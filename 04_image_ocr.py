@@ -1,15 +1,29 @@
 import os
 import logging
 from PIL import Image
-import google.generativeai as genai
+import google.genai as genai
 from common import load_config, setup_logging, get_absolute_path, get_api_key
 
-def perform_gemini_ocr(model, image_path, prompt):
-    """Gemini 모델을 사용하여 이미지에서 텍스트를 추출합니다."""
+def perform_gemini_ocr(client, model_name, image_path, prompt):
+    """Use Gemini model to extract text from an image."""
     try:
-        img = Image.open(image_path)
-        response = model.generate_content([prompt, img])
-        return response.text
+        with Image.open(image_path) as img:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[prompt, img]
+            )
+
+        if response.text:
+            return response.text.strip()
+
+        prompt_feedback = getattr(response, "prompt_feedback", None)
+        if prompt_feedback and prompt_feedback.block_reason:
+            logging.error(
+                f"OCR blocked for {image_path}: {prompt_feedback.block_reason.name}"
+            )
+        else:
+            logging.warning(f"OCR returned no text for {image_path}")
+        return None
     except FileNotFoundError:
         logging.error(f"OCR Error: Image file not found at {image_path}")
         return None
@@ -26,10 +40,9 @@ def main():
     api_key = get_api_key(config)
     if not api_key:
         return
-    genai.configure(api_key=api_key)
+    client = genai.Client(api_key=api_key)
 
     model_name = config.get('translation', {}).get('model_name', 'gemini-pro-vision')
-    model = genai.GenerativeModel(model_name)
     
     prompt_template = config.get('prompts', {}).get('image_ocr')
     if not prompt_template:
@@ -67,7 +80,7 @@ def main():
             continue
 
         logging.info(f"Processing {image_file} with Gemini...")
-        extracted_text = perform_gemini_ocr(model, image_path, prompt)
+        extracted_text = perform_gemini_ocr(client, model_name, image_path, prompt)
 
         if extracted_text:
             with open(output_txt_path, 'w', encoding='utf-8') as f:
