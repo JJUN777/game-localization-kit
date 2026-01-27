@@ -1,0 +1,68 @@
+{
+  "paths": {
+    "pdf_source_dir": "90_pdfOrg",
+    "english_txt_dir": "91_pdf_extracted",
+    "translated_txt_dir": "92_txt_translated",
+    "image_source_dir": "93_1_imgOrg",
+    "image_output_dir": "93_2_img_translated",
+    "image_ocr_dir": "94_imgOcrTxt"
+  },
+  "translation": {
+    "_comment": " 사용할 모델 넣기 : gemini-2.5-flash / gemini-3-pro-image-preview ",
+    "model_name": "gemini-3-pro-image-preview",
+    "api_key_env_var": "Gemini API 키 넣기",
+    "chunk_size": 3000
+  },
+  "keep_terms": [
+    "Mystling",
+    "Dragon Eclipse"
+  ],
+  "glossary": {
+    "Hand": "손패",
+    "Deck": "덱"
+  },
+  "prompts": {
+    "text_translation": [
+      "너는 보드게임 전문 번역가야. old kings crown 보드게임 번역할거야. 다음의 가이드에 따라서 번역을 진행하도록 해.",
+      "",
+      "[번역 방안]",
+      "- 원문의 톤과 매너를 유지하며 자연스러운 한국어로 번역해라.",
+      "- 다음 단어들은 절대 번역하지 말고 원문 그대로 유지해라: {keep_terms}",
+      "- 다음 용어집을 참고하여 번역해라: {glossary}",
+      "",
+      "[원문]",
+      "{text}"
+    ],
+    "image_translation": [
+      "드래곤 이클립스(Dragon Eclipse) 보드게임 카드 이미지 한글화 편집.",
+      "",
+      "[편집 범위(매우 중요)]",
+      "- 오직 '카드 효과 텍스트(본문 설명)'만 한국어로 번역해라.",
+      "- 다음은 절대 번역하지 말고 원문 그대로 유지해라:",
+      "  1) 카드 이름/제목",
+      "  2) 카드 효과 명(효과의 이름/스킬명/헤더 라인)",
+      "  3) 우측 상단 Mystling 관련 텍스트 및 모든 Mystling 표기",
+      "- 'mystling' 또는 'Mystling'은 항상 'Mystling'으로 그대로 적어라(번역/변형 금지).",
+      "- 다음 단어들도 원문 그대로 유지해라: {keep_terms}",
+      "",
+      "[아이콘/기호 보존]",
+      "- 효과 텍스트 안에 포함된 모든 아이콘(자원/속성/행동 아이콘 등)은 그대로 유지해라.",
+      "- 숫자, %, +, -, /, 괄호, 콜론 등 기호는 원문 그대로 유지해라.",
+      "- 텍스트만 교체하고, 일러스트/프레임/배경/아이콘/장식 요소는 절대 변경하지 마라.",
+      "",
+      "[출력 품질]",
+      "- 기존 카드의 글꼴 느낌, 크기, 줄바꿈, 정렬, 외곽선/그림자 등 스타일을 최대한 유지해라.",
+      "- 텍스트가 길어지면 줄바꿈/글자 크기를 조정하되 텍스트 박스 밖으로 넘치지 않게 해라.",
+      "- 효과 텍스트 박스(본문) 영역이 확실하지 않으면, 번역을 최소화하고 원문을 유지해라.",
+      "- 최종 출력은 '편집된 카드 이미지'만 반환해라."
+    ],
+    "image_ocr": [
+      "You are an expert in text recognition (OCR).",
+      "Your task is to accurately extract all English text from the given board game card image.",
+      "Pay close attention to preserving the original line breaks, special characters, symbols, and any formatting present in the text.",
+      "Provide only the extracted text as a plain text response.",
+      "Do not add any comments, explanations, or formatting like ```text ... ```.",
+      "If there is no text in the image, return an empty response."
+    ]
+  }
+}
