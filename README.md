@@ -26,6 +26,27 @@ common.py                # 공통 유틸 (설정, 로깅, 경로, API 키)
 94_imgOcrTxt/            # 4단계 OCR 텍스트
 ```
 
+## 전체 디렉터리 구조
+
+```
+.
+├── 00_config.json
+├── 01_pdf_extractor.py
+├── 02_text_translator.py
+├── 03_image_translator.py
+├── 04_image_ocr.py
+├── 90_pdfOrg/
+├── 91_pdf_extracted/
+├── 92_txt_translated/
+├── 93_1_imgOrg/
+├── 93_2_img_translated/
+├── 94_imgOcrTxt/
+├── README.md
+├── common.py
+.
+```
+
+
 ## 선행 조건
 
 - Python 3.10 이상과 `venv`.
