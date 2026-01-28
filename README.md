@@ -11,8 +11,8 @@ PDF와 카드 이미지 한글화를 Gemini 기반으로 자동화하기 위한 
 00_config.json           # 기본 설정이 들어가 있는 json 설정 파일
 01_pdf_extractor.py      # PDF → 기본 텍스트 추출
 02_text_translator.py    # 텍스트 → 한국어 번역 (Google GenAI)
-03_image_translator.py   # 카드 이미지 텍스트 교체
-04_image_ocr.py          # 번역된 이미지에서 OCR 수행
+03_image_translator.py   # 카드 이미지 텍스트 번역
+04_image_ocr.py          # 카드 이미지에서 OCR을 통해서 텍스트 추출
 common.py                # 공통 유틸 (설정, 로깅, 경로, API 키)
 
 " 프로젝트 상위 폴더 구성"
