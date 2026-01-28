@@ -32,7 +32,7 @@ def perform_gemini_ocr(client, model_name, image_path, prompt):
         return None
 
 def main():
-    setup_logging('04_image_ocr.log')
+    setup_logging()
     config = load_config()
     if not config:
         return
