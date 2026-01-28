@@ -70,16 +70,16 @@ common.py                # 공통 유틸 (설정, 로깅, 경로, API 키)
    - 모델 응답에서 이미지 데이터를 추출한 뒤 원본 해상도에 맞춰 리사이즈해 `paths.image_output_dir`에 저장합니다.
    - 이미지 번역 및 인식의 경우 Gemini의 Nanobanana 모델인 `gemini-3-pro-image-preview` 사용을 권장합니다.
 
-4. **번역 이미지 OCR**
+4. **카드 이미지 OCR**
    ```bash
    .venv/bin/python 04_image_ocr.py
    ```
-   - `prompts.image_ocr`를 사용해 번역된 이미지에서 텍스트를 재추출합니다.
+   - `prompts.image_ocr`를 사용해 이미지에서 텍스트를 추출합니다.
    - 결과는 이미지별 `.txt` 파일로 `paths.image_ocr_dir`에 기록되며, 기존 파일은 건너뜁니다.
 
 ## 사용 팁
 
-- 디렉터리 이름을 바꿀 때는 실제 폴더와 `00_config.json`을 동시에 업데이트하세요.
+- 디렉토리 이름을 바꿀 때는 실제 폴더와 `00_config.json`을 동시에 업데이트하세요.
 - AI를 기반으로 한 번역이기 때문에, 프롬프트를 아주 상세하고 구체적이게 작성하는게 중요합니다.
 - API 속도 제한에 맞추기 위해 `02_text_translator.py`는 청크 사이에 `time.sleep(1)`, `03_image_translator.py`는 요청마다 `time.sleep(2)`를 둡니다. 필요 시 조정하세요.
 
