@@ -11,7 +11,7 @@
   "translation": {
     "_comment": "사용할 모델 넣기 : gemini-2.5-flash / gemini-3-pro-image-preview / gemini-3-flash-preview",
     "model_name": "gemini-3-flash-preview",
-    "api_key": "AIzaSyAwCVXsoom13ZnmKzaVgWso7ixy-J78New",
+    "api_key": "sample",
     "chunk_size": 3000
   },
   "supported_image_extensions": [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"],
