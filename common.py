@@ -11,6 +11,9 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 # 기본 이미지 확장자 (config에 없을 때 fallback)
 DEFAULT_IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
 
+# 기본 설정 파일명
+DEFAULT_CONFIG_FILENAME = "00_config.json"
+
 
 def setup_logging(log_filename=None):
     """Initialize logging for console and optional file output."""
@@ -28,7 +31,7 @@ def setup_logging(log_filename=None):
     )
 
 
-def load_config(config_filename="00_config.json"):
+def load_config(config_filename=DEFAULT_CONFIG_FILENAME):
     """설정 파일을 로드합니다."""
     config_path = os.path.join(PROJECT_ROOT, config_filename)
     try:
@@ -84,10 +87,29 @@ def list_image_files(directory, config):
     return [f for f in os.listdir(directory) if f.lower().endswith(exts)]
 
 
+# 재시도하지 않을 영구적 HTTP 오류 상태 코드
+_NON_RETRYABLE_STATUS_CODES = {400, 401, 403, 404}
+
+
+def _is_retryable_error(error):
+    """재시도 가능한 오류인지 판별합니다. 인증/잘못된 요청 등 영구적 오류는 False."""
+    error_str = str(error).lower()
+    # google-genai SDK는 상태 코드를 메시지에 포함시킴
+    for code in _NON_RETRYABLE_STATUS_CODES:
+        if str(code) in error_str:
+            return False
+    # 인증/권한 관련 키워드
+    for keyword in ('invalid api key', 'permission denied', 'not found', 'invalid argument'):
+        if keyword in error_str:
+            return False
+    return True
+
+
 def call_gemini_with_retry(client, model_name, contents, max_retries=3, base_delay=2):
     """
     Gemini API 호출을 exponential backoff로 재시도합니다.
-    일시적 오류(네트워크, 429 rate limit 등)에 대응합니다.
+    일시적 오류(네트워크, 429 rate limit 등)만 재시도하고,
+    인증 오류(401), 잘못된 요청(400) 등 영구적 오류는 즉시 raise합니다.
     """
     for attempt in range(max_retries):
         try:
@@ -97,7 +119,7 @@ def call_gemini_with_retry(client, model_name, contents, max_retries=3, base_del
             )
             return response
         except Exception as e:
-            if attempt == max_retries - 1:
+            if attempt == max_retries - 1 or not _is_retryable_error(e):
                 raise
             delay = base_delay * (2 ** attempt)
             logging.warning(
@@ -107,13 +129,22 @@ def call_gemini_with_retry(client, model_name, contents, max_retries=3, base_del
             time.sleep(delay)
 
 
-def init_pipeline(log_filename=None, config_filename="00_config.json"):
+def init_config_only(log_filename=None, config_filename=DEFAULT_CONFIG_FILENAME):
+    """
+    API 호출이 필요 없는 스크립트용 초기화: 로깅 설정 + config 로드만 수행.
+    Returns config or None on failure.
+    """
+    setup_logging(log_filename)
+    config = load_config(config_filename)
+    return config
+
+
+def init_pipeline(log_filename=None, config_filename=DEFAULT_CONFIG_FILENAME):
     """
     공통 파이프라인 초기화: 로깅 설정, config 로드, Gemini 클라이언트 생성.
     Returns (config, client) or (None, None) on failure.
     """
-    setup_logging(log_filename)
-    config = load_config(config_filename)
+    config = init_config_only(log_filename, config_filename)
     if not config:
         return None, None
 

@@ -59,6 +59,10 @@ common.py                # 공통 유틸 (설정, 로깅, 경로, API 키, retry
   source .venv/bin/activate
   pip install google-genai Pillow PyPDF2
   ```
+  또는 `requirements.txt`를 사용하세요:
+  ```bash
+  pip install -r requirements.txt
+  ```
 - 이미지 모델을 호출할 수 있는 Gemini API 키.
 
 ## 설정 (`00_config.json`)
@@ -76,7 +80,8 @@ common.py                # 공통 유틸 (설정, 로깅, 경로, API 키, retry
 모든 스크립트가 의존하는 공통 유틸리티입니다.
 
 - `init_pipeline(log_filename)`: 로깅 설정 → config 로드 → Gemini 클라이언트 생성을 한 번에 처리합니다. `(config, client)` 튜플을 반환합니다.
-- `call_gemini_with_retry(client, model_name, contents)`: Gemini API 호출을 exponential backoff(최대 3회)로 재시도합니다. 일시적 네트워크 오류나 429 rate limit에 대응합니다.
+- `init_config_only(log_filename)`: API 호출이 필요 없는 스크립트용. 로깅 설정 + config 로드만 수행합니다.
+- `call_gemini_with_retry(client, model_name, contents)`: Gemini API 호출을 exponential backoff(최대 3회)로 재시도합니다. 인증 오류(401)나 잘못된 요청(400) 등 영구적 오류는 즉시 실패합니다.
 - `build_prompt_string(raw_prompt)`: 리스트 또는 문자열 형태의 프롬프트를 단일 문자열로 변환합니다.
 - `list_image_files(directory, config)`: config의 `supported_image_extensions`를 참조하여 디렉토리 내 이미지 파일 목록을 반환합니다.
 - `get_absolute_path(relative_path)`: 프로젝트 루트 기준 절대 경로 변환.
@@ -111,7 +116,7 @@ common.py                # 공통 유틸 (설정, 로깅, 경로, API 키, retry
    ```bash
    .venv/bin/python 04_image_ocr.py
    ```
-   - `prompts.image_ocr`를 사용해 이미지에서 텍스트를 재추출합니다.
+   - `prompts.image_ocr`를 사용해 원본 카드 이미지에서 영문 텍스트를 추출합니다.
    - 결과는 이미지별 `.txt` 파일로 `paths.image_ocr_dir`에 기록되며, 기존 파일은 건너뜁니다.
 
 5. **번역 텍스트 포맷팅**

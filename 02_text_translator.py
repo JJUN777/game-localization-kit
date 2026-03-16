@@ -3,8 +3,8 @@ import json
 import time
 import logging
 from common import (
-    load_config, setup_logging, get_absolute_path, get_api_key,
-    build_prompt_string, call_gemini_with_retry, init_pipeline,
+    get_absolute_path, build_prompt_string,
+    call_gemini_with_retry, init_pipeline,
 )
 
 
@@ -34,32 +34,41 @@ class TranslationState:
             json.dump(data, f, indent=2)
 
 
+def _flush_chunk(current_chunk, chunks):
+    """현재 청크를 chunks 리스트에 추가하고 빈 상태를 반환합니다."""
+    if current_chunk:
+        chunks.append('\n\n'.join(current_chunk))
+    return [], 0
+
+
+def _add_segment(segment, current_chunk, current_length, max_chunk_size, chunks, separator_len):
+    """세그먼트를 현재 청크에 추가하거나, 넘치면 새 청크를 시작합니다."""
+    if current_length + len(segment) + separator_len > max_chunk_size and current_chunk:
+        current_chunk, current_length = _flush_chunk(current_chunk, chunks)
+    current_chunk.append(segment)
+    current_length += len(segment) + separator_len
+    return current_chunk, current_length
+
+
 def smart_chunk_text(text, max_chunk_size=2000):
     chunks = []
     current_chunk = []
     current_length = 0
     paragraphs = text.split('\n\n')
+
     for paragraph in paragraphs:
         if len(paragraph) > max_chunk_size:
             sentences = paragraph.replace('. ', '.\n').split('\n')
             for sentence in sentences:
-                if current_length + len(sentence) + 1 > max_chunk_size:
-                    chunks.append('\n\n'.join(current_chunk))
-                    current_chunk = [sentence]
-                    current_length = len(sentence)
-                else:
-                    current_chunk.append(sentence)
-                    current_length += len(sentence) + 1
+                current_chunk, current_length = _add_segment(
+                    sentence, current_chunk, current_length, max_chunk_size, chunks, 1
+                )
         else:
-            if current_length + len(paragraph) + 2 > max_chunk_size:
-                chunks.append('\n\n'.join(current_chunk))
-                current_chunk = [paragraph]
-                current_length = len(paragraph)
-            else:
-                current_chunk.append(paragraph)
-                current_length += len(paragraph) + 2
-    if current_chunk:
-        chunks.append('\n\n'.join(current_chunk))
+            current_chunk, current_length = _add_segment(
+                paragraph, current_chunk, current_length, max_chunk_size, chunks, 2
+            )
+
+    _flush_chunk(current_chunk, chunks)
     return chunks
 
 

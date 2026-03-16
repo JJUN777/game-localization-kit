@@ -33,6 +33,44 @@ def save_image_corrected_size(image_bytes, original_image_path, output_path):
         return False
 
 
+def _extract_image_from_response(response):
+    """
+    Gemini 응답에서 이미지 데이터를 추출합니다.
+    Returns (image_bytes, error_reason). 성공 시 error_reason은 None.
+    """
+    if not response.parts:
+        prompt_feedback = response.prompt_feedback
+        if prompt_feedback and prompt_feedback.block_reason:
+            return None, f"blocked: {prompt_feedback.block_reason.name}"
+        return None, "empty response"
+
+    for part in response.parts:
+        inline_data = getattr(part, "inline_data", None)
+        if inline_data and inline_data.mime_type and inline_data.mime_type.startswith("image/"):
+            if not inline_data.data:
+                return None, "empty image data"
+            return inline_data.data, None
+
+    return None, "no image in response"
+
+
+def _process_single_image(client, model_name, prompt, input_path, output_path, filename):
+    """단일 이미지를 번역 처리합니다. Returns error_reason or None on success."""
+    img = Image.open(input_path)
+    try:
+        response = call_gemini_with_retry(client, model_name, [prompt, img])
+    finally:
+        img.close()
+
+    img_data, error_reason = _extract_image_from_response(response)
+    if error_reason:
+        logging.warning(f"{error_reason} for {filename}")
+        return error_reason
+
+    save_image_corrected_size(img_data, input_path, output_path)
+    return None
+
+
 def main():
     config, client = init_pipeline()
     if not config:
@@ -70,36 +108,9 @@ def main():
         logging.info(f"[{idx + 1}/{total_files}] Processing {filename}...")
 
         try:
-            img = Image.open(input_path)
-            try:
-                response = call_gemini_with_retry(client, model_name, [prompt, img])
-            finally:
-                img.close()
-
-            if response.parts:
-                for part in response.parts:
-                    inline_data = getattr(part, "inline_data", None)
-                    if inline_data and inline_data.mime_type and inline_data.mime_type.startswith("image/"):
-                        img_data = inline_data.data
-                        if not img_data:
-                            logging.warning(f"Image data empty in response for {filename}")
-                            failed_files.append((filename, "empty image data"))
-                            continue
-                        save_image_corrected_size(img_data, input_path, output_path)
-                        break
-                else:
-                    logging.warning(f"No image data found in response for {filename}")
-                    failed_files.append((filename, "no image in response"))
-            else:
-                prompt_feedback = response.prompt_feedback
-                if prompt_feedback and prompt_feedback.block_reason:
-                    reason = prompt_feedback.block_reason.name
-                    logging.error(f"Request for {filename} was blocked: {reason}")
-                    failed_files.append((filename, f"blocked: {reason}"))
-                else:
-                    logging.warning(f"Empty response for {filename}. Text part: {response.text}")
-                    failed_files.append((filename, "empty response"))
-
+            error_reason = _process_single_image(client, model_name, prompt, input_path, output_path, filename)
+            if error_reason:
+                failed_files.append((filename, error_reason))
         except Exception as e:
             logging.error(f"Failed to process {filename}: {e}")
             failed_files.append((filename, str(e)))
