@@ -1,141 +1,86 @@
 # 게임 로컬라이제이션 키트
 
-보드게임용 PDF와 카드 이미지를 한국어로 현지화하기 위한 파이썬 스크립트 모음입니다. 기본 구성은 *Old King's Crown / Dragon Eclipse* 자료를 대상으로 하지만 `00_config.json`을 수정하면 다른 프로젝트에도 적용할 수 있습니다.
+보드게임 룰북/PDF/카드 이미지를 한국어로 현지화하기 위한 스크립트 모음입니다.  
+현재 워크플로우는 `The Elder Scrolls` 룰북 번역 흐름(텍스트 정제 + 용어집 구축 + 번역)에 맞춰 업데이트되어 있습니다.
 
-## 프로젝트 구조
+## 빠른 시작
 
-```
-01_pdf_extractor.py      # PDF → 기본 텍스트 추출
-02_text_translator.py    # 텍스트 → 한국어 번역 (Google GenAI)
-03_image_translator.py   # 카드 이미지 텍스트 교체
-04_image_ocr.py          # 번역된 이미지에서 OCR 수행
-05_pdf_formatter.py      # 번역 텍스트 레이아웃 포맷팅
-90_pdfOrg/               # 원본 PDF
-91_pdf_extracted/        # 1단계 출력 텍스트
-92_txt_translated/       # 2단계 번역 결과
-93_1_imgOrg/             # 원본 카드 이미지
-93_2_img_translated/     # 3단계 결과 이미지
-94_imgOcrTxt/            # 4단계 OCR 텍스트
-95_pdf_formatted/        # 5단계 포맷팅 결과
-common.py                # 공통 유틸 (설정, 로깅, 경로, API 키, retry, 프롬프트 변환)
+모든 명령은 **프로젝트 루트**에서 실행하세요.
+
+```bash
+cd /Users/jjun_mac/Documents/GitHub/game-localization-kit
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### 전체 디렉터리 트리
+## 주요 파일
 
+```text
+00_config.json                   # 경로/모델/프롬프트/용어집 설정
+01_pdf_extractor.py              # PDF -> TXT 추출
+01_2_text_cleaner.py             # 추출 TXT 정제(_clean.txt)
+02_text_translator.py            # TXT 번역
+03_image_translator.py           # 이미지 번역 편집
+04_image_ocr.py                  # 이미지 OCR
+05_pdf_formatter.py              # 번역 텍스트 레이아웃 정리
+06_glossary_builder.py           # 용어 후보 CSV/JSON 생성
+common.py                        # 공통 유틸
+90_pdfOrg/                       # 원본 PDF
+91_pdf_extracted/                # 추출/정제 TXT
+92_txt_translated/               # 번역 TXT
+96_glossary_candidates/          # 용어 후보 CSV
 ```
-.
-├── 00_config.json
-├── 01_pdf_extractor.py
-├── 02_text_translator.py
-├── 03_image_translator.py
-├── 04_image_ocr.py
-├── 05_pdf_formatter.py
-├── 90_pdfOrg/
-│   └── Primal The Awakening - Rulebook.pdf
-├── 91_pdf_extracted/
-│   └── Primal The Awakening - Rulebook.txt
-├── 92_txt_translated/
-│   └── Primal The Awakening - Rulebook_ko.txt
-├── 93_1_imgOrg/
-├── 93_2_img_translated/
-├── 94_imgOcrTxt/
-├── 95_pdf_formatted/
-│   └── Primal The Awakening - Rulebook_formatted.txt
-├── README.md
-├── common.py
-├── __pycache__/
-├── .idea/
-└── .venv/
-```
-
-> 참고: 위 트리는 현재 저장소 상태 기준이며, 추가 자원이나 산출물이 생기면 그대로 반영됩니다.
-
-## 선행 조건
-
-- Python 3.10 이상과 `venv`.
-- Google GenAI SDK(`google-genai`) 및 `Pillow`, `PyPDF2` 등 의존성. 가상환경에 설치하세요:
-  ```bash
-  python3 -m venv .venv
-  source .venv/bin/activate
-  pip install google-genai Pillow PyPDF2
-  ```
-  또는 `requirements.txt`를 사용하세요:
-  ```bash
-  pip install -r requirements.txt
-  ```
-- 이미지 모델을 호출할 수 있는 Gemini API 키.
 
 ## 설정 (`00_config.json`)
 
-- `paths`: 입력/출력 폴더. `common.get_absolute_path`로 루트 기준 절대 경로로 변환되므로 리포지토리 내부 경로만 기입하세요.
-- `translation.model_name`: 전반에 사용할 Gemini 모델(예: `gemini-3-pro-image-preview`).
-- `translation.api_key`: API 키 문자열을 직접 저장합니다. 배포 전 본인 키로 교체하세요.
-- `translation.chunk_size`: 텍스트 번역 시 청크 분할 크기(문자 수). 기본값 3000.
-- `supported_image_extensions`: 이미지 처리 시 인식할 확장자 목록(예: `[".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"]`). 모든 이미지 관련 스크립트가 이 설정을 공유합니다.
-- `keep_terms`, `glossary`: 번역 시 유지해야 할 단어와 용어집 정의.
-- `prompts`: 텍스트 번역/이미지 번역/OCR/PDF 포맷팅에 쓰이는 프롬프트. 리스트 또는 단일 문자열 모두 허용되며 리스트는 줄바꿈으로 이어집니다.
+- `paths`: 입력/출력 디렉터리
+- `translation.model_name`: Gemini 모델명
+- `translation.api_key`: API 키
+- `translation.chunk_size`: 텍스트 번역 청크 크기
+- `keep_terms`: 절대 번역하지 않을 용어
+- `glossary`: 고정 번역 용어집
+- `prompts`: 텍스트/이미지/OCR/포맷팅 프롬프트
 
-## 공통 모듈 (`common.py`)
+## 권장 워크플로우
 
-모든 스크립트가 의존하는 공통 유틸리티입니다.
+1. PDF 텍스트 추출
+```bash
+python3 01_pdf_extractor.py
+```
 
-- `init_pipeline(log_filename)`: 로깅 설정 → config 로드 → Gemini 클라이언트 생성을 한 번에 처리합니다. `(config, client)` 튜플을 반환합니다.
-- `init_config_only(log_filename)`: API 호출이 필요 없는 스크립트용. 로깅 설정 + config 로드만 수행합니다.
-- `call_gemini_with_retry(client, model_name, contents)`: Gemini API 호출을 exponential backoff(최대 3회)로 재시도합니다. 인증 오류(401)나 잘못된 요청(400) 등 영구적 오류는 즉시 실패합니다.
-- `build_prompt_string(raw_prompt)`: 리스트 또는 문자열 형태의 프롬프트를 단일 문자열로 변환합니다.
-- `list_image_files(directory, config)`: config의 `supported_image_extensions`를 참조하여 디렉토리 내 이미지 파일 목록을 반환합니다.
-- `get_absolute_path(relative_path)`: 프로젝트 루트 기준 절대 경로 변환.
-- `get_api_key(config)`: config에서 `translation.api_key` 값을 읽어 반환합니다.
+2. 추출 텍스트 정제
+```bash
+python3 01_2_text_cleaner.py --file "TES_Rulebook.txt"
+```
+- 기본 출력: `91_pdf_extracted/TES_Rulebook_clean.txt`
+- 원본 덮어쓰기: `--inplace`
 
-## 사용 순서
+3. 용어 후보 생성
+```bash
+python3 06_glossary_builder.py --file "TES_Rulebook.txt" --min-freq 4
+```
+- `_clean.txt`가 있으면 자동으로 우선 사용합니다.
+- 출력: `96_glossary_candidates/*_candidates.csv`, `*_glossary_template.json`
 
-1. **PDF 텍스트 추출**
-   ```bash
-   .venv/bin/python 01_pdf_extractor.py
-   ```
-   `paths.pdf_source_dir`의 PDF를 읽어 각 페이지를 `[PAGE n]` 헤더와 함께 `paths.english_txt_dir`에 저장합니다.
+4. CSV 검수 후 `00_config.json` 반영
+- `korean` 컬럼 확정값을 `glossary`로 반영
+- `HP`, `XP`, `EP`, `NPC` 같이 영문 유지할 용어는 `keep_terms`에 반영
 
-2. **텍스트 번역**
-   ```bash
-   .venv/bin/python 02_text_translator.py
-   ```
-   - Gemini에 `translation.chunk_size` 단위로 분할 전송하여 번역합니다.
-   - 진행 상황은 `*.meta.json`과 `*.tmp`로 체크포인트를 유지하여 중단 후 재개할 수 있습니다.
-   - API 호출 실패 시 exponential backoff로 자동 재시도합니다.
-   - 결과 파일은 `{원본}_ko.txt` 형태로 `paths.translated_txt_dir`에 기록됩니다.
+5. 텍스트 번역 실행
+```bash
+python3 02_text_translator.py
+```
 
-3. **카드 이미지 번역**
-   ```bash
-   .venv/bin/python 03_image_translator.py
-   ```
-   - `paths.image_source_dir`의 이미지를 불러와 `prompts.image_translation` 지침과 함께 Gemini 비전 모델에 전송합니다.
-   - 모델 응답에서 이미지 데이터를 추출한 뒤 원본 해상도에 맞춰 리사이즈해 `paths.image_output_dir`에 저장합니다.
-   - 처리 완료 후 실패한 파일 목록을 요약 리포트로 출력합니다.
+6. 필요 시 이미지 번역/OCR/PDF 포맷팅 실행
+```bash
+python3 03_image_translator.py
+python3 04_image_ocr.py
+python3 05_pdf_formatter.py
+```
 
-4. **번역 이미지 OCR**
-   ```bash
-   .venv/bin/python 04_image_ocr.py
-   ```
-   - `prompts.image_ocr`를 사용해 원본 카드 이미지에서 영문 텍스트를 추출합니다.
-   - 결과는 이미지별 `.txt` 파일로 `paths.image_ocr_dir`에 기록되며, 기존 파일은 건너뜁니다.
+## 참고 사항
 
-5. **번역 텍스트 포맷팅**
-   ```bash
-   .venv/bin/python 05_pdf_formatter.py
-   ```
-   - 원본 PDF 레이아웃을 참조하여 번역된 텍스트의 줄바꿈/문단 간격을 Gemini로 재정리합니다.
-   - 페이지 단위로 처리하며, 개별 페이지 실패 시 `[FORMAT ERROR]` 마커를 남기고 나머지 페이지를 계속 처리합니다.
-   - 임시 파일 기반 복구를 지원하여 중단 후 재개가 가능합니다.
-   - 결과는 `paths.pdf_formatted_dir`에 `{원본}_formatted.txt` 형태로 저장됩니다.
-
-## 로깅 및 진단
-
-- 모든 스크립트가 `common.init_pipeline`을 통해 로깅을 초기화합니다. 인자로 로그 파일명을 넘기면 `<repo>/<파일명>`에 동시에 기록되고, 인자를 생략하면 콘솔 출력만 남습니다.
-- 각 단계는 출력물이 이미 존재하면 자동으로 건너뛰므로, 재생성하려면 해당 파일을 삭제하세요.
-
-## 운영 팁
-
-- 디렉터리 이름을 바꿀 때는 실제 폴더와 `00_config.json`을 동시에 업데이트하세요.
-- 본인의 게임 톤과 스타일에 맞게 프롬프트를 먼저 조정한 뒤 대량 작업을 실행하는 것이 좋습니다.
-- API 속도 제한에 맞추기 위해 `02_text_translator.py`는 청크 사이에 `time.sleep(1)`, `03_image_translator.py`는 요청마다 `time.sleep(2)`를 둡니다. 필요 시 조정하세요.
-- 모든 Gemini API 호출은 `call_gemini_with_retry`를 통해 일시적 오류 시 최대 3회 자동 재시도됩니다.
+- `02_text_translator.py`는 체크포인트(`.tmp`, `.meta.json`) 기반으로 재시작을 지원합니다.
+- API 호출은 `common.call_gemini_with_retry`로 재시도 로직이 적용됩니다.
+- 기존 출력 파일이 있으면 단계별로 건너뛰는 로직이 있으니, 재생성이 필요하면 해당 결과 파일을 먼저 삭제하세요.
