@@ -1,0 +1,53 @@
+term,count,recommended_action,korean
+Battle,384,keep_or_define,전투
+Adventurer,372,keep_or_define,모험가
+Party,310,keep_or_define,파티
+Enemy,283,keep_or_define,적
+encounter,272,keep_or_define,조우
+Dice,271,keep_or_define,주사위
+Skill,242,keep_or_define,스킬
+Quest,220,keep_or_define,퀘스트
+Card,200,keep_or_define,카드
+Elder Scrolls,168,keep_or_define,엘더스크롤
+ability,157,keep_or_define,능력
+Adventurers,151,keep_or_define,모험가들
+Second Era,148,keep_or_define,제2시대
+Delve,144,keep_or_define,탐사
+XP,141,keep_or_define,XP
+Item,140,keep_or_define,아이템
+Damage,133,keep_or_define,피해
+Town,133,keep_or_define,마을
+Session,131,keep_or_define,세션
+HP,129,keep_or_define,HP
+Overland,124,keep_or_define,오버랜드
+Level,124,keep_or_define,레벨
+Cooldown,120,keep_or_define,쿨다운
+Guild,113,keep_or_define,길드
+action,112,keep_or_define,행동
+Shannon,107,keep_or_define,섀넌
+Tenacity,97,keep_or_define,투지
+Move,96,keep_or_define,이동
+Class,93,keep_or_define,클래스
+Engage,88,keep_or_define,교전
+Campaign,85,keep_or_define,캠페인
+Fatigue,82,keep_or_define,피로
+Players,82,keep_or_define,플레이어들
+province,76,keep_or_define,지방
+Battle Form,70,keep_or_define,전투 형태
+EP,66,keep_or_define,EP
+Skill Dice,60,keep_or_define,스킬 주사위
+Lockpick,53,keep_or_define,자물쇠따개
+Dungeon,49,keep_or_define,던전
+Endgame,47,keep_or_define,엔드게임
+gazetteer,43,keep_or_define,지역 안내서
+Bandit,42,keep_or_define,도적
+Magicka,41,keep_or_define,매지카
+Stamina,41,keep_or_define,스태미나
+Skyshards,38,keep_or_define,스카이샤드
+Overland Map,32,keep_or_define,오버랜드 맵
+Tamriel,32,keep_or_define,탐리엘
+Jailbreak Introduction,30,keep_or_define,탈옥 서문
+Overfatigue,28,keep_or_define,과피로
+Campaign Journal,24,keep_or_define,캠페인 저널
+XP Dial,21,keep_or_define,XP 다이얼
+Argonian,20,keep_or_define,아르고니안
