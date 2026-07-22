@@ -4,9 +4,13 @@ import time
 import logging
 
 import google.genai as genai
+from dotenv import load_dotenv
 
 # 프로젝트의 루트 디렉토리를 이 파일(common.py)의 위치로 설정
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# 로컬 .env를 읽되, 셸/CI에서 이미 설정한 환경변수를 덮어쓰지 않습니다.
+load_dotenv(os.path.join(PROJECT_ROOT, '.env'), override=False)
 
 # 기본 이미지 확장자 (config에 없을 때 fallback)
 DEFAULT_IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
@@ -52,15 +56,14 @@ def get_absolute_path(relative_path):
     return os.path.join(PROJECT_ROOT, relative_path)
 
 
-def get_api_key(config):
-    """설정에서 API 키를 직접 읽어옵니다."""
-    if not config or 'translation' not in config:
-        logging.error("API key could not be read: 'translation' section is missing in config.")
-        return None
-
-    api_key = config['translation'].get('api_key')
+def get_api_key():
+    """환경변수에서 Gemini API 키를 읽어옵니다."""
+    api_key = os.getenv('GEMINI_API_KEY', '').strip()
     if not api_key:
-        logging.error("API key could not be read: 'api_key' is missing in config.")
+        logging.error(
+            "GEMINI_API_KEY is not set. Add it to the project .env file "
+            "or export it in the current shell."
+        )
         return None
 
     return api_key
@@ -105,7 +108,14 @@ def _is_retryable_error(error):
     return True
 
 
-def call_gemini_with_retry(client, model_name, contents, max_retries=3, base_delay=2):
+def call_gemini_with_retry(
+    client,
+    model_name,
+    contents,
+    max_retries=3,
+    base_delay=2,
+    generation_config=None,
+):
     """
     Gemini API 호출을 exponential backoff로 재시도합니다.
     일시적 오류(네트워크, 429 rate limit 등)만 재시도하고,
@@ -113,10 +123,13 @@ def call_gemini_with_retry(client, model_name, contents, max_retries=3, base_del
     """
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=contents,
-            )
+            request = {
+                'model': model_name,
+                'contents': contents,
+            }
+            if generation_config is not None:
+                request['config'] = generation_config
+            response = client.models.generate_content(**request)
             return response
         except Exception as e:
             if attempt == max_retries - 1 or not _is_retryable_error(e):
@@ -148,7 +161,7 @@ def init_pipeline(log_filename=None, config_filename=DEFAULT_CONFIG_FILENAME):
     if not config:
         return None, None
 
-    api_key = get_api_key(config)
+    api_key = get_api_key()
     if not api_key:
         return None, None
 

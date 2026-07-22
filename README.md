@@ -3,6 +3,13 @@
 보드게임 룰북/PDF/카드 이미지를 한국어로 현지화하기 위한 스크립트 모음입니다.  
 현재 워크플로우는 `The Elder Scrolls` 룰북 번역 흐름(텍스트 정제 + 용어집 구축 + 번역)에 맞춰 업데이트되어 있습니다.
 
+## 문서
+
+- [번역 자동화 파이프라인 설계 초안](docs/TRANSLATION_AUTOMATION_DESIGN.md)
+- [개선 로드맵](docs/IMPROVEMENTS.md)
+- [PDF 다단·줄바꿈 복원 PoC](docs/LAYOUT_RECONSTRUCTION_POC.md)
+- [이미지 폴더 OCR 설계 및 검증 결과](docs/IMAGE_OCR.md)
+
 ## 빠른 시작
 
 모든 명령은 **프로젝트 루트**에서 실행하세요.
@@ -11,7 +18,65 @@
 cd /Users/jjun_mac/Documents/GitHub/game-localization-kit
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
+touch .env
+```
+
+Windows PowerShell에서는 가상환경을 다음과 같이 활성화합니다.
+
+```powershell
+.venv\Scripts\Activate.ps1
+pip install -e .
+```
+
+설치 후 통합 CLI 진입점을 확인할 수 있습니다.
+
+```bash
+glk --help
+glk version
+```
+
+프로젝트 작업공간을 만들고 상태를 확인할 수 있습니다.
+
+```bash
+glk init "Primal Rulebook" --profile primal
+glk status --project primal_rulebook
+```
+
+기본 생성 위치는 `workspaces/<project_id>/`이며 Git에서 제외됩니다. 다른 위치를 사용하려면 두 명령에 `--workspace-root PATH`를 지정합니다.
+
+PDF 텍스트 레이어를 추출하고 LLM으로 읽기 순서를 복원할 수 있습니다.
+
+```bash
+glk extract \
+  --project primal_rulebook \
+  --file "rulebook.pdf" \
+  --pages 1-10
+```
+
+첫 실행은 PDF를 `source/original.pdf`로 등록하고 Gemini 레이아웃 판정을 수행합니다. 이후에는 `--file`을 생략할 수 있으며, PDF·fragment·모델·프롬프트가 같으면 검증된 페이지 캐시를 재사용합니다. 강제로 다시 판정하려면 `--force`를 사용합니다.
+
+이미지 폴더에서 원문을 OCR할 수 있습니다. 폴더의 `ocr_prompt.txt`는 공통 지침으로, `파일명.jpg.prompt.txt`는 해당 이미지 전용 추가 지침으로 사용합니다.
+
+```bash
+glk init "Card Set" --project-id card_set
+glk ocr --project card_set --folder samples/image_ocr
+```
+
+원본은 `source/images/`, 개별 TXT는 `source/ocr/individual/`, 통합본은 `source/ocr/combined.txt`에 저장됩니다. 같은 이미지·공통 프롬프트·개별 프롬프트·모델·프롬프트 버전이면 이후에는 `--folder`를 생략하고 검증된 캐시를 재사용할 수 있습니다.
+
+```bash
+glk ocr --project card_set
+glk ocr --project card_set --force
+```
+
+현재 `init`, `status`, `extract`, `ocr`가 실제 application service에 연결된 상태입니다. `run`, `translate` 등 아직 연결되지 않은 명령은 성공으로 처리하지 않고 종료 코드 `3`을 반환합니다. 텍스트 레이어가 없는 PDF 페이지의 OCR fallback은 다음 구현 단계에 포함됩니다.
+
+생성한 `.env`에 Gemini API 키를 입력하세요. `.env`는 Git에서 제외되며,
+셸이나 CI에 설정된 `GEMINI_API_KEY`가 있으면 그 값을 우선 사용합니다.
+
+```dotenv
+GEMINI_API_KEY=your_api_key_here
 ```
 
 ## 주요 파일
@@ -36,7 +101,7 @@ common.py                        # 공통 유틸
 
 - `paths`: 입력/출력 디렉터리
 - `translation.model_name`: Gemini 모델명
-- `translation.api_key`: API 키
+- `GEMINI_API_KEY`: `.env` 또는 실행 환경에서 주입하는 API 키
 - `translation.chunk_size`: 텍스트 번역 청크 크기
 - `keep_terms`: 절대 번역하지 않을 용어
 - `glossary`: 고정 번역 용어집

@@ -1,3 +1,5 @@
 google-genai
 Pillow
 PyPDF2
+PyMuPDF
+python-dotenv
