@@ -226,6 +226,9 @@ glossaries/
 - [x] `glk init`과 `glk status`에 project manifest 및 workspace service를 연결한다.
 - [x] `glk extract`에 PDF 등록, 렌더링, fragment 추출, LLM 레이아웃 복원과 캐시를 연결한다.
 - [x] `glk ocr`에 이미지 폴더 등록, 공통·개별 프롬프트, 구조화 OCR, 개별·통합 TXT와 캐시를 연결한다.
+- [ ] `glk run` 시작 시 PDF 원문 추출과 이미지 폴더 OCR 중 입력 방식을 선택받는 마법사를 제공한다.
+- [ ] 마법사의 선택에 따라 기존 `extract_project_pdf()` 또는 `ocr_project_images()` application service를 호출한다.
+- [ ] 비대화형 환경에서는 CLI 옵션으로 입력 방식을 명시해 같은 흐름을 실행할 수 있게 한다.
 - [ ] 번호 기반 스크립트를 하나의 CLI 진입점으로 통합한다.
 - [ ] 전체 파이프라인을 한 번에 실행하는 명령을 제공한다.
 - [ ] 단계별 실행과 전체 실행이 같은 내부 함수를 사용하게 한다.

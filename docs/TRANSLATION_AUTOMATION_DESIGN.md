@@ -667,6 +667,20 @@ glk export --project elder_scrolls_rulebook --status approved
 glk run --project elder_scrolls_rulebook --resume
 ```
 
+`glk run`에 입력이 아직 등록되지 않았다면 원문 획득 방식을 먼저 선택받습니다.
+
+```text
+원문 입력 방식을 선택하세요.
+1. PDF를 기반으로 원문 TXT 추출
+2. 이미지 폴더를 기반으로 원문 OCR
+```
+
+- PDF 선택: 파일 경로와 필요시 페이지 범위를 받은 뒤 기존 `extract_project_pdf()` service를 호출합니다.
+- 이미지 선택: 이미지 폴더와 선택적인 OCR prompt 경로를 받은 뒤 기존 `ocr_project_images()` service를 호출합니다.
+- 터미널 상호작용이 불가능한 CI나 자동화에서는 `--input-type pdf|images`, `--file`, `--folder` 옵션으로 같은 선택을 명시합니다.
+- 이미 원문이 등록된 프로젝트는 manifest와 실행 상태를 확인한 뒤 해당 경로를 재사용하며, 입력 방식이 불명확할 때만 질문합니다.
+- 마법사는 입력 수집만 담당하고 PDF 추출이나 이미지 OCR 로직을 중복 구현하지 않습니다.
+
 공통 옵션:
 
 - `--dry-run`: 처리 대상과 출력 경로만 표시
