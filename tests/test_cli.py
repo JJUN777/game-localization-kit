@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import pymupdf
+from PIL import Image
 
 from glk.cli import EXIT_NOT_IMPLEMENTED, main
+from glk.application.extraction_service import ExtractionResult, PageFailure
+from glk.application.segmentation_service import SegmentationResult
+from glk.application.source_qa_service import SourceQaResult
+from glk.domain.source_block import SOURCE_BLOCK_SCHEMA_VERSION, SourceBlock
 
 
 class CliTests(unittest.TestCase):
@@ -38,8 +46,6 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["code"], "NOT_IMPLEMENTED")
 
     def test_ocr_dry_run_reports_selected_images_as_json(self) -> None:
-        from PIL import Image
-
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             workspace_root = root / "workspaces"
@@ -75,6 +81,424 @@ class CliTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertTrue(payload["dry_run"])
             self.assertEqual(payload["selected_images"], ["card.png"])
+
+    def test_run_dispatches_pdf_non_interactively(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            pdf_path = root / "sample.pdf"
+            document = pymupdf.open()
+            page = document.new_page()
+            page.insert_text((72, 72), "Sample page")
+            document.save(pdf_path)
+            document.close()
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "init",
+                        "Run PDF",
+                        "--workspace-root",
+                        str(workspace_root),
+                    ]
+                )
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                exit_code = main(
+                    [
+                        "run",
+                        "--project",
+                        "run_pdf",
+                        "--input-type",
+                        "pdf",
+                        "--file",
+                        str(pdf_path),
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertTrue(payload["dry_run"])
+            self.assertEqual(payload["selected_pages"], [1])
+
+    def test_run_dispatches_image_folder_from_folder_option(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            image_folder = root / "images"
+            nested_folder = image_folder / "characters"
+            nested_folder.mkdir(parents=True)
+            Image.new("RGB", (8, 8), "white").save(nested_folder / "card.png")
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "init",
+                        "Run Images",
+                        "--workspace-root",
+                        str(workspace_root),
+                    ]
+                )
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                exit_code = main(
+                    [
+                        "run",
+                        "--project",
+                        "run_images",
+                        "--folder",
+                        str(image_folder),
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertTrue(payload["dry_run"])
+            self.assertEqual(payload["selected_images"], ["characters/card.png"])
+
+    def test_run_prepares_review_and_qa_after_successful_acquisition(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "init",
+                        "Integrated Run",
+                        "--workspace-root",
+                        str(workspace_root),
+                    ]
+                )
+            project_path = workspace_root / "integrated_run"
+            acquisition = ExtractionResult(
+                project_path=str(project_path),
+                source_pdf=str(project_path / "source/original.pdf"),
+                source_sha256="a" * 64,
+                model="test-model",
+                prompt_version="test-v1",
+                selected_pages=(1, 2),
+                successful_pages=(1, 2),
+                cached_pages=(),
+                failures=(),
+                output_file=str(project_path / "source/extracted.txt"),
+            )
+            segmentation = SegmentationResult(
+                project_path=str(project_path),
+                source_type="pdf",
+                input_sha256="b" * 64,
+                total_blocks=12,
+                flagged_blocks=0,
+                output_file=str(project_path / "segments/source.jsonl"),
+                draft_file=str(project_path / "draft/source.txt"),
+                review_file=str(project_path / "review/source.txt"),
+                review_status="current",
+                review_created=True,
+            )
+            qa = SourceQaResult(
+                project_path=str(project_path),
+                input_sha256="c" * 64,
+                total_blocks=12,
+                flagged_blocks=2,
+                total_issues=3,
+                error_count=1,
+                warning_count=2,
+                info_count=0,
+                allowed_tokens=(),
+                output_file=str(project_path / "qa/source_qa.json"),
+                human_report_file=str(project_path / "qa/source_qa.md"),
+            )
+            output = io.StringIO()
+            with (
+                patch("glk.cli.extract_project_pdf", return_value=acquisition) as acquire,
+                patch("glk.cli.segment_project_source", return_value=segmentation) as segment,
+                patch("glk.cli.run_project_source_qa", return_value=qa) as source_qa,
+                redirect_stdout(output),
+                redirect_stderr(io.StringIO()),
+            ):
+                exit_code = main(
+                    [
+                        "run",
+                        "--project",
+                        "integrated_run",
+                        "--input-type",
+                        "pdf",
+                        "--file",
+                        "rulebook.pdf",
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--json",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["pipeline_status"], "awaiting_human_review")
+            self.assertEqual(payload["segmentation"]["total_blocks"], 12)
+            self.assertEqual(payload["qa"]["total_issues"], 3)
+            self.assertEqual(payload["review_file"], segmentation.review_file)
+            acquire.assert_called_once()
+            segment.assert_called_once()
+            source_qa.assert_called_once()
+
+    def test_run_stops_before_review_preparation_on_partial_acquisition(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "init",
+                        "Partial Run",
+                        "--workspace-root",
+                        str(workspace_root),
+                    ]
+                )
+            acquisition = ExtractionResult(
+                project_path=str(workspace_root / "partial_run"),
+                source_pdf="source/original.pdf",
+                source_sha256="a" * 64,
+                model="test-model",
+                prompt_version="test-v1",
+                selected_pages=(1, 2),
+                successful_pages=(1,),
+                cached_pages=(),
+                failures=(PageFailure(page=2, error="layout failed"),),
+                output_file="source/extracted.txt",
+            )
+            output = io.StringIO()
+            with (
+                patch("glk.cli.extract_project_pdf", return_value=acquisition),
+                patch("glk.cli.segment_project_source") as segment,
+                patch("glk.cli.run_project_source_qa") as source_qa,
+                redirect_stdout(output),
+                redirect_stderr(io.StringIO()),
+            ):
+                exit_code = main(
+                    [
+                        "run",
+                        "--project",
+                        "partial_run",
+                        "--file",
+                        "rulebook.pdf",
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--json",
+                    ]
+                )
+            self.assertEqual(exit_code, 4)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["pipeline_status"], "acquisition_partial")
+            segment.assert_not_called()
+            source_qa.assert_not_called()
+
+    def test_run_interactive_wizard_asks_only_for_type_and_source_path(self) -> None:
+        class InteractiveInput(io.StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            image_folder = root / "images"
+            image_folder.mkdir()
+            Image.new("RGB", (8, 8), "white").save(image_folder / "card.png")
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "init",
+                        "Wizard Images",
+                        "--workspace-root",
+                        str(workspace_root),
+                    ]
+                )
+            output = io.StringIO()
+            interactive_input = InteractiveInput(f"2\n{image_folder}\n")
+            original_stdin = sys.stdin
+            try:
+                sys.stdin = interactive_input
+                with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                    exit_code = main(
+                        [
+                            "run",
+                            "--project",
+                            "wizard_images",
+                            "--workspace-root",
+                            str(workspace_root),
+                            "--dry-run",
+                        ]
+                    )
+            finally:
+                sys.stdin = original_stdin
+            self.assertEqual(exit_code, 0)
+            self.assertIn("1. PDF", output.getvalue())
+            self.assertIn("2. 이미지 폴더", output.getvalue())
+            self.assertIn("Would OCR 1 images", output.getvalue())
+
+    def test_run_rejects_file_and_folder_together(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "init",
+                        "Invalid Run",
+                        "--workspace-root",
+                        str(workspace_root),
+                    ]
+                )
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                exit_code = main(
+                    [
+                        "run",
+                        "--project",
+                        "invalid_run",
+                        "--file",
+                        "a.pdf",
+                        "--folder",
+                        "images",
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--json",
+                    ]
+                )
+            self.assertEqual(exit_code, 1)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["code"], "RUN_INPUT_FAILED")
+
+    def test_segment_reports_missing_source_as_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "init",
+                        "No Source",
+                        "--workspace-root",
+                        str(workspace_root),
+                    ]
+                )
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                exit_code = main(
+                    [
+                        "segment",
+                        "--project",
+                        "no_source",
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--json",
+                    ]
+                )
+            self.assertEqual(exit_code, 1)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["code"], "SEGMENTATION_FAILED")
+
+    def test_qa_reports_missing_common_blocks_as_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "init",
+                        "No Segments",
+                        "--workspace-root",
+                        str(workspace_root),
+                    ]
+                )
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                exit_code = main(
+                    [
+                        "qa",
+                        "--project",
+                        "no_segments",
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--json",
+                    ]
+                )
+            self.assertEqual(exit_code, 1)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["code"], "SOURCE_QA_FAILED")
+
+    def test_review_prepare_and_finalize_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "init",
+                        "CLI Review",
+                        "--workspace-root",
+                        str(workspace_root),
+                    ]
+                )
+            text = "Gain l0 health."
+            block = SourceBlock(
+                schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
+                id="pdf-p0001-b0001-0000000001",
+                source_type="pdf",
+                source_file="source/original.pdf",
+                page=1,
+                source_order=1,
+                block_order=1,
+                block_type="body",
+                raw_text=text,
+                corrected_text=None,
+                bbox=(100.0, 100.0, 900.0, 900.0),
+                legibility=None,
+                status="raw",
+                warnings=(),
+                source_refs=("P001-F001",),
+                source_hash="sha256:" + hashlib.sha256(text.encode()).hexdigest(),
+            )
+            source_path = workspace_root / "cli_review/segments/source.jsonl"
+            source_path.write_text(
+                json.dumps(block.to_dict(), ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            prepare_output = io.StringIO()
+            with redirect_stdout(prepare_output), redirect_stderr(io.StringIO()):
+                prepare_exit = main(
+                    [
+                        "review",
+                        "prepare",
+                        "--project",
+                        "cli_review",
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--json",
+                    ]
+                )
+            self.assertEqual(prepare_exit, 0)
+            self.assertTrue(json.loads(prepare_output.getvalue())["review_created"])
+            review_path = workspace_root / "cli_review/review/source.txt"
+            review_path.write_text(
+                review_path.read_text(encoding="utf-8").replace("l0", "10"),
+                encoding="utf-8",
+            )
+
+            finalize_output = io.StringIO()
+            with redirect_stdout(finalize_output), redirect_stderr(io.StringIO()):
+                finalize_exit = main(
+                    [
+                        "review",
+                        "finalize",
+                        "--project",
+                        "cli_review",
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--json",
+                    ]
+                )
+            self.assertEqual(finalize_exit, 0)
+            payload = json.loads(finalize_output.getvalue())
+            self.assertEqual(payload["changed_blocks"], 1)
+            self.assertTrue((workspace_root / "cli_review/final/source.txt").is_file())
 
     def test_init_and_status_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

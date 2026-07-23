@@ -3,7 +3,19 @@
 이 문서는 현재 코드베이스에서 확인된 개선 작업을 우선순위와 구현 단계별로 정리한 체크리스트입니다.
 
 통합 CLI와 초벌 번역 개선 흐름의 설계는 [번역 자동화 파이프라인 설계 초안](TRANSLATION_AUTOMATION_DESIGN.md)을 참고합니다.
+현재 구현된 전체 실행 순서와 용어 기준은 [전체 작업 흐름도](WORKFLOW.md)를 단일 기준으로 사용합니다. 파이프라인 단계·명령·출력이 변경되는 작업에서는 이 흐름도를 반드시 함께 갱신합니다.
 PDF 다단·줄바꿈 복원 실험은 [PDF 레이아웃 복원 PoC](LAYOUT_RECONSTRUCTION_POC.md)를 참고합니다.
+
+## 다음 작업
+
+PDF와 이미지 OCR 결과의 검수용 중간 block 정규화, 로컬 원문 QA와 파일 기반 사람 검수가 완료됐습니다. 다음 우선 작업은 검수 후 만들어진 최종 공통 원문을 용어 분석과 번역 입력으로 연결하는 것입니다.
+
+1. `segments/approved_source.jsonl`만 용어 분석 입력으로 허용한다.
+2. 승인된 원문에서 용어·고유명사·반복 표현 후보를 추출한다.
+3. 사람이 확정한 용어집을 번역 prompt와 QA에서 공통 사용한다.
+4. 원문 block ID를 유지한 번역 세그먼트를 생성한다.
+
+다른 컴퓨터에서 이어서 작업할 때 필요한 현재 상태와 검증 명령은 [작업 히스토리](WORK_HISTORY.md)를 참고합니다.
 
 ## 완료된 작업
 
@@ -21,6 +33,16 @@ PDF 다단·줄바꿈 복원 실험은 [PDF 레이아웃 복원 PoC](LAYOUT_RECO
 - [x] 아이콘 참조 이미지를 반복 전송하지 않는 텍스트 설명형 OCR 프롬프트
 - [x] 이미지별 TXT와 구분선 기반 통합 TXT 생성
 - [x] `glk ocr` 프로젝트 서비스, 원본 등록, 결과 캐시 및 상태 기록
+- [x] PDF·이미지 OCR 결과의 검수용 중간 `SourceBlock` 모델과 `glk segment` 구현
+- [x] 안정적인 block ID, 원문 해시, 0~1000 bbox와 JSONL 캐시 검증
+- [x] LLM을 사용하지 않는 `glk qa` 로컬 원문 QA와 JSON issue 리포트
+- [x] 사람이 읽는 `qa/source_qa.md` 보고서
+- [x] 같은 내용으로 생성되는 `draft/source.txt`와 편집용 `review/source.txt`
+- [x] 기존 review를 덮어쓰지 않는 stale 감지와 명시적 `review prepare --force`
+- [x] `glk review finalize` 구조·token 검증과 `final/source.txt` 생성
+- [x] raw text를 보존한 최종 공통 원문 `segments/approved_source.jsonl` 생성
+- [x] `glk run`에서 원문 획득 → 검수용 중간 block → draft/review → 로컬 QA 통합 실행
+- [x] `glk status`에 원문 획득·QA·사람 검수·최종 승인 상태 표시
 
 ## P0: 원문 획득 및 OCR
 
@@ -35,12 +57,14 @@ PDF 다단·줄바꿈 복원 실험은 [PDF 레이아웃 복원 PoC](LAYOUT_RECO
 - [ ] 내장 텍스트와 OCR 결과가 크게 다른 페이지를 표시한다.
 - [ ] 다단 편집, 표, 사이드바, 캡션의 읽기 순서 오류를 탐지한다.
 - [ ] 반복 머리말·꼬리말과 페이지 번호를 본문과 구분한다.
-- [ ] `0/O`, `1/I/l`, `5/S` 등 OCR 혼동 후보를 탐지한다.
+- [x] 숫자와 같은 문자열에 섞인 `O/0`, `I/l/1` OCR 혼동 후보를 탐지한다.
+- [ ] 문맥 오탐을 줄인 `5/S`, `8/B` OCR 혼동 규칙을 추가한다.
 - [ ] 숫자, 부정어, 카드·지도 참조의 OCR 의심 항목을 높은 심각도로 분류한다.
 - [x] 이미지 원본과 raw OCR JSON 및 파생 TXT를 함께 보존한다.
-- [ ] corrected text와 원문 수정 이력을 추가로 보존한다.
+- [x] PDF와 이미지 OCR block을 provider 독립적인 검수용 `segments/source.jsonl`로 정규화한다.
+- [x] 사람이 수정한 text를 raw text와 분리해 `corrected_text`로 보존한다.
 - [ ] 원문 검수용 HTML 리포트를 생성한다.
-- [ ] 원문 수정 이력과 승인 상태를 기록한다.
+- [x] 검토 기준 source hash와 승인 상태를 기록한다.
 - [ ] 승인되지 않은 원문 block이 번역 단계로 넘어가지 않게 한다.
 - [ ] 텍스트 PDF, 스캔 PDF, hybrid PDF, 이미지 폴더 fixture를 추가한다.
 
@@ -226,9 +250,11 @@ glossaries/
 - [x] `glk init`과 `glk status`에 project manifest 및 workspace service를 연결한다.
 - [x] `glk extract`에 PDF 등록, 렌더링, fragment 추출, LLM 레이아웃 복원과 캐시를 연결한다.
 - [x] `glk ocr`에 이미지 폴더 등록, 공통·개별 프롬프트, 구조화 OCR, 개별·통합 TXT와 캐시를 연결한다.
-- [ ] `glk run` 시작 시 PDF 원문 추출과 이미지 폴더 OCR 중 입력 방식을 선택받는 마법사를 제공한다.
-- [ ] 마법사의 선택에 따라 기존 `extract_project_pdf()` 또는 `ocr_project_images()` application service를 호출한다.
-- [ ] 비대화형 환경에서는 CLI 옵션으로 입력 방식을 명시해 같은 흐름을 실행할 수 있게 한다.
+- [x] `glk segment`에 PDF·이미지 검수용 중간 block 변환과 캐시를 연결한다.
+- [x] `glk qa`에 로컬 결정 규칙, issue JSON과 입력 해시 캐시를 연결한다.
+- [x] `glk run` 시작 시 PDF 원문 추출과 이미지 폴더 OCR 중 입력 방식을 선택받는 마법사를 제공한다.
+- [x] 마법사의 선택에 따라 기존 `extract_project_pdf()` 또는 `ocr_project_images()` application service를 호출한다.
+- [x] 비대화형 환경에서는 CLI 옵션으로 입력 방식을 명시해 같은 흐름을 실행할 수 있게 한다.
 - [ ] 번호 기반 스크립트를 하나의 CLI 진입점으로 통합한다.
 - [ ] 전체 파이프라인을 한 번에 실행하는 명령을 제공한다.
 - [ ] 단계별 실행과 전체 실행이 같은 내부 함수를 사용하게 한다.

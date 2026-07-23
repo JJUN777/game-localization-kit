@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import uuid
@@ -17,6 +18,9 @@ DEFAULT_WORKSPACE_ROOT = Path("workspaces")
 PROJECT_DIRECTORIES = (
     Path("source/pages"),
     Path("segments"),
+    Path("draft"),
+    Path("review"),
+    Path("final"),
     Path("terminology"),
     Path("qa"),
     Path("revisions"),
@@ -153,9 +157,91 @@ def inspect_project(
         for relative_path in PROJECT_DIRECTORIES
         if not (location.path / relative_path).is_dir()
     ]
+    pipeline = _inspect_pipeline_status(location)
     return {
         "ok": not missing_paths,
         "project_path": str(location.path),
         "manifest": location.manifest.to_dict(),
         "missing_paths": missing_paths,
+        "pipeline": pipeline,
+    }
+
+
+def _read_optional_json(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _sha256_file(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
+    project_path = location.path
+    if location.manifest.source_file == "source/original.pdf":
+        acquisition = _read_optional_json(project_path / "source/document.json")
+        source_type = "pdf"
+    elif location.manifest.source_file == "source/images":
+        acquisition = _read_optional_json(project_path / "source/ocr/run_summary.json")
+        source_type = "images"
+    else:
+        acquisition = None
+        source_type = None
+    source_acquired = bool(
+        acquisition
+        and acquisition.get("status") == "complete"
+        and not acquisition.get("failures")
+    )
+
+    source_blocks_path = project_path / "segments/source.jsonl"
+    source_sha256 = _sha256_file(source_blocks_path)
+    review_source_ready = source_sha256 is not None
+
+    qa_state = _read_optional_json(project_path / "state/source_qa.json")
+    if qa_state is None:
+        qa_status = "not_run"
+        qa_issues = None
+    elif qa_state.get("source_sha256") != source_sha256:
+        qa_status = "stale"
+        qa_issues = qa_state.get("total_issues")
+    else:
+        qa_status = "complete"
+        qa_issues = qa_state.get("total_issues")
+
+    review_path = project_path / "review/source.txt"
+    review_state = _read_optional_json(project_path / "state/source_review.json")
+    final_path = project_path / "final/source.txt"
+    approved_path = project_path / "segments/approved_source.jsonl"
+    if not review_path.is_file() or review_state is None:
+        human_review = "not_ready"
+    elif review_state.get("source_sha256") != source_sha256:
+        human_review = "stale"
+    elif (
+        review_state.get("status") == "approved"
+        and review_state.get("review_sha256") == _sha256_file(review_path)
+        and review_state.get("final_sha256") == _sha256_file(final_path)
+        and review_state.get("approved_blocks_sha256") == _sha256_file(approved_path)
+    ):
+        human_review = "approved"
+    else:
+        human_review = "pending"
+
+    return {
+        "source_type": source_type,
+        "source_acquired": source_acquired,
+        "review_source_ready": review_source_ready,
+        "qa_status": qa_status,
+        "qa_issues": qa_issues,
+        "human_review": human_review,
+        "final_source_approved": human_review == "approved",
     }

@@ -1,5 +1,7 @@
 # 번역 자동화 파이프라인 설계 초안
 
+현재 구현된 전체 실행 순서와 용어의 단일 기준은 [전체 작업 흐름도](WORKFLOW.md)입니다. 파이프라인 단계·명령·출력이 변경되면 해당 흐름도를 반드시 함께 갱신합니다.
+
 > 상태: Draft 0.1  
 > 대상: 보드게임 룰북, 카드 텍스트, 앱/스크립트 문자열의 한국어 현지화  
 > 우선 인터페이스: Windows/macOS 공통 CLI
@@ -120,8 +122,15 @@ workspace/
     │   └── source_corrections.jsonl
     ├── segments/
     │   ├── source.jsonl
+    │   ├── approved_source.jsonl
     │   ├── draft.jsonl
     │   └── aligned.jsonl
+    ├── draft/
+    │   └── source.txt
+    ├── review/
+    │   └── source.txt
+    ├── final/
+    │   └── source.txt
     ├── terminology/
     │   ├── candidates.csv
     │   ├── termbase.json
@@ -165,6 +174,31 @@ manifest는 파일 이름을 추측하는 대신 각 단계의 입력과 출력�
 ### 5.2 세그먼트
 
 초기 저장 형식은 사람이 확인하기 쉽고 append가 가능한 JSONL을 사용합니다. 데이터 양이 커지거나 검색 성능이 필요해지면 SQLite로 전환할 수 있습니다.
+
+QA와 사람 검수를 진행하기 전에 provider별 PDF layout과 이미지 OCR 결과를 다음 검수용 중간 source block으로 정규화합니다. 이 데이터는 최종 공통 원문이 아닙니다.
+
+```json
+{
+  "schema_version": 1,
+  "id": "image-card-239-b0004-427fc82ddb",
+  "source_type": "image",
+  "source_file": "source/images/card-239.jpg",
+  "page": null,
+  "source_order": 4,
+  "block_order": 4,
+  "block_type": "body",
+  "raw_text": "Discard the top card of your deck.",
+  "corrected_text": null,
+  "bbox": [180.0, 620.0, 820.0, 650.0],
+  "legibility": "clear",
+  "status": "raw",
+  "warnings": [],
+  "source_refs": [],
+  "source_hash": "sha256:..."
+}
+```
+
+PDF fragment의 실측 좌표는 페이지 크기를 기준으로 0~1000 범위로 정규화하고, 이미지 OCR bbox는 같은 범위를 그대로 사용합니다. `raw_text`는 불변 원문이며 사람이 수정할 때는 `corrected_text`와 상태만 변경합니다. block ID는 원본 위치와 block 순서로 만들기 때문에 text 교정만으로 바뀌지 않습니다.
 
 ```json
 {
@@ -365,16 +399,48 @@ OCR 제공자가 좌표나 confidence를 반환하지 않는 경우 내부 값�
 
 특히 규칙 의미에 영향을 주는 숫자, 부정어, 비교 표현, 카드 번호가 의심될 경우 오류 심각도를 높입니다.
 
+현재 `glk qa`의 첫 구현은 LLM을 사용하지 않는 로컬 결정 규칙만 적용합니다.
+
+- source hash와 raw text 무결성
+- OCR `legibility=uncertain`과 provider warning
+- `[ILLEGIBLE]`, `[ICON: ...]`, replacement character
+- malformed `{TOKEN}`과 OCR prompt에 없는 token
+- 아이콘 파일명이 token 대신 평문으로 남은 경우
+- 숫자와 같은 문자열에 섞인 `O/0`, `I/l/1` 후보
+- identifier의 비정상 공백·문자와 중복
+- 과도한 공백과 비정상적으로 긴 block
+
+QA는 프로그램용 `qa/source_qa.json`과 사람이 읽는 `qa/source_qa.md`에 block ID, severity, code, evidence, 원본 파일, 페이지와 bbox를 기록합니다. 원문을 자동 수정하지 않으며 모든 issue의 `auto_fixable`은 현재 `false`입니다. 의미상 숫자가 맞는지 확인하거나 원본 이미지를 LLM으로 재검증하는 2차 단계는 현재 범위에서 제외합니다.
+
 ### 6.7 원문 검수 및 승인
 
-OCR 결과에는 다음 상태를 사용합니다.
+`glk segment`는 검수 전 내부 중간 데이터인 `segments/source.jsonl`과 함께 다음 두 TXT를 같은 내용으로 생성합니다.
+
+- `draft/source.txt`: 자동 추출 기준본이며 사람이 수정하지 않음
+- `review/source.txt`: PDF 또는 이미지를 보면서 사람이 본문을 직접 수정하는 작업본
+
+TXT에는 `[PAGE ...]` 또는 `[SOURCE ...]`, 안정적인 `[BLOCK ...]` marker가 포함됩니다. `qa/source_qa.md`는 이 위치와 block ID를 사용해 확인할 부분을 알려줍니다. 사용자는 별도 수정 명령 대신 일반 텍스트 편집기에서 review 본문을 수정합니다.
+
+기존 review가 있으면 segmentation을 다시 실행해도 덮어쓰지 않습니다. `draft/source.txt`만 새 원문으로 갱신하고 source hash가 달라진 review는 stale 상태로 만들어 최종화를 차단합니다. 사람이 기존 수정 내용을 비교한 뒤 `glk review prepare --force`를 실행해야만 review를 새 draft로 초기화합니다.
+
+`glk review finalize`는 다음 항목을 로컬에서 검증합니다.
+
+- 모든 block ID와 위치 marker가 원래 순서대로 정확히 한 번 존재함
+- 검토 기준 source hash가 현재 `segments/source.jsonl`과 일치함
+- 빈 block, `[ILLEGIBLE]`, `[ICON: ...]`, replacement character가 없음
+- token 중괄호가 정상이며 OCR prompt에 없는 token이 없음
+- `{HP}` 같은 token 개수 변경은 `--allow-token-changes`로 명시적으로 확인함
+
+검증 후 `final/source.txt`와 최종 공통 원문인 `segments/approved_source.jsonl`을 생성합니다. approved JSONL은 `raw_text`를 그대로 유지하고 실제 수정문만 `corrected_text`에 기록하므로 원문과 수정 결과를 계속 비교할 수 있습니다.
+
+원문 block에는 다음 상태를 사용합니다.
 
 - `raw`: 최초 추출 또는 OCR 결과
 - `flagged`: 원문 QA 문제 발견
 - `corrected`: 사람이 OCR 오류 수정
 - `approved`: 번역 입력으로 사용 승인
 
-원문 검수 리포트에는 페이지 이미지, bounding box, OCR 원문, 수정문, QA 사유를 함께 표시합니다. 프로젝트 설정에서 명시적으로 허용하지 않는 한 `approved`되지 않은 block은 번역 세그먼트로 만들지 않습니다.
+현재 검수 인터페이스는 별도 웹 화면 대신 편집 가능한 TXT와 Markdown QA 보고서를 사용합니다. bounding box와 원본 위치는 내부 JSONL/JSON에 남아 있으므로 이후 HTML 검수 화면을 추가해도 같은 block ID로 연결할 수 있습니다. 프로젝트 설정에서 명시적으로 허용하지 않는 한 `approved`되지 않은 block은 번역 세그먼트로 만들지 않습니다.
 
 ### 6.8 OCR 제공자 추상화
 
@@ -664,7 +730,7 @@ glk export --project elder_scrolls_rulebook --status approved
 ### 12.7 전체 파이프라인
 
 ```bash
-glk run --project elder_scrolls_rulebook --resume
+glk run --project elder_scrolls_rulebook
 ```
 
 `glk run`에 입력이 아직 등록되지 않았다면 원문 획득 방식을 먼저 선택받습니다.
@@ -675,19 +741,26 @@ glk run --project elder_scrolls_rulebook --resume
 2. 이미지 폴더를 기반으로 원문 OCR
 ```
 
-- PDF 선택: 파일 경로와 필요시 페이지 범위를 받은 뒤 기존 `extract_project_pdf()` service를 호출합니다.
-- 이미지 선택: 이미지 폴더와 선택적인 OCR prompt 경로를 받은 뒤 기존 `ocr_project_images()` service를 호출합니다.
+- PDF 선택: 최초 실행에서는 PDF 파일 경로만 받은 뒤 기존 `extract_project_pdf()` service를 호출합니다. 기본값은 전체 페이지이며 일부 페이지만 필요한 경우 명령행의 `--pages` 선택 옵션을 사용합니다.
+- 이미지 선택: 최초 실행에서는 이미지 루트 폴더만 받은 뒤 기존 `ocr_project_images()` service를 호출합니다. 하위 폴더를 재귀 탐색하고 상대 경로를 원본·개별 TXT 출력에 유지합니다.
+- 이미지 OCR 공통 프롬프트는 루트 폴더의 `ocr_prompt.txt`를 자동 사용합니다. 다른 파일이 필요할 때만 `--prompt` 선택 옵션을 사용합니다.
 - 터미널 상호작용이 불가능한 CI나 자동화에서는 `--input-type pdf|images`, `--file`, `--folder` 옵션으로 같은 선택을 명시합니다.
 - 이미 원문이 등록된 프로젝트는 manifest와 실행 상태를 확인한 뒤 해당 경로를 재사용하며, 입력 방식이 불명확할 때만 질문합니다.
 - 마법사는 입력 수집만 담당하고 PDF 추출이나 이미지 OCR 로직을 중복 구현하지 않습니다.
+- 원문 획득이 성공하면 같은 `glk run`에서 `segment_project_source()`와 `run_project_source_qa()`를 순서대로 호출합니다.
+- 중간 단계가 모두 성공하면 `review/source.txt`와 `qa/source_qa.md` 경로를 안내하고 사람 검수 직전에 멈춥니다.
+- 원문 획득이 partial이면 중간 원문 생성과 QA를 시작하지 않습니다.
+- `extract`, `ocr`, `segment`, `qa` 개별 명령은 진단과 부분 재실행용으로 유지합니다.
+- `glk status`는 `source_acquired`, `qa_status`, `human_review`, `final_source_approved`를 표시합니다.
 
 공통 옵션:
 
 - `--dry-run`: 처리 대상과 출력 경로만 표시
-- `--resume`: 이전 체크포인트부터 재개
 - `--force`: 기존 결과 재생성
 - `--verbose`: 상세 로그 출력
 - `--json`: 사람이 아닌 프로그램용 결과 출력
+
+원문 획득 단계는 입력·프롬프트·모델 해시가 같으면 기본적으로 캐시를 재사용하므로 별도 `--resume` 옵션을 요구하지 않습니다. 전체 번역 파이프라인 체크포인트가 구현될 때 `--resume`을 다시 도입합니다.
 
 ## 13. 코드 구조 초안
 
@@ -793,10 +866,12 @@ domain 모듈은 Gemini SDK, PDF 라이브러리, CLI 파서에 직접 의존하
 - [x] 공통·개별 OCR 프롬프트 및 이미지별 캐시
 - [x] 이미지별 TXT, 구조화 JSON과 통합 TXT 출력
 - [x] 페이지·block·좌표 기반 원문 데이터 저장
-- [ ] 원문 QA 및 flagged block 리포트
-- [ ] 원문 수정 이력과 승인 상태 저장
-- [ ] 승인된 원문만 텍스트 정제 단계로 전달
-- [ ] 안정적인 세그먼트 ID 생성
+- [x] PDF·이미지 검수용 중간 source block JSONL과 안정적인 ID 생성
+- [x] 로컬 원문 QA 및 JSON flagged block 리포트
+- [x] draft/review TXT 분리, stale 감지와 원문 수정·승인 상태 저장
+- [x] 최종 원문 TXT와 최종 공통 원문 approved JSONL 생성
+- [ ] 승인된 원문만 용어 분석·번역 단계로 전달
+- [x] 안정적인 source block ID 생성
 - [ ] 기존 초벌 번역 가져오기
 - [ ] key/page/order 기반 1차 정렬
 - [ ] 현재 glossary와 keep terms 적용
