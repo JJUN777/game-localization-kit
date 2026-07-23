@@ -21,6 +21,9 @@ from glk.application.translation_review_service import (
     run_project_translation_qa,
     save_project_translation_review,
 )
+from glk.application.translation_retry_service import retry_failed_translations
+from glk.application.translation_service import TranslationError
+from glk.infrastructure.gemini_layout import GeminiConfigurationError
 
 
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
@@ -172,7 +175,7 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
-        if path not in {"/api/save", "/api/qa", "/api/finalize"}:
+        if path not in {"/api/save", "/api/qa", "/api/retry", "/api/finalize"}:
             self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
             return
         if not self._api_authorized():
@@ -208,6 +211,20 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
                             workspace_root=self.server.workspace_root,
                         ),
                     }
+                elif path == "/api/retry":
+                    result = retry_failed_translations(
+                        project=self.server.project,
+                        workspace_root=self.server.workspace_root,
+                        expected_review_sha256=document["review_sha256"],
+                    )
+                    response = {
+                        "ok": result.ok,
+                        "result": result.to_dict(),
+                        "document": get_project_translation_review_document(
+                            project=self.server.project,
+                            workspace_root=self.server.workspace_root,
+                        ),
+                    }
                 else:
                     result = finalize_project_translation_review(
                         project=self.server.project,
@@ -221,7 +238,14 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
                             workspace_root=self.server.workspace_root,
                         ),
                     }
-        except (TranslationReviewError, OSError, ValueError) as error:
+        except (
+            TranslationError,
+            TranslationReviewError,
+            GeminiConfigurationError,
+            OSError,
+            RuntimeError,
+            ValueError,
+        ) as error:
             status = (
                 HTTPStatus.CONFLICT
                 if "changed after this page was loaded" in str(error)

@@ -44,7 +44,11 @@ flowchart TD
     TRANS_REVIEW --> TRANS_UI
     TRANS_UI --> TRANS_HUMAN[브라우저에서 원문·번역 비교<br/>번역 본문만 수정·저장]
     TRANS_HUMAN --> TRANS_QA[브라우저에서 로컬 QA 실행]
-    TRANS_QA -->|오류| TRANS_UI
+    TRANS_QA -->|오류| TRANS_DECIDE{오류 처리 방법}
+    TRANS_DECIDE -->|직접 수정| TRANS_UI
+    TRANS_DECIDE -->|ERROR만 Gemini 재번역| TRANS_RETRY[glk retry --failed<br/>또는 UI 오류만 재번역]
+    TRANS_RETRY --> REVISION[revisions/translation_retry_*.json]
+    REVISION --> TRANS_UI
     TRANS_QA -->|통과| TRANS_CHECK[glk translation finalize --dry-run]
     TRANS_CHECK -->|오류| TRANS_HUMAN
     TRANS_CHECK -->|통과| TRANS_FINALIZE[glk translation finalize]
@@ -317,9 +321,12 @@ glk translation review --project primal
 - 오류·경고·수정됨 필터와 block 이동
 - 번역문만 수정하고 `review/translation.txt`에 안전하게 저장
 - 저장 후 로컬 QA 실행과 오류 확인
+- QA ERROR가 연결된 block만 Gemini로 재번역하고 다시 검수
 - 오류가 0개인 결과의 최종 승인
 
-서버는 `127.0.0.1`에만 바인딩되고 원문·번역을 외부로 전송하거나 Gemini를 호출하지 않습니다. 요청별 임의 세션 token, localhost Host·Origin 검사, 동시 편집 hash 검사를 적용합니다. 터미널에서 `Ctrl+C`를 누르면 종료됩니다.
+PASS block을 포함한 모든 번역문을 수정할 수 있습니다. PASS는 결정적 QA 규칙을 통과했다는 뜻이며 번역 품질 승인이나 편집 잠금이 아닙니다.
+
+서버는 `127.0.0.1`에만 바인딩됩니다. 조회·저장·QA·최종화는 로컬에서 처리하며, 사용자가 `오류만 재번역`을 실행할 때만 대상 ERROR block을 Gemini에 보냅니다. 요청별 임의 세션 token, localhost Host·Origin 검사, 동시 편집 hash 검사를 적용합니다. 터미널에서 `Ctrl+C`를 누르면 종료됩니다.
 
 브라우저를 자동으로 열지 않거나 고정 포트를 쓰려면 다음처럼 실행합니다.
 
@@ -355,9 +362,16 @@ glk translation qa --project primal
 원문과 번역이 완전히 같거나 한국어 대상 번역에 한글이 없는 경우는 사람이 판단할 수 있도록 warning으로 표시하며 자동으로 승인을 차단하지 않습니다. 결과는 `qa/translation_qa.json`과 `qa/translation_qa.md`에 기록됩니다.
 
 ```bash
+glk retry --failed --project primal --dry-run
+glk retry --failed --project primal
+
 glk translation finalize --project primal --dry-run
 glk translation finalize --project primal
 ```
+
+`glk retry --failed`는 QA ERROR가 연결된 block만 한 개씩 재번역합니다. ERROR가 여러 개 있어도 PASS·WARNING 전용 block과 사람이 수정한 다른 block은 그대로 유지합니다. 모델 응답은 숫자·token·HTML·termbase 규칙으로 다시 검증하며, 모든 대상 응답이 유효할 때만 `review/translation.txt`를 한 번 갱신합니다. 초벌 기준인 `draft/translation.txt`는 바꾸지 않습니다.
+
+교체 전 번역, 새 번역, 기존 QA 오류와 모델 정보는 `revisions/translation_retry_*.json`에 남습니다. 재번역 직후 로컬 QA를 자동으로 다시 실행하지만 사람 승인으로 간주하지 않으므로, 결과를 읽고 필요하면 수정한 뒤 최종 승인합니다.
 
 오류가 0개일 때만 다음 최종 파일이 생성됩니다.
 

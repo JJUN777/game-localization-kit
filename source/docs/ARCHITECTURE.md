@@ -166,7 +166,8 @@ segments/translation.jsonl
 ├── draft/translation.txt
 └── review/translation.txt
         ↑ glk translation review
-        │ localhost HTML 편집·저장
+        │ localhost HTML 편집·저장·ERROR 선택 재번역
+        ├── revisions/translation_retry_*.json
         ↓ marker·원문·숫자·token·태그·용어 검사
 qa/translation_qa.json
 qa/translation_qa.md
@@ -189,9 +190,9 @@ final/translation.txt
 - 임의 session token과 Host·Origin 검사로 다른 웹페이지의 요청 차단
 - 현재 review SHA-256을 요구해 외부 편집과 동시 저장 충돌 차단
 - API 요청 크기, block ID 집합과 reserved marker 검증
-- 외부 CDN, font, script와 네트워크 API를 사용하지 않음
+- 외부 CDN, font와 script를 사용하지 않으며 선택 재번역 때만 서버가 Gemini API 호출
 
-저장·QA·최종화는 기존 `translation_review_service`를 호출하며 UI가 workspace 파일을 직접 다루지 않습니다. TXT 기반 CLI 흐름도 같은 application service를 사용하므로 두 검수 방식의 승인 규칙은 동일합니다.
+저장·QA·최종화는 기존 `translation_review_service`를 호출하며 UI가 workspace 파일을 직접 다루지 않습니다. 선택 재번역은 `translation_retry_service`가 현재 review의 block별 ERROR를 선별하고 기존 translation prompt compiler와 응답 검증기를 재사용합니다. 정상 block은 유지하고 review만 갱신하며 초벌 draft는 변경하지 않습니다. TXT 기반 CLI 흐름도 같은 application service를 사용하므로 두 검수 방식의 승인 규칙은 동일합니다.
 
 ## 크로스 플랫폼 기준
 
@@ -205,7 +206,6 @@ final/translation.txt
 
 다음 단계도 기존 경계를 유지합니다.
 
-- 선택 재번역: 승인·locked 번역은 제외하고 QA 실패 segment만 새 revision으로 생성
 - 의미·문체 QA: 결정적 로컬 QA와 분리된 선택적 LLM 보조 단계
 - GUI: workspace 파일을 직접 조작하지 않고 application service 호출
 

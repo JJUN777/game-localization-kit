@@ -19,6 +19,7 @@ from glk.application.translation_review_service import (
     prepare_project_translation_review,
     run_project_translation_qa,
 )
+from glk.application.translation_retry_service import retry_failed_translations
 from glk.domain.approved_translation import ApprovedTranslationSegment
 from glk.domain.source_block import SOURCE_BLOCK_SCHEMA_VERSION, SourceBlock
 from glk.domain.translation_segment import TranslationSegment
@@ -614,6 +615,137 @@ class TranslationReviewTests(unittest.TestCase):
                     "translation_review"
                 ],
                 "pending",
+            )
+
+    def test_retry_replaces_only_qa_error_blocks_and_preserves_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            project_path, blocks = self._translated_project(workspace_root)
+            draft_before = (project_path / "draft/translation.txt").read_bytes()
+            review_path = project_path / "review/translation.txt"
+            reviewed = review_path.read_text(encoding="utf-8")
+            reviewed = reviewed.replace(
+                "[TRANSLATION]\n전투\n",
+                "[TRANSLATION]\n전투 단계\n",
+            )
+            reviewed = reviewed.replace(
+                "각 사냥꾼은 스태미나 2를 얻습니다.",
+                "각 사냥꾼은 스태미나 3을 얻습니다.",
+            )
+            review_path.write_text(reviewed, encoding="utf-8")
+            qa = run_project_translation_qa(
+                project="translation_project",
+                workspace_root=workspace_root,
+            )
+            self.assertFalse(qa.passed)
+
+            provider = SequenceProvider(
+                [
+                    {
+                        "translations": [
+                            {
+                                "id": blocks[1].id,
+                                "text": "각 사냥꾼은 스태미나 2를 얻습니다.",
+                            }
+                        ]
+                    }
+                ]
+            )
+            result = retry_failed_translations(
+                project="translation_project",
+                workspace_root=workspace_root,
+                provider=provider,
+            )
+
+            self.assertEqual(result.requested_blocks, 1)
+            self.assertEqual(result.retried_blocks, 1)
+            self.assertEqual(result.remaining_error_count, 0)
+            self.assertEqual(result.block_ids, (blocks[1].id,))
+            self.assertEqual(len(provider.prompts), 1)
+            self.assertIn(blocks[1].id, provider.prompts[0])
+            self.assertNotIn(blocks[0].id, provider.prompts[0])
+            review_after = review_path.read_text(encoding="utf-8")
+            self.assertIn("[TRANSLATION]\n전투 단계\n", review_after)
+            self.assertIn("각 사냥꾼은 스태미나 2를 얻습니다.", review_after)
+            self.assertEqual(
+                (project_path / "draft/translation.txt").read_bytes(),
+                draft_before,
+            )
+            revision = json.loads(
+                Path(result.revision_file or "").read_text(encoding="utf-8")
+            )
+            self.assertEqual(revision["retried_blocks"], 1)
+            self.assertEqual(
+                revision["changes"][0]["previous_translation"],
+                "각 사냥꾼은 스태미나 3을 얻습니다.",
+            )
+            self.assertEqual(
+                inspect_project("translation_project", workspace_root)["pipeline"][
+                    "translation_review"
+                ],
+                "qa_passed",
+            )
+
+    def test_retry_dry_run_lists_errors_without_calling_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            project_path, blocks = self._translated_project(workspace_root)
+            review_path = project_path / "review/translation.txt"
+            review_path.write_text(
+                review_path.read_text(encoding="utf-8").replace(
+                    "사냥꾼들은 {HP} 10을 사용할 수 있습니다.",
+                    "사냥꾼들은 11을 사용할 수 있습니다.",
+                ),
+                encoding="utf-8",
+            )
+            before = review_path.read_bytes()
+            provider = SequenceProvider([])
+            result = retry_failed_translations(
+                project="translation_project",
+                workspace_root=workspace_root,
+                provider=provider,
+                dry_run=True,
+            )
+            self.assertTrue(result.dry_run)
+            self.assertEqual(result.requested_blocks, 1)
+            self.assertEqual(result.block_ids, (blocks[2].id,))
+            self.assertEqual(provider.prompts, [])
+            self.assertEqual(review_path.read_bytes(), before)
+            self.assertIsNone(result.revision_file)
+
+    def test_retry_validation_failure_does_not_partially_change_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            project_path, blocks = self._translated_project(workspace_root)
+            review_path = project_path / "review/translation.txt"
+            review_path.write_text(
+                review_path.read_text(encoding="utf-8").replace(
+                    "각 사냥꾼은 스태미나 2를 얻습니다.",
+                    "각 사냥꾼은 스태미나 3을 얻습니다.",
+                ),
+                encoding="utf-8",
+            )
+            before = review_path.read_bytes()
+            invalid = {
+                "translations": [
+                    {
+                        "id": blocks[1].id,
+                        "text": "각 사냥꾼은 스태미나 4를 얻습니다.",
+                    }
+                ]
+            }
+            with self.assertRaisesRegex(
+                TranslationError, "review was not changed"
+            ):
+                retry_failed_translations(
+                    project="translation_project",
+                    workspace_root=workspace_root,
+                    provider=SequenceProvider([invalid, invalid]),
+                )
+            self.assertEqual(review_path.read_bytes(), before)
+            self.assertEqual(
+                list((project_path / "revisions").glob("translation_retry_*.json")),
+                [],
             )
 
 

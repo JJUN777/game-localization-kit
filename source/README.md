@@ -32,7 +32,9 @@ flowchart TD
     WORDS --> DRAFT[5. AI가 초벌 번역 생성]
     DRAFT --> TRANS_REVIEW[6. 사람이 브라우저에서<br/>원문과 번역을 비교·수정]
     TRANS_REVIEW --> CHECK{숫자·아이콘·용어에<br/>문제가 없는가?}
-    CHECK -->|문제 있음| TRANS_REVIEW
+    CHECK -->|문제 있음| RETRY{처리 방법 선택}
+    RETRY -->|직접 수정| TRANS_REVIEW
+    RETRY -->|오류 문장만 AI 재번역| TRANS_REVIEW
     CHECK -->|문제 없음| RESULT([7. 최종 한국어 TXT 완성])
 ```
 
@@ -45,7 +47,7 @@ flowchart TD
 | 원문 확인 | 의심되는 숫자·아이콘·글자 위치 표시 | 원본과 비교해 잘못 읽힌 문장 수정 |
 | 용어 정리 | 반복되는 이름과 게임 용어 후보 수집 | 사용할 한국어 번역어 결정 |
 | 초벌 번역 | 정해진 용어를 반영해 AI 번역 생성 | 번역 문체 지침이 필요하면 작성 |
-| 번역 확인 | 숫자·아이콘·용어가 유지됐는지 검사 | 브라우저에서 어색한 번역 수정 |
+| 번역 확인 | 숫자·아이콘·용어 검사와 오류 문장 선택 재번역 | PASS 여부와 관계없이 브라우저에서 번역 수정 |
 | 완료 | 검사를 통과한 최종 TXT 생성 | 최종 승인 |
 
 사용자가 직접 판단해야 하는 핵심은 세 가지입니다.
@@ -97,7 +99,7 @@ glk --help
 glk version
 ```
 
-정상적으로 설치되면 `glk 0.1.0`과 사용 가능한 명령 목록이 표시됩니다.
+정상적으로 설치되면 `glk 1.0.0`과 사용 가능한 명령 목록이 표시됩니다.
 
 ### `glk: command not found`가 표시될 때
 
@@ -165,7 +167,7 @@ glk translate --project primal
 glk translation review --project primal
 ```
 
-브라우저 검수 화면에서 QA 오류를 모두 해결하고 최종 승인을 누르면 다음 파일이 만들어집니다.
+브라우저 검수 화면에서 QA 오류를 직접 고치거나 `오류만 재번역`을 누른 뒤, 결과를 다시 확인하고 최종 승인하면 다음 파일이 만들어집니다.
 
 ```text
 workspaces/primal/final/translation.txt
@@ -252,7 +254,34 @@ PDF 처리 방식:
 
 즉, 다단 페이지의 읽기 순서와 시각적 줄바꿈을 복원하면서도 최종 원문은 PDF에서 추출한 문자열을 기준으로 유지합니다.
 
-현재 텍스트 레이어가 전혀 없는 스캔 PDF의 자동 OCR fallback은 아직 구현 전입니다. 이런 파일은 페이지를 이미지로 준비해 이미지 OCR 흐름을 사용하는 편이 안전합니다.
+### PDF 유형에 따른 입력 방법
+
+| PDF 유형 | 확인 방법 | 권장 입력 |
+|---|---|---|
+| 일반 PDF | 글자를 마우스로 선택·복사할 수 있음 | PDF 파일 그대로 사용 |
+| 스캔 PDF | 페이지가 통째로 이미지이고 글자를 선택할 수 없음 | 모든 페이지를 번호가 붙은 이미지로 변환한 뒤 이미지 폴더로 사용 |
+| Hybrid PDF | 선택 가능한 페이지와 스캔 페이지가 섞여 있음 | 전체 페이지를 번호가 붙은 이미지로 변환한 뒤 이미지 폴더로 사용 |
+
+스캔 PDF와 Hybrid PDF도 번역할 수 있습니다. 다만 `--input-type pdf`가 페이지별로 OCR 방식과 텍스트 추출 방식을 자동 전환하는 구조는 아니므로, 이런 파일은 다음처럼 페이지 전체를 이미지 폴더로 준비합니다.
+
+```text
+rulebook_pages/
+├── page-001.png
+├── page-002.png
+├── page-003.png
+└── ...
+```
+
+```bash
+glk run \
+  --project primal \
+  --input-type images \
+  --folder rulebook_pages/
+```
+
+파일명에 페이지 번호를 일정하게 넣으면 원래 페이지 순서대로 처리하기 쉽습니다.
+
+표, 아이콘 설명, 자유롭게 배치된 구성 요소처럼 읽는 순서가 하나로 정해지지 않은 페이지는 자동 결과를 만든 뒤 사람이 원본과 비교해 `review/source.txt`에서 순서와 문장을 조정합니다. 이는 별도 오류 처리 단계가 아니라 기본 원문 검수 과정에 포함됩니다.
 
 ### 이미지 폴더 OCR
 
@@ -520,9 +549,12 @@ glk translation review --project primal
 - 오류·경고·수정된 block 필터
 - 번역 본문 수정과 안전 저장
 - 로컬 QA 실행
+- QA에서 ERROR인 문장만 Gemini로 재번역
 - QA 오류가 없는 번역 최종 승인
 
-검수 서버는 `127.0.0.1`에만 열립니다. 브라우저 검수 중에는 Gemini를 호출하거나 원문과 번역을 외부로 전송하지 않습니다. 종료하려면 서버를 실행한 터미널에서 `Ctrl+C`를 누릅니다.
+PASS, WARNING, ERROR 상태와 관계없이 모든 번역 칸을 수정할 수 있습니다. PASS는 숫자·token·용어 같은 자동 검사 통과를 뜻할 뿐, 문장 품질에 대한 승인이나 편집 잠금이 아닙니다.
+
+검수 서버는 `127.0.0.1`에만 열립니다. 저장·QA·최종 승인은 로컬에서 처리합니다. `오류만 재번역`을 누를 때만 ERROR 블록의 원문과 번역 지침을 Gemini에 전송합니다. 종료하려면 서버를 실행한 터미널에서 `Ctrl+C`를 누릅니다.
 
 브라우저를 자동으로 열지 않으려면:
 
@@ -548,9 +580,15 @@ TXT를 직접 수정한 경우 로컬 QA와 최종 승인을 실행합니다.
 
 ```bash
 glk translation qa --project primal
+
+# 선택 사항: ERROR가 있는 block만 재번역하고 QA를 다시 실행
+glk retry --failed --project primal
+
 glk translation finalize --project primal --dry-run
 glk translation finalize --project primal
 ```
+
+선택 재번역은 정상 블록을 그대로 두고 ERROR가 연결된 block만 한 개씩 다시 번역합니다. `draft/translation.txt`는 비교 기준으로 유지하며, 교체 전·후 번역은 `revisions/translation_retry_*.json`에 기록됩니다. 새 결과도 자동 승인되지 않으므로 HTML이나 `review/translation.txt`에서 사람이 다시 확인해야 합니다.
 
 최종 승인을 차단하는 대표 오류:
 
@@ -615,6 +653,8 @@ workspaces/<project_id>/
 │   ├── source_qa.md
 │   ├── translation_qa.json
 │   └── translation_qa.md
+├── revisions/
+│   └── translation_retry_*.json
 ├── state/
 └── translation_prompt.txt
 ```
@@ -677,6 +717,7 @@ glk status --project primal
 | `glk translate` | Gemini 초벌 번역 |
 | `glk translation review` | 로컬 HTML 번역 검수 화면 |
 | `glk translation qa` | 번역 로컬 QA |
+| `glk retry --failed` | 번역 QA의 ERROR block만 Gemini 재번역 |
 | `glk translation finalize` | 최종 번역 승인 |
 | `glk status` | 프로젝트 전체 상태 확인 |
 
@@ -752,23 +793,20 @@ Gemini를 사용하는 단계:
 - PDF 페이지의 fragment 읽기 순서와 block 묶음 판정
 - 이미지 한 장씩 OCR
 - 승인 원문 기반 초벌 번역
+- 사용자가 명시적으로 실행한 QA ERROR block 선택 재번역
 
 Gemini를 사용하지 않는 단계:
 
 - 원문 QA
 - 용어 후보 생성과 termbase import 검증
 - 번역 QA
-- localhost HTML 검수
+- localhost HTML 검수의 조회·편집·저장·QA·최종 승인
 - 파일 hash, marker, 숫자와 token 검증
 
-검수 브라우저는 로컬 컴퓨터의 `127.0.0.1`에서만 동작합니다. 외부 CDN, 외부 script 또는 별도 웹 API를 사용하지 않습니다.
+검수 브라우저와 UI 자원은 로컬 컴퓨터의 `127.0.0.1`에서만 동작하며 외부 CDN이나 외부 script를 불러오지 않습니다. 단, 사용자가 선택 재번역을 실행하면 로컬 서버가 대상 ERROR block만 Gemini API로 전송합니다.
 
 ## 현재 제한사항
 
-- 텍스트 레이어가 없는 스캔 PDF 자동 OCR fallback
-- 텍스트 PDF와 스캔 페이지가 섞인 hybrid PDF 자동 판정
-- 표와 자유 배치 컴포넌트의 완전 자동 복원
-- QA 실패 segment만 선택적으로 재번역
 - 설치형 실행 파일과 데스크톱 GUI
 
 향후 기능이 추가되면 이 제한사항과 전체 흐름도를 함께 갱신합니다.
@@ -780,5 +818,6 @@ Gemini를 사용하지 않는 단계:
 | [전체 작업 흐름](docs/WORKFLOW.md) | 파일 형식, 단계별 세부 규칙과 재실행 정책 |
 | [용어집 검토 사양](docs/GLOSSARY.md) | TSV 컬럼, status, 수동 용어와 import 검증 |
 | [아키텍처](docs/ARCHITECTURE.md) | 코드 계층, 데이터 모델, 캐시와 승인 구조 |
+| [릴리즈 노트](docs/RELEASE_NOTES.md) | v1.0.0 주요 기능, 검증 결과와 알려진 제한사항 |
 
 신규 사용자는 `source/`의 README, 코드와 문서만 사용하면 됩니다.

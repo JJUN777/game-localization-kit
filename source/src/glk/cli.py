@@ -25,6 +25,7 @@ from glk.application.source_review_service import (
 )
 from glk.application.source_qa_service import SourceQaError, run_project_source_qa
 from glk.application.translation_service import TranslationError, translate_project
+from glk.application.translation_retry_service import retry_failed_translations
 from glk.application.translation_review_service import (
     TranslationReviewError,
     finalize_project_translation_review,
@@ -37,7 +38,6 @@ from glk.infrastructure.translation_review_server import serve_translation_revie
 
 
 EXIT_ERROR = 1
-EXIT_NOT_IMPLEMENTED = 3
 EXIT_PARTIAL = 4
 
 
@@ -843,27 +843,43 @@ def _run_translation_review_web(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_planned_command(args: argparse.Namespace) -> int:
-    command = args.command
-    message = (
-        f"The 'glk {command}' command interface is ready, but its application "
-        "service has not been implemented yet."
-    )
-    if getattr(args, "json", False):
-        print(
-            json.dumps(
-                {
-                    "ok": False,
-                    "command": command,
-                    "code": "NOT_IMPLEMENTED",
-                    "message": message,
-                },
-                ensure_ascii=False,
-            )
+def _run_retry(args: argparse.Namespace) -> int:
+    try:
+        result = retry_failed_translations(
+            project=args.project,
+            workspace_root=args.workspace_root,
+            model_name=args.model,
+            dry_run=args.dry_run,
+            progress=lambda message: print(message, file=sys.stderr),
         )
+    except (
+        ProjectError,
+        TranslationError,
+        TranslationReviewError,
+        GeminiConfigurationError,
+        OSError,
+        RuntimeError,
+        ValueError,
+    ) as error:
+        return _print_error(args, "TRANSLATION_RETRY_FAILED", str(error))
+
+    if args.json:
+        print(json.dumps(result.to_dict(), ensure_ascii=False))
+    elif result.dry_run:
+        print(
+            f"Would retry {result.requested_blocks} QA-error blocks "
+            f"with {result.model}"
+        )
+    elif result.requested_blocks == 0:
+        print("No QA-error translation blocks need retranslation.")
     else:
-        print(message, file=sys.stderr)
-    return EXIT_NOT_IMPLEMENTED
+        print(
+            f"Retranslated {result.retried_blocks} QA-error blocks; "
+            f"{result.remaining_error_count} errors remain"
+        )
+        print(f"Review: {result.review_file}")
+        print(f"Revision: {result.revision_file}")
+    return 0 if result.ok else EXIT_ERROR
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1159,10 +1175,28 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--json", action="store_true", help="Print machine-readable output")
     status_parser.set_defaults(handler=_run_status)
 
-    retry_parser = subparsers.add_parser("retry", help="Retry failed pipeline items")
-    retry_parser.add_argument("--failed", action="store_true", help="Retry failed items only")
-    _add_execution_options(retry_parser)
-    retry_parser.set_defaults(handler=_run_planned_command)
+    retry_parser = subparsers.add_parser(
+        "retry", help="Retranslate only translation blocks that failed QA"
+    )
+    retry_parser.add_argument(
+        "--failed",
+        action="store_true",
+        required=True,
+        help="Retry QA-error translation blocks only",
+    )
+    retry_parser.add_argument(
+        "--project", required=True, help="Project ID or workspace path"
+    )
+    retry_parser.add_argument(
+        "--workspace-root", default="workspaces", help="Parent directory for workspaces"
+    )
+    retry_parser.add_argument("--model", help="Gemini model override")
+    retry_parser.add_argument(
+        "--dry-run", action="store_true", help="List retry targets without calling Gemini"
+    )
+    retry_parser.add_argument("--verbose", action="store_true", help="Enable detailed logging")
+    retry_parser.add_argument("--json", action="store_true", help="Print machine-readable output")
+    retry_parser.set_defaults(handler=_run_retry)
 
     return parser
 

@@ -13,12 +13,13 @@ from unittest.mock import patch
 import pymupdf
 from PIL import Image
 
-from glk.cli import EXIT_NOT_IMPLEMENTED, main
+from glk.cli import main
 from glk.application.extraction_service import ExtractionResult, PageFailure
 from glk.application.glossary_service import GlossaryBuildResult, GlossaryImportResult
 from glk.application.segmentation_service import SegmentationResult
 from glk.application.source_qa_service import SourceQaResult
 from glk.application.translation_service import TranslationRunResult
+from glk.application.translation_retry_service import TranslationRetryResult
 from glk.application.translation_review_service import (
     TranslationFinalizeResult,
     TranslationQaResult,
@@ -41,15 +42,33 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertRegex(output.getvalue(), r"^glk \d+\.\d+\.\d+\n$")
 
-    def test_planned_command_fails_explicitly_as_json(self) -> None:
+    def test_retry_failed_command_reports_result_as_json(self) -> None:
+        result = TranslationRetryResult(
+            project_path="/tmp/workspaces/game",
+            model="test-model",
+            requested_blocks=2,
+            retried_blocks=2,
+            block_ids=("block-1", "block-2"),
+            previous_error_count=3,
+            remaining_error_count=0,
+            warning_count=1,
+            review_file="/tmp/workspaces/game/review/translation.txt",
+            revision_file="/tmp/workspaces/game/revisions/retry.json",
+        )
         output = io.StringIO()
-        with redirect_stdout(output), redirect_stderr(io.StringIO()):
-            exit_code = main(["retry", "--failed", "--json"])
-        self.assertEqual(exit_code, EXIT_NOT_IMPLEMENTED)
+        with (
+            patch("glk.cli.retry_failed_translations", return_value=result) as retry,
+            redirect_stdout(output),
+            redirect_stderr(io.StringIO()),
+        ):
+            exit_code = main(
+                ["retry", "--failed", "--project", "game", "--json"]
+            )
+        self.assertEqual(exit_code, 0)
         payload = json.loads(output.getvalue())
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["command"], "retry")
-        self.assertEqual(payload["code"], "NOT_IMPLEMENTED")
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["retried_blocks"], 2)
+        self.assertEqual(retry.call_args.kwargs["project"], "game")
 
     def test_ocr_dry_run_reports_selected_images_as_json(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -5,10 +5,12 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from glk.application.translation_service import translate_project
+from glk.application.translation_retry_service import TranslationRetryResult
 from glk.infrastructure.translation_review_server import (
     TranslationReviewHttpServer,
     create_translation_review_server,
@@ -97,6 +99,7 @@ class TranslationReviewServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIsInstance(html, str)
         self.assertIn("원문과 번역을 함께 검수하세요", html)
+        self.assertIn("오류만 재번역", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
         self.assertEqual(headers["X-Frame-Options"], "DENY")
         self.assertEqual(self.server.server_address[0], "127.0.0.1")
@@ -209,6 +212,52 @@ class TranslationReviewServerTests(unittest.TestCase):
         self.assertEqual(
             (self.project_path / "review/translation.txt").read_bytes(),
             before,
+        )
+
+    def test_retry_api_saves_edits_then_calls_selective_retry(self) -> None:
+        _, document, _ = self._request("/api/review")
+        translations = {
+            block["id"]: block["translation"]
+            for block in document["blocks"]
+        }
+        translations[document["blocks"][1]["id"]] = (
+            "각 사냥꾼은 스태미나 3을 얻습니다."
+        )
+        result = TranslationRetryResult(
+            project_path=str(self.project_path),
+            model="test-model",
+            requested_blocks=1,
+            retried_blocks=1,
+            block_ids=(document["blocks"][1]["id"],),
+            previous_error_count=1,
+            remaining_error_count=0,
+            warning_count=0,
+            review_file=str(self.project_path / "review/translation.txt"),
+            revision_file=str(self.project_path / "revisions/retry.json"),
+        )
+        with patch(
+            "glk.infrastructure.translation_review_server.retry_failed_translations",
+            return_value=result,
+        ) as retry:
+            status, payload, _ = self._request(
+                "/api/retry",
+                method="POST",
+                payload={
+                    "review_sha256": document["review_sha256"],
+                    "translations": translations,
+                },
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["result"]["retried_blocks"], 1)
+        self.assertEqual(
+            retry.call_args.kwargs["expected_review_sha256"],
+            payload["document"]["review_sha256"],
+        )
+        self.assertIn(
+            "스태미나 3",
+            (self.project_path / "review/translation.txt").read_text(
+                encoding="utf-8"
+            ),
         )
 
 

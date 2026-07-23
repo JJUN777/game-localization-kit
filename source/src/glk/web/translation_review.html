@@ -315,6 +315,7 @@
     <div class="header-actions">
       <button class="button button-secondary" id="save-button">저장</button>
       <button class="button button-primary" id="qa-button">저장 후 QA</button>
+      <button class="button button-secondary" id="retry-button">오류만 재번역</button>
       <button class="button button-success" id="finalize-button">최종 승인</button>
     </div>
   </header>
@@ -415,6 +416,7 @@
       $("#finalize-button").disabled = state.busy || state.dirty || doc.summary.errors > 0;
       $("#save-button").disabled = state.busy || !state.dirty;
       $("#qa-button").disabled = state.busy;
+      $("#retry-button").disabled = state.busy || doc.summary.errors === 0;
     }
 
     function blockDot(block) {
@@ -557,6 +559,14 @@
           const count = payload.result.error_count;
           toast(count ? `QA 오류 ${count}개를 확인하세요.` : "QA를 통과했습니다.", count > 0);
         }
+        if (action === "retry") {
+          const count = payload.result.retried_blocks;
+          const remaining = payload.result.remaining_error_count;
+          toast(
+            `${count}개 오류 문장을 재번역했습니다. 남은 오류 ${remaining}개.`,
+            remaining > 0
+          );
+        }
         if (action === "finalize") {
           toast(payload.result.finalized ? "최종 번역을 승인했습니다." : "QA 오류를 먼저 수정하세요.", !payload.result.finalized);
         }
@@ -570,6 +580,7 @@
 
     $("#save-button").addEventListener("click", () => runAction("save"));
     $("#qa-button").addEventListener("click", () => runAction("qa"));
+    $("#retry-button").addEventListener("click", () => runAction("retry"));
     $("#finalize-button").addEventListener("click", () => runAction("finalize"));
     $("#search").addEventListener("input", (event) => {
       state.search = event.target.value;
