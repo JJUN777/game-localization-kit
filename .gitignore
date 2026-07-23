@@ -20,12 +20,9 @@ dist/
 00_config.json
 legacy/00_config.json
 
-# Historical inputs/outputs are preserved locally, not in Git
-local-data/*
-!local-data/README.md
+# Historical inputs/outputs are preserved under the legacy bundle, not in Git
+legacy/data/
 
-97_layout_poc/
-97_image_ocr_poc/
 workspaces/
 
 legacy/samples/image_ocr/**/*.png

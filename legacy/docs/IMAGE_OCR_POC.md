@@ -1,6 +1,6 @@
 # 이미지 폴더 OCR 설계 및 검증 결과
 
-> 상태: 2026-07-23 시점의 구현·검증 기록입니다. 현재 사용법은 [전체 작업 흐름](../guides/workflow.md)을 기준으로 합니다.
+> 상태: 2026-07-23 시점의 구현·검증 기록입니다. 현재 사용법은 [전체 작업 흐름](../../source/docs/guides/workflow.md)을 기준으로 합니다.
 
 ## 목적
 
@@ -26,7 +26,7 @@ card_images/
 
 아이콘 참조 이미지를 Gemini 요청에 포함하지 않습니다. 참조 아이콘이 많거나 OCR 대상이 100장 이상일 때 같은 이미지를 매번 다시 전송하는 비용을 피하기 위해, 아이콘의 핵심 실루엣과 정확한 출력 토큰을 `ocr_prompt.txt`에 글로 설명합니다.
 
-현재 샘플 프롬프트는 [legacy/samples/image_ocr/ocr_prompt.txt](../../legacy/samples/image_ocr/ocr_prompt.txt)에 있으며 다음 계열을 포함합니다.
+현재 샘플 프롬프트는 [legacy/samples/image_ocr/ocr_prompt.txt](../samples/image_ocr/ocr_prompt.txt)에 있으며 다음 계열을 포함합니다.
 
 - 능력치·규칙: `DEF`, `DMG`, `DMGR`, `HP`, `PWR`, `STR`, `SWT`, `WILL`
 - 흑백 기호: `ARCH`, `CLOVER`, `Non`, `SPADE`

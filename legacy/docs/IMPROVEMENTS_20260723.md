@@ -1,12 +1,12 @@
 # 게임 로컬라이제이션 키트 개선 로드맵
 
-> 상태: 2026-07-23까지 누적된 전체 체크리스트 기록입니다. 현재 우선순위는 [로드맵](../project/roadmap.md)을 기준으로 합니다.
+> 상태: 2026-07-23까지 누적된 전체 체크리스트 기록입니다. 현재 우선순위는 [로드맵](../../source/docs/project/roadmap.md)을 기준으로 합니다.
 
 이 문서는 현재 코드베이스에서 확인된 개선 작업을 우선순위와 구현 단계별로 정리한 체크리스트입니다.
 
 통합 CLI와 초벌 번역 개선 흐름의 당시 설계는 [번역 자동화 파이프라인 설계 초안](TRANSLATION_AUTOMATION_DESIGN_DRAFT.md)을 참고합니다.
-현재 구현된 전체 실행 순서와 용어 기준은 [전체 작업 흐름](../guides/workflow.md)을 사용합니다.
-용어 후보의 편집 파일과 수동 추가·import 검증 규칙은 [용어집 검토 사양](../guides/glossary.md)을 사용합니다.
+현재 구현된 전체 실행 순서와 용어 기준은 [전체 작업 흐름](../../source/docs/guides/workflow.md)을 사용합니다.
+용어 후보의 편집 파일과 수동 추가·import 검증 규칙은 [용어집 검토 사양](../../source/docs/guides/glossary.md)을 사용합니다.
 PDF 다단·줄바꿈 복원 실험은 [PDF 레이아웃 복원 PoC](LAYOUT_RECONSTRUCTION_POC.md)를 참고합니다.
 
 ## 다음 작업

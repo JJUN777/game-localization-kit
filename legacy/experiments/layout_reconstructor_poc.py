@@ -612,7 +612,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--file", required=True, help="Input PDF path")
     parser.add_argument("--pages", help="1-based pages, e.g. 1,3-4 (default: all)")
-    parser.add_argument("--output-dir", default="97_layout_poc", help="PoC output directory")
+    parser.add_argument(
+        "--output-dir",
+        default=str(PROJECT_ROOT / "legacy" / "data" / "97_layout_poc"),
+        help="PoC output directory",
+    )
     parser.add_argument("--model", help="Override the configured Gemini model")
     parser.add_argument("--scale", type=float, default=1.5, help="Page rendering scale")
     parser.add_argument("--extract-only", action="store_true", help="Skip Gemini and write fragments only")

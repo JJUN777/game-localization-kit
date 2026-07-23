@@ -209,4 +209,4 @@ final/translation.txt
 - 의미·문체 QA: 결정적 로컬 QA와 분리된 선택적 LLM 보조 단계
 - GUI: workspace 파일을 직접 조작하지 않고 application service 호출
 
-구현 우선순위와 완료 조건은 [로드맵](../project/roadmap.md)에만 기록합니다. 초기 전체 구상은 [보관된 설계 초안](../archive/TRANSLATION_AUTOMATION_DESIGN_DRAFT.md)에서 확인할 수 있습니다.
+구현 우선순위와 완료 조건은 [로드맵](../project/roadmap.md)에만 기록합니다.

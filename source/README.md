@@ -14,11 +14,11 @@ PDF 룰북과 이미지 폴더에서 원문을 추출하고, 사람이 원문을
 | [용어집 검토 사양](docs/guides/glossary.md) | TSV 컬럼, 상태, 수동 용어, import 검증 규칙 | 용어 데이터 계약의 단일 기준 |
 | [로드맵](docs/project/roadmap.md) | 미구현 작업과 우선순위 | 앞으로 할 작업의 단일 기준 |
 | [인수인계](docs/project/handoff.md) | 현재 브랜치, 검증 상태와 바로 다음 작업 | 다른 컴퓨터·세션에서 재개할 때 사용 |
-| [기록 보관소](docs/archive/README.md) | 초기 설계, PoC 결과와 과거 상세 체크리스트 | 참고용, 현재 동작 기준 아님 |
+| [레거시 문서](../legacy/docs/README.md) | 초기 설계, PoC 결과와 과거 상세 체크리스트 | 참고용, 현재 동작 기준 아님 |
 
 ## 설치
 
-Python 3.10 이상이 필요합니다. 모든 명령은 저장소 루트에서 실행합니다.
+Python 3.10 이상이 필요합니다. 모든 명령은 이 `source/` 디렉터리에서 실행합니다.
 
 macOS/Linux:
 
@@ -45,7 +45,7 @@ glk version
 
 ## API 키
 
-저장소 루트에 추적되지 않는 `.env`를 만들고 Gemini API 키를 설정합니다. 셸이나 CI의 `GEMINI_API_KEY`가 `.env`보다 우선합니다.
+`source/`에 추적되지 않는 `.env`를 만들고 Gemini API 키를 설정합니다. 셸이나 CI의 `GEMINI_API_KEY`가 `.env`보다 우선합니다.
 
 ```dotenv
 GEMINI_API_KEY=your_api_key_here
@@ -104,12 +104,15 @@ glk status --project primal
 기본 workspace는 `workspaces/<project_id>/`에 생성되고 Git에서 제외됩니다. 다른 루트를 사용하려면 관련 명령에 `--workspace-root PATH`를 동일하게 지정합니다.
 
 ```text
-src/glk/        현재 사용하는 통합 CLI 코드
-tests/          현재 CLI 회귀 테스트
-docs/           가이드·아키텍처·로드맵·과거 기록
-legacy/         통합 CLI 이전 코드와 PoC 자료
-workspaces/     신규 프로젝트 작업 데이터 (Git 제외)
-local-data/     예전 대용량 입력·출력 자료 (Git 제외)
+game-localization-kit/
+├── source/         현재 사용하는 프로젝트
+│   ├── README.md
+│   ├── pyproject.toml
+│   ├── src/glk/    통합 CLI 코드
+│   ├── tests/      회귀 테스트
+│   ├── docs/       현재 가이드·아키텍처·로드맵
+│   └── workspaces/ 신규 프로젝트 작업 데이터 (Git 제외)
+└── legacy/         이전 코드·PoC·문서·데이터 묶음
 ```
 
-신규 작업에서는 `src/glk/`와 `glk` 명령만 사용합니다. 예전 단일 스크립트의 범위와 주의사항은 [레거시 안내](legacy/README.md)를 확인합니다.
+신규 사용자는 `source/`만 확인하면 됩니다. 예전 단일 스크립트와 자료의 범위는 [레거시 안내](../legacy/README.md)를 확인합니다.

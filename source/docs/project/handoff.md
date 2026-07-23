@@ -7,28 +7,25 @@
 - 갱신일: 2026-07-23
 - 브랜치: `improvement/local-source-20260723`
 - 원격 추적: `origin/improvement/local-source-20260723`
-- 분기 기준: `fca2fb8` (`md 업데이트`)
+- 현재 정리 기준 커밋: `8e6e218` (`v1.0 버전 업데이트`)
 - 목적: 현재 로컬 소스를 기준으로 작업하고 이전 `improvement/pipeline-hardening` 후속 변경을 자동 병합하지 않음
-- 개인용 예전 설정은 Git에서 제외된 `legacy/00_config.json`에 보존
 - API 키는 Git에 넣지 않고 각 컴퓨터의 `.env` 또는 환경변수로 설정
 
-이 문서 갱신 시점의 glossary build/import, 초벌 번역, 번역 검수·QA 코드와 문서 재구성 변경은 아직 커밋·push하지 않았습니다. 이동 전에 관련 변경만 검토해 커밋하고 현재 브랜치만 push합니다. `git push --all`은 사용하지 않습니다.
+최상위 폴더 재구성과 관련 경로 변경은 이 문서 갱신 시점에 아직 커밋·push하지 않았습니다. 이동 전에 관련 변경을 검토해 커밋하고 현재 브랜치만 push합니다. `git push --all`은 사용하지 않습니다.
 
 ## 저장소 정리 상태
 
 ```text
-src/glk/        현재 사용하는 통합 CLI 코드
-tests/          현재 CLI 회귀 테스트
-docs/guides/    사용자 작업 순서와 편집 파일 사양
-docs/reference/ 개발 아키텍처
-docs/project/   로드맵과 현재 인수인계
-docs/archive/   과거 설계·PoC·상세 작업 기록
-legacy/         통합 CLI 이전 스크립트·PoC·샘플
-local-data/     예전 대용량 원본·결과 (Git 제외)
-workspaces/     신규 프로젝트 데이터 (Git 제외)
+source/
+├── README.md
+├── pyproject.toml
+├── src/glk/      현재 사용하는 통합 CLI 코드
+├── tests/        현재 CLI 회귀 테스트
+├── docs/         현재 가이드·아키텍처·로드맵
+└── workspaces/   신규 프로젝트 데이터 (Git 제외)
 ```
 
-루트의 예전 단일 스크립트와 PoC는 `legacy/`로 옮겼습니다. 기존 `90_*`~`97_*`, `9999. final` 자료는 삭제하지 않고 `local-data/legacy/`에 보존했으며 Git 추적에서는 제외합니다. `.idea`, `.DS_Store`, 예전 `__pycache__`는 저장소에서 제거했습니다.
+활성 README·코드·테스트·문서는 모두 `source/`에 있습니다.
 
 ## 현재 구현 상태
 
@@ -90,7 +87,7 @@ PDF/이미지 원문 획득
 - 외부 Origin·무인증 요청·알 수 없는 block·동시 편집 충돌 차단
 - Orca 내장 브라우저에서 수정 표시·필터·QA 통과·최종 승인까지 실제 조작 확인
 
-실제 PoC 원본, `local-data/`와 workspace는 Git에서 제외되므로 다른 컴퓨터에 자동 전달되지 않습니다.
+workspace와 로컬 원본은 Git에서 제외되므로 다른 컴퓨터에 자동 전달되지 않습니다.
 
 ## 바로 다음 작업
 
@@ -109,6 +106,7 @@ PDF/이미지 원문 획득
 ```bash
 git fetch origin
 git switch improvement/local-source-20260723
+cd source
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -125,7 +123,7 @@ py -m venv .venv
 pip install -e .
 ```
 
-각 컴퓨터의 저장소 루트에 추적되지 않는 `.env`를 별도로 만듭니다.
+각 컴퓨터의 `source/`에 추적되지 않는 `.env`를 별도로 만듭니다.
 
 ```dotenv
 GEMINI_API_KEY=your_api_key_here

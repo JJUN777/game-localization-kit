@@ -21,7 +21,7 @@ LOWER_CONNECTORS = {"of", "the", "and", "for", "to", "in", "on", "from", "with",
 SCRIPT_ROOT = os.path.dirname(os.path.abspath(__file__))
 LEGACY_ROOT = os.path.dirname(SCRIPT_ROOT)
 REPOSITORY_ROOT = os.path.dirname(LEGACY_ROOT)
-PROJECT_ROOT = os.path.join(REPOSITORY_ROOT, "local-data", "legacy")
+PROJECT_ROOT = os.path.join(LEGACY_ROOT, "data")
 
 
 def load_config(config_filename="00_config.json"):

@@ -40,7 +40,7 @@
 
 ## 완료된 기반
 
-현재 완료된 큰 범위만 기록합니다. 상세 과거 체크리스트는 [2026-07-23 보관본](../archive/IMPROVEMENTS_20260723.md)을 참고합니다.
+현재 완료된 큰 범위만 기록합니다.
 
 - [x] 크로스 플랫폼 `glk` CLI와 project workspace
 - [x] PDF fragment 추출과 Gemini 읽기 순서 복원
@@ -59,7 +59,6 @@
 - [x] localhost HTML 원문·번역 대조, 검색과 오류·경고·수정 필터
 - [x] block ID 기반 안전 저장, 로컬 QA와 최종 승인 UI
 - [x] session token·Origin·hash 충돌 검사를 적용한 로컬 전용 서버
-- [x] 활성 코드·레거시 코드·로컬 대용량 데이터와 문서 역할별 분리
 
 ## 범위 관리 규칙
 

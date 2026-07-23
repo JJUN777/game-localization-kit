@@ -1,9 +1,9 @@
 # PDF 레이아웃 복원 PoC
 
-> 상태: PDF 다단 읽기 순서와 줄바꿈 복원 방식을 검증한 PoC 기록입니다. 현재 사용법은 [전체 작업 흐름](../guides/workflow.md)을 기준으로 합니다.
+> 상태: PDF 다단 읽기 순서와 줄바꿈 복원 방식을 검증한 PoC 기록입니다. 현재 사용법은 [전체 작업 흐름](../../source/docs/guides/workflow.md)을 기준으로 합니다.
 
 > 상태: PoC 완료, 통합 CLI extraction service로 이전됨  
-> 입력: `local-data/legacy/9999. final/PoC.pdf` 4페이지  
+> 입력: `legacy/data/9999. final/PoC.pdf` 4페이지
 > 구현: `legacy/experiments/layout_reconstructor_poc.py`
 
 ## 목적
@@ -21,7 +21,7 @@ PDF에서 원문을 가져올 때 발생하는 두 문제를 검증합니다.
 
 ```bash
 python legacy/experiments/layout_reconstructor_poc.py \
-  --file "local-data/legacy/9999. final/PoC.pdf" \
+  --file "legacy/data/9999. final/PoC.pdf" \
   --pages 1-4 \
   --local-only
 ```
@@ -32,7 +32,7 @@ python legacy/experiments/layout_reconstructor_poc.py \
 
 ```bash
 python legacy/experiments/layout_reconstructor_poc.py \
-  --file "local-data/legacy/9999. final/PoC.pdf" \
+  --file "legacy/data/9999. final/PoC.pdf" \
   --pages 1-4
 ```
 
@@ -68,7 +68,7 @@ python legacy/experiments/layout_reconstructor_poc.py \
 
 ## 생성 파일
 
-기본 출력 디렉터리는 git에서 제외된 `97_layout_poc/`입니다.
+기본 출력 디렉터리는 Git에서 제외된 `legacy/data/97_layout_poc/`입니다.
 
 - `page_NNN.png`: 판정에 사용한 페이지 렌더링
 - `page_NNN_fragments.json`: PDF 원문 fragment와 좌표

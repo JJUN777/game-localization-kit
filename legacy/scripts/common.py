@@ -6,14 +6,14 @@ import logging
 import google.genai as genai
 from dotenv import load_dotenv
 
-# 레거시 데이터는 코드와 분리해 Git에서 제외된 local-data/legacy에 보존합니다.
+# 레거시 데이터는 Git에서 제외된 legacy/data에 보존합니다.
 SCRIPT_ROOT = os.path.dirname(os.path.abspath(__file__))
 LEGACY_ROOT = os.path.dirname(SCRIPT_ROOT)
 REPOSITORY_ROOT = os.path.dirname(LEGACY_ROOT)
-PROJECT_ROOT = os.path.join(REPOSITORY_ROOT, "local-data", "legacy")
+PROJECT_ROOT = os.path.join(LEGACY_ROOT, "data")
 
 # 로컬 .env를 읽되, 셸/CI에서 이미 설정한 환경변수를 덮어쓰지 않습니다.
-load_dotenv(os.path.join(REPOSITORY_ROOT, '.env'), override=False)
+load_dotenv(os.path.join(REPOSITORY_ROOT, 'source', '.env'), override=False)
 
 # 기본 이미지 확장자 (config에 없을 때 fallback)
 DEFAULT_IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')

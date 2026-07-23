@@ -21,7 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LEGACY_SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(LEGACY_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(LEGACY_SCRIPTS))
-SRC_ROOT = PROJECT_ROOT / "src"
+SRC_ROOT = PROJECT_ROOT / "source" / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
@@ -330,7 +330,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="legacy/samples/image_ocr",
         help="Input image folder",
     )
-    parser.add_argument("--output-dir", default="97_image_ocr_poc", help="PoC output directory")
+    parser.add_argument(
+        "--output-dir",
+        default=str(PROJECT_ROOT / "legacy" / "data" / "97_image_ocr_poc"),
+        help="PoC output directory",
+    )
     parser.add_argument("--prompt", help="Project-wide additional OCR instructions")
     parser.add_argument("--model", help="Gemini model override")
     parser.add_argument("--limit", type=int, help="Process only the first N images")
