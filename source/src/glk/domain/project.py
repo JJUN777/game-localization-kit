@@ -10,7 +10,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 
-PROJECT_SCHEMA_VERSION = 1
+PROJECT_SCHEMA_VERSION = 2
 _WINDOWS_RESERVED_NAMES = {
     "CON",
     "PRN",

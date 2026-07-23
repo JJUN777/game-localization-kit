@@ -7,6 +7,8 @@ Windows와 macOS에서 같은 `glk` 명령을 사용합니다.
 쉽게 말하면 이 프로그램은 다음 일을 도와줍니다.
 
 ```text
+Gemini API 키와 기본 모델을 설정함
+→ 프로젝트를 만들고 PDF 또는 이미지를 넣음
 PDF 또는 이미지에서 글자를 읽음
 → 잘못 읽었을 가능성이 있는 부분을 알려줌
 → 사람이 원본을 보면서 글자를 바로잡음
@@ -22,20 +24,21 @@ AI가 읽은 원문과 초벌 번역을 그대로 최종 결과로 사용하지 
 
 ```mermaid
 flowchart TD
-    START([1. 설치하고 프로젝트 만들기])
-    START --> SELECT{2. 원본 선택}
+    START([1. 설치·API 키·기본 모델 설정])
+    START --> PROJECT[2. 프로젝트 만들기]
+    PROJECT --> SELECT{3. 원본 선택}
     SELECT -->|룰북 PDF| PDF[프로그램이 PDF의 글과<br/>읽는 순서를 정리]
     SELECT -->|이미지 폴더| IMAGE[프로그램이 이미지마다<br/>글자를 인식]
-    PDF --> SOURCE_REVIEW[3. 사람이 원본과 비교하며<br/>잘못 읽힌 글자를 수정]
+    PDF --> SOURCE_REVIEW[4. 사람이 원본과 비교하며<br/>잘못 읽힌 글자를 수정]
     IMAGE --> SOURCE_REVIEW
-    SOURCE_REVIEW --> WORDS[4. 자주 쓰는 게임 용어와<br/>번역어를 결정]
-    WORDS --> DRAFT[5. AI가 초벌 번역 생성]
-    DRAFT --> TRANS_REVIEW[6. 사람이 브라우저에서<br/>원문과 번역을 비교·수정]
+    SOURCE_REVIEW --> WORDS[5. 자주 쓰는 게임 용어와<br/>번역어를 결정]
+    WORDS --> DRAFT[6. AI가 초벌 번역 생성]
+    DRAFT --> TRANS_REVIEW[7. 사람이 브라우저에서<br/>원문과 번역을 비교·수정]
     TRANS_REVIEW --> CHECK{숫자·아이콘·용어에<br/>문제가 없는가?}
     CHECK -->|문제 있음| RETRY{처리 방법 선택}
     RETRY -->|직접 수정| TRANS_REVIEW
     RETRY -->|오류 문장만 AI 재번역| TRANS_REVIEW
-    CHECK -->|문제 없음| RESULT([7. 최종 한국어 TXT 완성])
+    CHECK -->|문제 없음| RESULT([8. 최종 한국어 TXT 완성])
 ```
 
 ### 프로그램과 사용자가 나누어 하는 일
@@ -70,26 +73,26 @@ flowchart TD
 
 ## 설치
 
-모든 활성 코드와 문서는 `source/`에 있습니다. 아래 명령도 `source/`에서 실행합니다.
+모든 활성 코드와 문서는 `source/`에 있습니다. 가상환경과 workspace 위치가 흔들리지 않도록 저장소 최상위에서 설치와 `glk` 작업 명령을 실행합니다.
 
 ### macOS/Linux
 
 ```bash
-cd game-localization-kit/source
+cd game-localization-kit
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -e .
+pip install -e source
 ```
 
 ### Windows PowerShell
 
 ```powershell
-cd game-localization-kit\source
+cd game-localization-kit
 py -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -e .
+pip install -e source
 ```
 
 설치 확인:
@@ -108,7 +111,7 @@ glk version
 macOS/Linux:
 
 ```bash
-cd game-localization-kit/source
+cd game-localization-kit
 source .venv/bin/activate
 glk --help
 ```
@@ -116,22 +119,23 @@ glk --help
 Windows PowerShell:
 
 ```powershell
-cd game-localization-kit\source
-.venv\Scripts\Activate.ps1
+cd game-localization-kit
+.\.venv\Scripts\Activate.ps1
 glk --help
 ```
 
-그래도 실행되지 않으면 가상환경을 활성화한 상태에서 `pip install -e .`를 다시 실행합니다.
+그래도 실행되지 않으면 저장소 최상위에서 가상환경을 활성화한 상태로 `pip install -e source`를 다시 실행합니다.
 
-## Gemini API 키 설정
+## 처음 설정할 Gemini API 키와 기본 모델
 
-`source/`에 `.env` 파일을 만들고 다음 한 줄을 입력합니다.
+설치 직후 `source/`에 `.env` 파일을 만들고 API 키와 기본 모델을 먼저 입력합니다.
 
 ```dotenv
 GEMINI_API_KEY=your_api_key_here
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
-셸이나 CI에 이미 설정한 `GEMINI_API_KEY`가 `.env`보다 우선합니다.
+`GEMINI_MODEL`을 생략하면 프로그램 기본값인 `gemini-2.5-flash`를 사용합니다. 셸이나 CI에 이미 설정한 `GEMINI_API_KEY`와 `GEMINI_MODEL`이 `.env`보다 우선합니다.
 
 API 키는 다음 위치에 넣지 않습니다.
 
@@ -143,13 +147,73 @@ API 키는 다음 위치에 넣지 않습니다.
 
 `.env`는 Git에서 제외됩니다. 키가 Git 이력이나 공개 저장소에 노출됐다면 파일에서 지우는 것만으로 충분하지 않으므로 해당 키를 폐기하고 새 키를 발급해야 합니다.
 
+### LLM을 사용하는 작업과 전송 범위
+
+GLK는 모든 단계에 Gemini를 사용하는 것이 아니라 시각적 판단, OCR과 번역이 필요한 단계에만 사용합니다.
+
+| 작업 | Gemini가 하는 일 | 전송되는 주요 데이터 |
+|---|---|---|
+| PDF 원문 획득 | fragment 읽기 순서와 block 묶음 판정 | 현재 PDF 페이지 이미지, fragment ID·텍스트·좌표 |
+| 이미지 OCR | 이미지 한 장의 원문과 아이콘 token 인식 | OCR 대상 이미지 한 장, 공통·개별 OCR prompt |
+| 초벌 번역 | 승인된 원문 block을 한국어로 번역 | 현재 source block, 관련 termbase 항목, 번역 prompt |
+| 오류 선택 재번역 | QA ERROR가 있는 block만 다시 번역 | 해당 ERROR block과 관련 용어·번역 지침 |
+
+Gemini를 사용하지 않고 로컬에서 처리하는 작업:
+
+- 원문 QA
+- 용어 후보 생성과 termbase import 검증
+- 번역 QA
+- 검수 화면의 조회·편집·저장·최종 승인
+- 파일 hash, marker, 숫자, token과 HTML 검증
+- 프로젝트 목록과 상태 확인
+
+프로젝트 workspace 전체를 한 번에 전송하지 않습니다. 이미지 OCR은 요청마다 대상 이미지 한 장만 보내고, 번역은 현재 처리할 block과 관련 용어만 보냅니다.
+
+검수 브라우저와 UI 자원은 로컬 컴퓨터의 `127.0.0.1`에서만 동작하며 외부 CDN이나 외부 script를 불러오지 않습니다. 단, 사용자가 `오류만 재번역`을 실행하면 로컬 서버가 대상 ERROR block만 Gemini API로 전송합니다.
+
+### 실행별 모델 변경
+
+기본 모델은 `gemini-2.5-flash`입니다. 특정 실행에서 다른 모델을 사용하려면 `--model`을 지정합니다.
+
+```bash
+# PDF 레이아웃 분석
+glk run --project primal --model gemini-2.5-flash
+
+# 이미지 OCR
+glk run \
+  --project cards \
+  --input-type images \
+  --model gemini-2.5-flash
+
+# 초벌 번역
+glk translate --project primal --model gemini-2.5-flash
+
+# QA ERROR block 선택 재번역
+glk retry \
+  --failed \
+  --project primal \
+  --model gemini-2.5-flash
+```
+
+모델 결정 우선순위:
+
+1. 현재 명령에 입력한 `--model`
+2. 환경변수 또는 `.env`의 `GEMINI_MODEL`
+3. 프로그램 기본값 `gemini-2.5-flash`
+
+PDF 분석, 이미지 OCR과 번역에 서로 다른 모델을 지정할 수 있습니다. 모델을 변경하면 이전 캐시가 현재 설정과 달라져 관련 단계를 다시 실행하거나 기존 결과가 `stale`로 표시될 수 있습니다.
+
+HTML 검수 화면의 `오류만 재번역`은 별도 모델을 입력받지 않고 해당 초벌 번역에 기록된 모델을 기본적으로 다시 사용합니다. 다른 모델로 재번역하려면 CLI에서 `glk retry --failed --project <project_id> --model <model_name>`을 실행합니다.
+
 ## 가장 빠른 실행 예시
 
 다음 예시는 `primal`이라는 PDF 프로젝트를 만들고 최종 번역까지 진행합니다.
 
 ```bash
 glk init "Primal Rulebook" --project-id primal
-glk run --project primal --input-type pdf --file rulebook.pdf
+
+# rulebook.pdf를 workspaces/primal/01_input/pdf/에 넣은 뒤
+glk run --project primal
 
 # 원문 검수 후
 glk review finalize --project primal --dry-run
@@ -159,7 +223,7 @@ glk review finalize --project primal
 glk glossary build --project primal
 glk glossary import \
   --project primal \
-  --file terminology/glossary_review.tsv
+  --file 03_terminology/glossary_review.tsv
 
 # 번역 생성 및 브라우저 검수
 glk translate --project primal --dry-run
@@ -170,7 +234,7 @@ glk translation review --project primal
 브라우저 검수 화면에서 QA 오류를 직접 고치거나 `오류만 재번역`을 누른 뒤, 결과를 다시 확인하고 최종 승인하면 다음 파일이 만들어집니다.
 
 ```text
-workspaces/primal/final/translation.txt
+workspaces/primal/05_output/translation.txt
 ```
 
 ## 1. 프로젝트 만들기
@@ -200,7 +264,15 @@ glk init "Primal Rulebook" \
 생성 위치:
 
 ```text
-source/workspaces/primal/
+workspaces/primal/
+```
+
+프로젝트를 만들면 원본을 넣을 두 폴더도 함께 생성됩니다.
+
+```text
+workspaces/primal/01_input/
+├── pdf/       # PDF 한 개
+└── images/    # OCR할 이미지와 선택적 prompt
 ```
 
 현재 상태 확인:
@@ -209,7 +281,73 @@ source/workspaces/primal/
 glk status --project primal
 ```
 
-## 2. 원문 가져오기
+생성된 전체 프로젝트 목록 확인:
+
+```bash
+glk projects
+```
+
+## 2. 번역 작업할 원본 넣기
+
+프로젝트 생성 후 번역할 원본을 해당 프로젝트의 `01_input/` 폴더에 넣습니다. `02_source/`부터 `05_output/`까지는 단계별 작업 결과이고, `.glk/`는 프로그램 내부 데이터이므로 원본을 직접 넣지 않습니다.
+
+### PDF를 번역하는 경우
+
+프로젝트 하나당 PDF 한 개만 처리합니다. 번역할 PDF 파일 한 개를 `01_input/pdf/`에 넣습니다.
+
+```text
+workspaces/primal/
+└── 01_input/
+    ├── pdf/
+    │   └── rulebook.pdf
+    └── images/
+```
+
+`01_input/pdf/`에는 PDF를 한 개만 넣어야 합니다. 여러 PDF를 넣어도 하나를 선택하거나 이어 붙여 처리하지 않으며, 어느 파일을 사용할지 임의로 결정하지 않고 실행을 중단합니다.
+
+본판 룰북, 확장 룰북처럼 PDF가 여러 개라면 프로젝트를 각각 만듭니다.
+
+```text
+workspaces/
+├── primal_base/
+│   └── 01_input/pdf/base-rulebook.pdf
+└── primal_expansion/
+    └── 01_input/pdf/expansion-rulebook.pdf
+```
+
+PDF를 중간에 다른 파일로 교체하면 추출 결과뿐 아니라 원문 검수, 용어집과 번역 결과까지 다시 확인해야 할 수 있습니다. 따라서 처음부터 PDF별 프로젝트로 분리하는 방식을 권장합니다.
+
+### 이미지를 번역하는 경우
+
+이미지를 `01_input/images/`에 넣습니다. 하위 폴더도 그대로 사용할 수 있습니다.
+
+```text
+workspaces/cards/
+└── 01_input/
+    ├── pdf/
+    └── images/
+        ├── ocr_prompt.txt
+        ├── characters/
+        │   ├── card-001.jpg
+        │   └── card-001.jpg.prompt.txt
+        └── items/
+            └── card-002.png
+```
+
+- `ocr_prompt.txt`: 모든 이미지에 적용할 OCR 지침
+- `이미지파일명.prompt.txt`: 특정 이미지에만 추가할 지침
+- PNG, JPG, JPEG와 WebP 이미지 지원
+- 하위 폴더까지 자동 탐색
+
+PDF 한 개 또는 이미지 폴더 중 한쪽에만 원본이 있으면 `glk run`이 입력 방식을 자동으로 감지합니다.
+
+```bash
+glk run --project primal
+```
+
+PDF와 이미지가 양쪽에 모두 있으면 대화형 실행에서 사용할 입력 방식을 선택합니다. 자동화된 실행에서는 `--input-type pdf` 또는 `--input-type images`를 지정합니다.
+
+## 3. 원문 가져오기
 
 원문 입력은 두 가지입니다.
 
@@ -222,15 +360,25 @@ glk status --project primal
 glk run --project primal
 ```
 
-CLI가 PDF와 이미지 폴더 중 하나를 선택하도록 요청하고, 이어서 파일 또는 폴더 경로를 입력받습니다.
+프로젝트의 `01_input/pdf/` 또는 `01_input/images/`를 자동으로 사용합니다. 양쪽에 모두 원본이 있거나 아무 원본도 없으면 CLI가 입력 방식이나 외부 경로를 요청합니다.
 
 ### PDF 실행
+
+`01_input/pdf/`의 PDF를 사용:
+
+```bash
+glk run \
+  --project primal \
+  --input-type pdf
+```
+
+프로젝트 밖의 PDF를 직접 지정하는 방식도 지원합니다.
 
 ```bash
 glk run \
   --project primal \
   --input-type pdf \
-  --file rulebook.pdf
+  --file /다른/위치/rulebook.pdf
 ```
 
 페이지 범위는 선택 사항입니다. 생략하면 전체 PDF를 처리합니다.
@@ -239,7 +387,6 @@ glk run \
 glk run \
   --project primal \
   --input-type pdf \
-  --file rulebook.pdf \
   --pages 1,3-8,12
 ```
 
@@ -265,7 +412,7 @@ PDF 처리 방식:
 스캔 PDF와 Hybrid PDF도 번역할 수 있습니다. 다만 `--input-type pdf`가 페이지별로 OCR 방식과 텍스트 추출 방식을 자동 전환하는 구조는 아니므로, 이런 파일은 다음처럼 페이지 전체를 이미지 폴더로 준비합니다.
 
 ```text
-rulebook_pages/
+workspaces/primal/01_input/images/
 ├── page-001.png
 ├── page-002.png
 ├── page-003.png
@@ -275,13 +422,12 @@ rulebook_pages/
 ```bash
 glk run \
   --project primal \
-  --input-type images \
-  --folder rulebook_pages/
+  --input-type images
 ```
 
 파일명에 페이지 번호를 일정하게 넣으면 원래 페이지 순서대로 처리하기 쉽습니다.
 
-표, 아이콘 설명, 자유롭게 배치된 구성 요소처럼 읽는 순서가 하나로 정해지지 않은 페이지는 자동 결과를 만든 뒤 사람이 원본과 비교해 `review/source.txt`에서 순서와 문장을 조정합니다. 이는 별도 오류 처리 단계가 아니라 기본 원문 검수 과정에 포함됩니다.
+표, 아이콘 설명, 자유롭게 배치된 구성 요소처럼 읽는 순서가 하나로 정해지지 않은 페이지는 자동 결과를 만든 뒤 사람이 원본과 비교해 `02_source/review.txt`에서 순서와 문장을 조정합니다. 이는 별도 오류 처리 단계가 아니라 기본 원문 검수 과정에 포함됩니다.
 
 ### 이미지 폴더 OCR
 
@@ -291,10 +437,10 @@ glk run \
 glk init "Card Images" --project-id cards
 ```
 
-이미지 폴더 구조 예시:
+프로젝트 입력 폴더 구조 예시:
 
 ```text
-card_images/
+workspaces/cards/01_input/images/
 ├── ocr_prompt.txt
 ├── characters/
 │   ├── card-001.jpg
@@ -312,8 +458,7 @@ card_images/
 ```bash
 glk run \
   --project cards \
-  --input-type images \
-  --folder card_images/
+  --input-type images
 ```
 
 공통 prompt 파일을 직접 지정할 수도 있습니다.
@@ -355,15 +500,15 @@ Gain 2 {HP}.
 
 한 단계만 다시 실행하거나 문제를 진단할 때는 `extract`, `ocr`, `segment`, `qa` 명령을 개별적으로 사용할 수 있습니다.
 
-## 3. 원문 QA와 사람 검수
+## 4. 원문 QA와 사람 검수
 
 `glk run`이 완료되면 다음 파일을 확인합니다.
 
 | 파일 | 역할 | 수정 |
 |---|---|---:|
-| `draft/source.txt` | 자동 추출 결과의 비교 기준 | 수정하지 않음 |
-| `review/source.txt` | 사람이 PDF·이미지와 비교해 고치는 작업본 | 본문만 수정 |
-| `qa/source_qa.md` | 의심 위치, block ID와 검사 근거 | 읽기 전용 |
+| `02_source/draft.txt` | 자동 추출 결과의 비교 기준 | 수정하지 않음 |
+| `02_source/review.txt` | 사람이 PDF·이미지와 비교해 고치는 작업본 | 본문만 수정 |
+| `02_source/qa.md` | 의심 위치, block ID와 검사 근거 | 읽기 전용 |
 
 로컬 QA는 다음 항목을 찾습니다.
 
@@ -373,7 +518,7 @@ Gain 2 {HP}.
 - block ID 중복과 source hash 불일치
 - OCR provider가 남긴 판독 경고
 
-QA는 문제 위치만 알려주며 원문을 자동 수정하지 않습니다. 실제 PDF 또는 이미지를 보고 `review/source.txt`를 직접 고칩니다.
+QA는 문제 위치만 알려주며 원문을 자동 수정하지 않습니다. 실제 PDF 또는 이미지를 보고 `02_source/review.txt`를 직접 고칩니다.
 
 검토 파일 예시:
 
@@ -395,7 +540,7 @@ Increase your HP by 10.
 
 marker 사이의 실제 원문만 수정합니다.
 
-## 4. 최종 원문 승인
+## 5. 최종 원문 승인
 
 먼저 결과 파일을 쓰지 않는 검사를 실행합니다.
 
@@ -420,8 +565,8 @@ glk review finalize --project primal
 생성 파일:
 
 ```text
-final/source.txt
-segments/approved_source.jsonl
+02_source/final.txt
+.glk/segments/approved_source.jsonl
 ```
 
 후속 용어와 번역 단계는 현재 hash가 유효한 `approved_source.jsonl`만 사용합니다.
@@ -434,7 +579,7 @@ glk review finalize \
   --allow-token-changes
 ```
 
-## 5. 용어집 만들기
+## 6. 용어집 만들기
 
 승인된 원문에서 용어 후보를 수집합니다. 이 단계는 Gemini를 호출하지 않습니다.
 
@@ -445,7 +590,7 @@ glk glossary build --project primal
 생성 파일:
 
 ```text
-workspaces/primal/terminology/glossary_review.tsv
+workspaces/primal/03_terminology/glossary_review.tsv
 ```
 
 Excel, Numbers, LibreOffice 또는 일반 텍스트 편집기로 TSV를 열고 `status`, `translation`, `category`, `note`를 검토합니다.
@@ -466,18 +611,18 @@ Excel, Numbers, LibreOffice 또는 일반 텍스트 편집기로 TSV를 열고 `
 ```bash
 glk glossary import \
   --project primal \
-  --file terminology/glossary_review.tsv
+  --file 03_terminology/glossary_review.tsv
 ```
 
 생성 파일:
 
 ```text
-workspaces/primal/terminology/termbase.json
+workspaces/primal/03_terminology/termbase.json
 ```
 
 기존 TSV가 있을 때 `glk glossary build`를 다시 실행해도 사람의 편집을 자동으로 덮어쓰지 않습니다. `--force`는 기존 편집을 버리고 새 후보로 초기화하므로 백업과 비교 후에만 사용합니다.
 
-## 6. 초벌 번역
+## 7. 초벌 번역
 
 승인 원문과 termbase가 모두 현재 상태일 때 번역할 수 있습니다.
 
@@ -514,7 +659,7 @@ glk translate \
 
 1. ID, 순서, 숫자, token과 HTML 보존 규칙
 2. 검토가 끝난 termbase
-3. 프로젝트 `translation_prompt.txt`
+3. 프로젝트 `04_translation/prompt.txt`
 4. 프로그램 기본 문체
 
 프로젝트 prompt와 termbase가 충돌하면 termbase가 우선합니다.
@@ -529,12 +674,12 @@ glk translate --project primal --resume
 
 | 파일 | 역할 |
 |---|---|
-| `segments/translation.jsonl` | block ID로 원문과 연결된 초벌 번역 데이터 |
-| `draft/translation.txt` | 자동 번역 기준본 |
-| `review/translation.txt` | 사람이 수정하는 번역 작업본 |
-| `translation_prompt.txt` | 실제 프로젝트에 등록된 번역 지침 |
+| `.glk/segments/translation.jsonl` | block ID로 원문과 연결된 초벌 번역 데이터 |
+| `04_translation/draft.txt` | 자동 번역 기준본 |
+| `04_translation/review.txt` | 사람이 수정하는 번역 작업본 |
+| `04_translation/prompt.txt` | 실제 프로젝트에 등록된 번역 지침 |
 
-## 7. 번역 검수
+## 8. 번역 검수
 
 권장 방법은 로컬 HTML 검수 화면입니다.
 
@@ -565,7 +710,7 @@ glk translation review \
   --port 8765
 ```
 
-일반 편집기를 사용하려면 `review/translation.txt`의 `[TRANSLATION]` 본문만 수정합니다. `[ORIGINAL]` 본문과 marker는 변경하지 않습니다.
+일반 편집기를 사용하려면 `04_translation/review.txt`의 `[TRANSLATION]` 본문만 수정합니다. `[ORIGINAL]` 본문과 marker는 변경하지 않습니다.
 
 ```text
 [BLOCK pdf-p0001-b0001-...]
@@ -588,7 +733,7 @@ glk translation finalize --project primal --dry-run
 glk translation finalize --project primal
 ```
 
-선택 재번역은 정상 블록을 그대로 두고 ERROR가 연결된 block만 한 개씩 다시 번역합니다. `draft/translation.txt`는 비교 기준으로 유지하며, 교체 전·후 번역은 `revisions/translation_retry_*.json`에 기록됩니다. 새 결과도 자동 승인되지 않으므로 HTML이나 `review/translation.txt`에서 사람이 다시 확인해야 합니다.
+선택 재번역은 정상 블록을 그대로 두고 ERROR가 연결된 block만 한 개씩 다시 번역합니다. `04_translation/draft.txt`는 비교 기준으로 유지하며, 교체 전·후 번역은 `04_translation/revisions/translation_retry_*.json`에 기록됩니다. 새 결과도 자동 승인되지 않으므로 HTML이나 `04_translation/review.txt`에서 사람이 다시 확인해야 합니다.
 
 최종 승인을 차단하는 대표 오류:
 
@@ -599,21 +744,21 @@ glk translation finalize --project primal
 - `keep` 용어 변경
 - `[ILLEGIBLE]` 같은 미해결 표시
 
-## 8. 최종 결과
+## 9. 최종 결과
 
 가장 중요한 최종 파일:
 
 ```text
-workspaces/<project_id>/final/translation.txt
+workspaces/<project_id>/05_output/translation.txt
 ```
 
 함께 생성되는 파일:
 
 ```text
-segments/approved_translation.jsonl
-qa/translation_qa.json
-qa/translation_qa.md
-state/translation_review.json
+.glk/segments/approved_translation.jsonl
+.glk/reports/translation_qa.json
+04_translation/qa.md
+.glk/state/translation_review.json
 ```
 
 `approved_translation.jsonl`에는 Gemini 초벌 번역과 사람이 수정한 번역을 분리해서 보존합니다.
@@ -623,58 +768,81 @@ state/translation_review.json
 ```text
 workspaces/<project_id>/
 ├── project.json
-├── source/
-│   ├── original.pdf
-│   ├── pages/
-│   ├── fragments/
-│   ├── layouts/
+├── 01_input/                          # 사용자가 원본을 넣는 곳
+│   ├── pdf/
+│   └── images/
+├── 02_source/                         # 원문 획득·검수 단계
+│   ├── assets/
+│   │   ├── original.pdf
+│   │   ├── images/
+│   │   └── ocr_prompt.txt
+│   ├── ocr/
+│   │   ├── individual/
+│   │   └── combined.txt
 │   ├── extracted.txt
-│   ├── images/
-│   └── ocr/
-├── segments/
-│   ├── source.jsonl
-│   ├── approved_source.jsonl
-│   ├── translation.jsonl
-│   └── approved_translation.jsonl
-├── draft/
-│   ├── source.txt
-│   └── translation.txt
-├── review/
-│   ├── source.txt
-│   └── translation.txt
-├── final/
-│   ├── source.txt
-│   └── translation.txt
-├── terminology/
+│   ├── draft.txt
+│   ├── review.txt
+│   ├── qa.md
+│   └── final.txt
+├── 03_terminology/                    # 용어 후보 검토·확정
 │   ├── glossary_review.tsv
 │   └── termbase.json
-├── qa/
-│   ├── source_qa.json
-│   ├── source_qa.md
-│   ├── translation_qa.json
-│   └── translation_qa.md
-├── revisions/
-│   └── translation_retry_*.json
-├── state/
-└── translation_prompt.txt
+├── 04_translation/                    # 번역·검수 단계
+│   ├── prompt.txt
+│   ├── draft.txt
+│   ├── review.txt
+│   ├── qa.md
+│   └── revisions/
+├── 05_output/                         # 최종 사용자 결과
+│   └── translation.txt
+└── .glk/                              # 프로그램 내부 데이터
+    ├── cache/
+    │   ├── pdf/
+    │   └── ocr/
+    ├── segments/
+    ├── state/
+    └── reports/
 ```
 
 ### `draft`, `review`, `final`의 차이
 
-| 폴더 | 의미 | 사람이 수정 |
+| 파일 | 의미 | 사람이 수정 |
 |---|---|---:|
-| `draft/` | 프로그램이 만든 비교 기준본 | 하지 않음 |
-| `review/` | 사람이 확인하고 수정하는 작업본 | 본문만 수정 |
-| `final/` | 검증과 승인을 통과한 최종 TXT | 직접 수정하지 않음 |
+| `02_source/draft.txt`, `04_translation/draft.txt` | 프로그램이 만든 비교 기준본 | 하지 않음 |
+| `02_source/review.txt`, `04_translation/review.txt` | 사람이 확인하고 수정하는 작업본 | 본문만 수정 |
+| `02_source/final.txt`, `05_output/translation.txt` | 검증과 승인을 통과한 최종 TXT | 직접 수정하지 않음 |
 
-최종 승인 후 `final/`을 직접 수정하면 저장된 hash와 달라져 `stale` 상태가 됩니다. 수정이 필요하면 `review/`에서 고친 뒤 QA와 finalize를 다시 실행합니다.
+최종 승인 파일을 직접 수정하면 저장된 hash와 달라져 `stale` 상태가 됩니다. 수정이 필요하면 해당 단계의 `review.txt`에서 고친 뒤 QA와 finalize를 다시 실행합니다.
 
 ## 상태 확인과 안전한 재실행
 
 언제든 다음 명령으로 전체 상태를 확인할 수 있습니다.
 
 ```bash
+glk projects
 glk status --project primal
+```
+
+`glk projects`는 현재 `workspaces/`의 프로젝트 ID, 이름, 입력 방식, 진행 단계, 최종 완료 여부와 경로를 보여줍니다. 특정 프로젝트의 상세 상태는 `glk status --project <project_id>`로 확인합니다.
+
+목록에 표시되는 주요 단계:
+
+| 단계 | 의미 |
+|---|---|
+| `not_started` | 원문 획득 전 |
+| `source_review` | 추출·OCR 원문 검수 단계 |
+| `glossary` / `glossary_review` | 용어집 생성 또는 검토 단계 |
+| `ready_to_translate` | termbase 완료, 초벌 번역 실행 가능 |
+| `translation_partial` | 초벌 번역이 중간에 멈춤 |
+| `translation_review` | 번역 검수 또는 최종 승인 대기 |
+| `translation_qa_failed` | 번역 QA 오류가 남아 있음 |
+| `completed` | 최종 번역 승인 완료 |
+
+다른 workspace 루트를 확인하려면:
+
+```bash
+glk projects --workspace-root /다른/workspaces
+glk projects --json
 ```
 
 주요 상태:
@@ -719,6 +887,7 @@ glk status --project primal
 | `glk translation qa` | 번역 로컬 QA |
 | `glk retry --failed` | 번역 QA의 ERROR block만 Gemini 재번역 |
 | `glk translation finalize` | 최종 번역 승인 |
+| `glk projects` | workspace의 전체 프로젝트와 진행 단계 목록 |
 | `glk status` | 프로젝트 전체 상태 확인 |
 
 각 명령의 전체 옵션은 `--help`로 확인합니다.
@@ -733,7 +902,7 @@ glk translation review --help
 
 ### API 키를 찾지 못함
 
-현재 터미널 위치가 `source/`인지, `source/.env`에 `GEMINI_API_KEY`가 있는지 확인합니다.
+저장소 최상위 또는 `source/.env`에 `GEMINI_API_KEY`가 있는지 확인합니다. 둘 중 하나만 사용하면 됩니다.
 
 ```bash
 pwd
@@ -742,7 +911,7 @@ glk run --project primal
 
 ### PDF 결과의 일부 문단 순서가 이상함
 
-`qa/source_qa.md`, `draft/source.txt`, 원본 PDF를 비교합니다. 잘못된 문장은 `review/source.txt`에서 수정합니다. PDF fragment 누락이나 구조 오류로 실행 자체가 실패했다면 `--verbose`로 다시 실행해 해당 페이지를 확인합니다.
+`02_source/qa.md`, `02_source/draft.txt`, 원본 PDF를 비교합니다. 잘못된 문장은 `02_source/review.txt`에서 수정합니다. PDF fragment 누락이나 구조 오류로 실행 자체가 실패했다면 `--verbose`로 다시 실행해 해당 페이지를 확인합니다.
 
 ```bash
 glk run --project primal --verbose
@@ -785,25 +954,6 @@ glk translation review \
   --no-open \
   --port 8765
 ```
-
-## AI 사용 범위와 데이터 처리
-
-Gemini를 사용하는 단계:
-
-- PDF 페이지의 fragment 읽기 순서와 block 묶음 판정
-- 이미지 한 장씩 OCR
-- 승인 원문 기반 초벌 번역
-- 사용자가 명시적으로 실행한 QA ERROR block 선택 재번역
-
-Gemini를 사용하지 않는 단계:
-
-- 원문 QA
-- 용어 후보 생성과 termbase import 검증
-- 번역 QA
-- localhost HTML 검수의 조회·편집·저장·QA·최종 승인
-- 파일 hash, marker, 숫자와 token 검증
-
-검수 브라우저와 UI 자원은 로컬 컴퓨터의 `127.0.0.1`에서만 동작하며 외부 CDN이나 외부 script를 불러오지 않습니다. 단, 사용자가 선택 재번역을 실행하면 로컬 서버가 대상 ERROR block만 Gemini API로 전송합니다.
 
 ## 현재 제한사항
 

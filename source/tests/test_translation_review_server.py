@@ -143,7 +143,7 @@ class TranslationReviewServerTests(unittest.TestCase):
         self.assertNotEqual(saved_document["review_sha256"], original_hash)
         self.assertEqual(saved_document["summary"]["changed"], 1)
         review_text = (
-            self.project_path / "review/translation.txt"
+            self.project_path / "04_translation/review.txt"
         ).read_text(encoding="utf-8")
         self.assertIn("[ORIGINAL]\nCombat", review_text)
         self.assertIn("[TRANSLATION]\n전투 단계", review_text)
@@ -188,12 +188,12 @@ class TranslationReviewServerTests(unittest.TestCase):
             final_payload["document"]["final_translation_approved"]
         )
         self.assertTrue(
-            (self.project_path / "final/translation.txt").is_file()
+            (self.project_path / "05_output/translation.txt").is_file()
         )
 
     def test_rejects_unknown_block_without_modifying_review(self) -> None:
         _, document, _ = self._request("/api/review")
-        before = (self.project_path / "review/translation.txt").read_bytes()
+        before = (self.project_path / "04_translation/review.txt").read_bytes()
         translations = {
             block["id"]: block["translation"]
             for block in document["blocks"]
@@ -210,7 +210,7 @@ class TranslationReviewServerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("unknown", payload["message"])
         self.assertEqual(
-            (self.project_path / "review/translation.txt").read_bytes(),
+            (self.project_path / "04_translation/review.txt").read_bytes(),
             before,
         )
 
@@ -232,8 +232,8 @@ class TranslationReviewServerTests(unittest.TestCase):
             previous_error_count=1,
             remaining_error_count=0,
             warning_count=0,
-            review_file=str(self.project_path / "review/translation.txt"),
-            revision_file=str(self.project_path / "revisions/retry.json"),
+            review_file=str(self.project_path / "04_translation/review.txt"),
+            revision_file=str(self.project_path / "04_translation/revisions/retry.json"),
         )
         with patch(
             "glk.infrastructure.translation_review_server.retry_failed_translations",
@@ -255,7 +255,7 @@ class TranslationReviewServerTests(unittest.TestCase):
         )
         self.assertIn(
             "스태미나 3",
-            (self.project_path / "review/translation.txt").read_text(
+            (self.project_path / "04_translation/review.txt").read_text(
                 encoding="utf-8"
             ),
         )

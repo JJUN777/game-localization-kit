@@ -8,7 +8,8 @@
 flowchart TD
     START([작업 시작]) --> SETUP[CLI 설치<br/>GEMINI_API_KEY 설정]
     SETUP --> INIT[glk init<br/>프로젝트 workspace 생성]
-    INIT --> RUN[glk run<br/>사람 검수 직전까지 통합 실행]
+    INIT --> PLACE[01_input/pdf 또는 01_input/images에<br/>번역할 원본 넣기]
+    PLACE --> RUN[glk run<br/>입력 자동 감지·통합 실행]
     RUN --> INPUT{원문 입력}
 
     INPUT -->|PDF| PDF[PDF fragment·좌표 추출<br/>Gemini 읽기 순서 판정]
@@ -16,11 +17,11 @@ flowchart TD
     PDF --> NORMALIZE[공통 source block 정규화]
     IMAGE --> NORMALIZE
 
-    NORMALIZE --> BLOCKS[segments/source.jsonl<br/>검수 전 내부 데이터]
-    BLOCKS --> DRAFT[draft/source.txt<br/>수정하지 않는 기준본]
-    BLOCKS --> REVIEW[review/source.txt<br/>사람이 수정하는 작업본]
+    NORMALIZE --> BLOCKS[.glk/segments/source.jsonl<br/>검수 전 내부 데이터]
+    BLOCKS --> DRAFT[02_source/draft.txt<br/>수정하지 않는 기준본]
+    BLOCKS --> REVIEW[02_source/review.txt<br/>사람이 수정하는 작업본]
     BLOCKS --> QA[로컬 규칙 QA]
-    QA --> REPORT[qa/source_qa.md<br/>사람용 보고서]
+    QA --> REPORT[02_source/qa.md<br/>사람용 보고서]
 
     DRAFT -. 비교 .-> HUMAN[원본 PDF·이미지 확인<br/>review 본문 수정]
     REVIEW --> HUMAN
@@ -29,17 +30,17 @@ flowchart TD
     CHECK -->|오류| HUMAN
     CHECK -->|통과| FINALIZE[glk review finalize]
 
-    FINALIZE --> FINAL[final/source.txt]
-    FINALIZE --> APPROVED[segments/approved_source.jsonl<br/>최종 공통 원문]
+    FINALIZE --> FINAL[02_source/final.txt]
+    FINALIZE --> APPROVED[.glk/segments/approved_source.jsonl<br/>최종 공통 원문]
     APPROVED --> BUILD[glk glossary build<br/>로컬 용어 후보 수집]
-    BUILD --> TSV[terminology/glossary_review.tsv]
+    BUILD --> TSV[03_terminology/glossary_review.tsv]
     TSV --> EDIT[사람이 상태·번역어 검토<br/>누락 용어 행 추가]
     EDIT --> IMPORT[glk glossary import<br/>구조·ID·원문 근거 검증]
-    IMPORT --> TERMBASE[terminology/termbase.json]
+    IMPORT --> TERMBASE[03_terminology/termbase.json]
     TERMBASE --> TRANSLATE[glk translate<br/>ID 기반 Gemini 초벌 번역]
-    TRANSLATE --> TRANS_SEG[segments/translation.jsonl]
-    TRANS_SEG --> TRANS_DRAFT[draft/translation.txt]
-    TRANS_SEG --> TRANS_REVIEW[review/translation.txt]
+    TRANSLATE --> TRANS_SEG[.glk/segments/translation.jsonl]
+    TRANS_SEG --> TRANS_DRAFT[04_translation/draft.txt]
+    TRANS_SEG --> TRANS_REVIEW[04_translation/review.txt]
     TRANS_DRAFT -. 비교 .-> TRANS_UI[glk translation review<br/>localhost 검수 화면]
     TRANS_REVIEW --> TRANS_UI
     TRANS_UI --> TRANS_HUMAN[브라우저에서 원문·번역 비교<br/>번역 본문만 수정·저장]
@@ -47,13 +48,13 @@ flowchart TD
     TRANS_QA -->|오류| TRANS_DECIDE{오류 처리 방법}
     TRANS_DECIDE -->|직접 수정| TRANS_UI
     TRANS_DECIDE -->|ERROR만 Gemini 재번역| TRANS_RETRY[glk retry --failed<br/>또는 UI 오류만 재번역]
-    TRANS_RETRY --> REVISION[revisions/translation_retry_*.json]
+    TRANS_RETRY --> REVISION[04_translation/revisions/translation_retry_*.json]
     REVISION --> TRANS_UI
     TRANS_QA -->|통과| TRANS_CHECK[glk translation finalize --dry-run]
     TRANS_CHECK -->|오류| TRANS_HUMAN
     TRANS_CHECK -->|통과| TRANS_FINALIZE[glk translation finalize]
-    TRANS_FINALIZE --> APPROVED_TRANS[segments/approved_translation.jsonl]
-    TRANS_FINALIZE --> FINAL_TRANS[final/translation.txt]
+    TRANS_FINALIZE --> APPROVED_TRANS[.glk/segments/approved_translation.jsonl]
+    TRANS_FINALIZE --> FINAL_TRANS[05_output/translation.txt]
     FINAL_TRANS --> DONE([최종 TXT 완료])
 
     NORMALIZE -. 원문 변경 감지 .-> STALE{기존 review와<br/>새 draft가 다른가?}
@@ -67,6 +68,7 @@ flowchart TD
 
 ```bash
 glk init "Primal Rulebook" --project-id primal
+glk projects
 glk status --project primal
 ```
 
@@ -74,8 +76,22 @@ glk status --project primal
 - `project_id`는 `workspaces/<project_id>/` 경로와 CLI에서 계속 사용하는 식별자입니다.
 - `project_id`를 생략하면 이름을 Windows/macOS에서 사용할 수 있는 형태로 정규화합니다.
 - 다른 workspace 루트를 쓰면 이후 모든 명령에도 `--workspace-root PATH`를 지정합니다.
+- `glk projects`는 workspace 안의 전체 프로젝트와 현재 진행 단계를 보여줍니다.
 
-## 2. 원문 획득과 검수 준비
+## 2. 번역 원본 넣기와 검수 준비
+
+`glk init`은 프로젝트마다 사용자 입력 전용 폴더를 생성합니다.
+
+```text
+workspaces/<project_id>/01_input/
+├── pdf/
+└── images/
+```
+
+- 일반 PDF 프로젝트: `01_input/pdf/`에 PDF 한 개를 넣습니다.
+- 이미지 OCR 프로젝트: `01_input/images/`에 이미지와 `ocr_prompt.txt`를 넣습니다.
+- 이미지 하위 폴더와 이미지별 `파일명.prompt.txt`도 그대로 지원합니다.
+- `02_source/`는 프로그램이 등록·가공한 결과용이므로 사용자가 원본을 직접 넣지 않습니다.
 
 가장 간단한 시작 방법은 대화형 통합 명령입니다.
 
@@ -83,7 +99,7 @@ glk status --project primal
 glk run --project primal
 ```
 
-PDF와 이미지 폴더 중 하나를 선택하고 파일 또는 폴더 경로를 입력합니다. `glk run`은 원문 획득, block 정규화, draft/review 생성과 로컬 QA까지 실행합니다.
+한 입력 폴더에만 원본이 있으면 종류와 경로를 자동 감지합니다. 양쪽에 모두 원본이 있으면 PDF와 이미지 중 하나를 선택합니다. `glk run`은 원문 획득, block 정규화, draft/review 생성과 로컬 QA까지 실행합니다.
 
 스크립트나 CI에서는 입력을 명시합니다.
 
@@ -150,9 +166,9 @@ Gain 2 {HP}.
 
 | 파일 | 역할 | 수정 여부 |
 |---|---|---:|
-| `draft/source.txt` | 자동 추출 결과의 비교 기준 | 수정하지 않음 |
-| `review/source.txt` | 사람이 원본을 보며 고치는 작업본 | 본문만 수정 |
-| `qa/source_qa.md` | 의심 위치, block ID와 근거 | 읽기 전용 |
+| `02_source/draft.txt` | 자동 추출 결과의 비교 기준 | 수정하지 않음 |
+| `02_source/review.txt` | 사람이 원본을 보며 고치는 작업본 | 본문만 수정 |
+| `02_source/qa.md` | 의심 위치, block ID와 근거 | 읽기 전용 |
 
 QA는 LLM을 호출하거나 원문을 자동 수정하지 않습니다. 현재 검사 범위는 다음과 같습니다.
 
@@ -173,7 +189,7 @@ Increase your HP by 10.
 [[GLK_END pdf-p0007-b0012-xxxxxxxxxx]]
 ```
 
-이미지 block은 `[PAGE]` 대신 `[SOURCE source/images/...]`를 사용합니다. 실제 문장은 일반 편집기로 바로 고치고 저장합니다.
+이미지 block은 `[PAGE]` 대신 `[SOURCE 02_source/assets/images/...]`를 사용합니다. 실제 문장은 일반 편집기로 바로 고치고 저장합니다.
 
 ## 5. 최종 원문 승인
 
@@ -195,7 +211,7 @@ glk review finalize --project primal
 glk review finalize --project primal --allow-token-changes
 ```
 
-최종 결과는 `final/source.txt`와 `segments/approved_source.jsonl`입니다. 후속 단계는 hash까지 유효한 `approved_source.jsonl`만 입력으로 허용합니다.
+최종 결과는 `02_source/final.txt`와 `.glk/segments/approved_source.jsonl`입니다. 후속 단계는 hash까지 유효한 `approved_source.jsonl`만 입력으로 허용합니다.
 
 원문 획득 결과가 바뀐 상태에서 `glk segment`를 다시 실행하면 새 draft만 만들고 기존 review를 stale로 표시합니다. 비교를 마치고 작업본을 새 draft로 초기화할 때만 다음 명령을 사용합니다.
 
@@ -224,7 +240,7 @@ TSV에서 모든 자동 후보를 `approved`, `keep`, `rejected` 중 하나로 �
 ```bash
 glk glossary import \
   --project primal \
-  --file terminology/glossary_review.tsv
+  --file 03_terminology/glossary_review.tsv
 ```
 
 import는 다음 작업을 수행합니다.
@@ -234,14 +250,14 @@ import는 다음 작업을 수행합니다.
 - 수동 용어의 안정적인 ID 생성
 - 승인 원문에서 variants, 빈도, block ID, 위치와 예문 재계산
 - 검증된 근거를 `glossary_review.tsv`에 다시 기록
-- `terminology/termbase.json`과 `state/glossary_import.json` 원자적 생성
+- `03_terminology/termbase.json`과 `.glk/state/glossary_import.json` 원자적 생성
 
 `review` 상태가 하나라도 남거나 자동 후보 행이 삭제되면 import를 차단합니다. 원문에 아직 없는 확장판 용어를 의도적으로 선등록할 때만 다음 옵션을 사용합니다.
 
 ```bash
 glk glossary import \
   --project primal \
-  --file terminology/glossary_review.tsv \
+  --file 03_terminology/glossary_review.tsv \
   --allow-missing-terms
 ```
 
@@ -261,7 +277,7 @@ glk translate --project primal --dry-run
 glk translate --project primal
 ```
 
-처음 실제 실행할 때 기본 지침을 workspace의 `translation_prompt.txt`에 기록합니다. 처음부터 게임별 지침을 사용하려면 UTF-8 prompt를 지정합니다. 지정한 내용은 검증 후 같은 프로젝트 파일로 등록됩니다.
+처음 실제 실행할 때 기본 지침을 workspace의 `04_translation/prompt.txt`에 기록합니다. 처음부터 게임별 지침을 사용하려면 UTF-8 prompt를 지정합니다. 지정한 내용은 검증 후 같은 프로젝트 파일로 등록됩니다.
 
 ```bash
 glk translate \
@@ -276,7 +292,7 @@ prompt는 문체와 표현 지침만 담당하며 전체 시스템 prompt를 교
 |---:|---|---|
 | 1 | block ID, 순서, 숫자, `{TOKEN}`, `[TOKEN]`, HTML 보존 | 변경 불가 |
 | 2 | current termbase의 `approved`, `keep` | TSV 검토 후 glossary import |
-| 3 | 프로젝트 `translation_prompt.txt` | 파일 또는 `--prompt` |
+| 3 | 프로젝트 `04_translation/prompt.txt` | 파일 또는 `--prompt` |
 | 4 | 프로그램 기본 문체 | 프로젝트 지침이 없을 때 사용 |
 
 프로젝트 prompt가 termbase와 충돌해도 termbase가 우선합니다. Gemini 응답이 다른 용어를 사용하거나 숫자·token·ID를 변경하면 해당 청크를 한 번 더 요청하고, 반복 실패하면 성공 결과로 저장하지 않습니다.
@@ -287,7 +303,7 @@ prompt는 문체와 표현 지침만 담당하며 전체 시스템 prompt를 교
 glk translate --project primal --max-characters 8000
 ```
 
-각 청크가 검증을 통과할 때마다 `segments/translation.jsonl`과 `state/translation.json`에 저장합니다. 중간 실패 후에는 완료된 청크를 재사용합니다.
+각 청크가 검증을 통과할 때마다 `.glk/segments/translation.jsonl`과 `.glk/state/translation.json`에 저장합니다. 중간 실패 후에는 완료된 청크를 재사용합니다.
 
 ```bash
 glk translate --project primal --resume
@@ -299,12 +315,12 @@ glk translate --project primal --resume
 
 | 파일 | 역할 |
 |---|---|
-| `segments/translation.jsonl` | source block ID와 연결된 내부 번역 데이터 |
-| `draft/translation.txt` | 자동 번역 기준본 |
-| `review/translation.txt` | 사람이 원문과 번역을 함께 보며 수정할 작업본 |
-| `translation_prompt.txt` | 실제 사용한 프로젝트 문체·표현 지침 |
+| `.glk/segments/translation.jsonl` | source block ID와 연결된 내부 번역 데이터 |
+| `04_translation/draft.txt` | 자동 번역 기준본 |
+| `04_translation/review.txt` | 사람이 원문과 번역을 함께 보며 수정할 작업본 |
+| `04_translation/prompt.txt` | 실제 사용한 프로젝트 문체·표현 지침 |
 
-재번역으로 draft가 달라져도 기존 `review/translation.txt`는 덮어쓰지 않고 `stale`로 보존합니다. 사람이 새 draft와 기존 검토본을 비교하기 전에는 자동 초기화하지 않습니다.
+재번역으로 draft가 달라져도 기존 `04_translation/review.txt`는 덮어쓰지 않고 `stale`로 보존합니다. 사람이 새 draft와 기존 검토본을 비교하기 전에는 자동 초기화하지 않습니다.
 
 ## 8. 번역문 검수, QA와 최종 승인
 
@@ -319,7 +335,7 @@ glk translation review --project primal
 - block별 원문과 번역을 나란히 비교
 - 원문·번역·block ID 검색
 - 오류·경고·수정됨 필터와 block 이동
-- 번역문만 수정하고 `review/translation.txt`에 안전하게 저장
+- 번역문만 수정하고 `04_translation/review.txt`에 안전하게 저장
 - 저장 후 로컬 QA 실행과 오류 확인
 - QA ERROR가 연결된 block만 Gemini로 재번역하고 다시 검수
 - 오류가 0개인 결과의 최종 승인
@@ -334,7 +350,7 @@ PASS block을 포함한 모든 번역문을 수정할 수 있습니다. PASS는 
 glk translation review --project primal --no-open --port 8765
 ```
 
-일반 편집기를 선호하면 기존 TXT 방식도 그대로 사용할 수 있습니다. `review/translation.txt`에서 각 block의 `[TRANSLATION]` 아래 본문만 수정합니다. `[PAGE]`, `[SOURCE]`, `[BLOCK]`, `[ORIGINAL]`, `[TRANSLATION]`, `[[GLK_END ...]]` marker와 `[ORIGINAL]` 본문은 변경하지 않습니다.
+일반 편집기를 선호하면 기존 TXT 방식도 그대로 사용할 수 있습니다. `04_translation/review.txt`에서 각 block의 `[TRANSLATION]` 아래 본문만 수정합니다. `[PAGE]`, `[SOURCE]`, `[BLOCK]`, `[ORIGINAL]`, `[TRANSLATION]`, `[[GLK_END ...]]` marker와 `[ORIGINAL]` 본문은 변경하지 않습니다.
 
 ```text
 [BLOCK pdf-p0001-b0001-...]
@@ -359,7 +375,7 @@ glk translation qa --project primal
 - termbase의 `approved` 번역어 누락 또는 `keep` 용어 변경
 - Unicode replacement character와 `[ILLEGIBLE]` 잔존
 
-원문과 번역이 완전히 같거나 한국어 대상 번역에 한글이 없는 경우는 사람이 판단할 수 있도록 warning으로 표시하며 자동으로 승인을 차단하지 않습니다. 결과는 `qa/translation_qa.json`과 `qa/translation_qa.md`에 기록됩니다.
+원문과 번역이 완전히 같거나 한국어 대상 번역에 한글이 없는 경우는 사람이 판단할 수 있도록 warning으로 표시하며 자동으로 승인을 차단하지 않습니다. 결과는 `.glk/reports/translation_qa.json`과 `04_translation/qa.md`에 기록됩니다.
 
 ```bash
 glk retry --failed --project primal --dry-run
@@ -369,17 +385,17 @@ glk translation finalize --project primal --dry-run
 glk translation finalize --project primal
 ```
 
-`glk retry --failed`는 QA ERROR가 연결된 block만 한 개씩 재번역합니다. ERROR가 여러 개 있어도 PASS·WARNING 전용 block과 사람이 수정한 다른 block은 그대로 유지합니다. 모델 응답은 숫자·token·HTML·termbase 규칙으로 다시 검증하며, 모든 대상 응답이 유효할 때만 `review/translation.txt`를 한 번 갱신합니다. 초벌 기준인 `draft/translation.txt`는 바꾸지 않습니다.
+`glk retry --failed`는 QA ERROR가 연결된 block만 한 개씩 재번역합니다. ERROR가 여러 개 있어도 PASS·WARNING 전용 block과 사람이 수정한 다른 block은 그대로 유지합니다. 모델 응답은 숫자·token·HTML·termbase 규칙으로 다시 검증하며, 모든 대상 응답이 유효할 때만 `04_translation/review.txt`를 한 번 갱신합니다. 초벌 기준인 `04_translation/draft.txt`는 바꾸지 않습니다.
 
-교체 전 번역, 새 번역, 기존 QA 오류와 모델 정보는 `revisions/translation_retry_*.json`에 남습니다. 재번역 직후 로컬 QA를 자동으로 다시 실행하지만 사람 승인으로 간주하지 않으므로, 결과를 읽고 필요하면 수정한 뒤 최종 승인합니다.
+교체 전 번역, 새 번역, 기존 QA 오류와 모델 정보는 `04_translation/revisions/translation_retry_*.json`에 남습니다. 재번역 직후 로컬 QA를 자동으로 다시 실행하지만 사람 승인으로 간주하지 않으므로, 결과를 읽고 필요하면 수정한 뒤 최종 승인합니다.
 
 오류가 0개일 때만 다음 최종 파일이 생성됩니다.
 
 | 파일 | 역할 |
 |---|---|
-| `segments/approved_translation.jsonl` | 초벌 번역을 보존하고 실제 사람 수정만 `corrected_translation`에 저장한 최종 데이터 |
-| `final/translation.txt` | 사람 검수를 통과한 최종 번역 TXT |
-| `state/translation_review.json` | review·QA·최종 파일 hash와 `qa_failed`, `qa_passed`, `approved` 상태 |
+| `.glk/segments/approved_translation.jsonl` | 초벌 번역을 보존하고 실제 사람 수정만 `corrected_translation`에 저장한 최종 데이터 |
+| `05_output/translation.txt` | 사람 검수를 통과한 최종 번역 TXT |
+| `.glk/state/translation_review.json` | review·QA·최종 파일 hash와 `qa_failed`, `qa_passed`, `approved` 상태 |
 
 재번역으로 review가 stale이 되면 기존 사람 수정은 자동으로 덮어쓰지 않습니다. 새 draft와 비교를 마친 뒤 정말 현재 draft로 초기화할 때만 다음 명령을 사용합니다.
 
@@ -413,66 +429,63 @@ glk status --project primal
 ```text
 workspaces/<project_id>/
 ├── project.json
-├── source/
-│   ├── original.pdf                  # PDF 프로젝트
-│   ├── pages/
-│   ├── fragments/
-│   ├── layouts/
+├── 01_input/
+│   ├── pdf/                          # 사용자가 넣는 PDF 한 개
+│   └── images/                       # 사용자가 넣는 OCR 이미지
+├── 02_source/
+│   ├── assets/
+│   │   ├── original.pdf             # 등록된 PDF
+│   │   ├── images/                  # 등록된 OCR 이미지
+│   │   └── ocr_prompt.txt
+│   ├── ocr/
+│   │   ├── individual/
+│   │   └── combined.txt
 │   ├── extracted.txt
-│   ├── images/                       # 이미지 프로젝트
-│   ├── ocr_prompt.txt
-│   └── ocr/
-│       ├── results/
-│       ├── individual/
-│       ├── combined.txt
-│       └── run_summary.json
-├── segments/
-│   ├── source.jsonl                  # 검수 전 공통 block
-│   ├── approved_source.jsonl         # 승인된 최종 공통 원문
-│   ├── translation.jsonl             # ID로 연결된 초벌 번역
-│   └── approved_translation.jsonl    # 사람 검수 완료 번역
-├── draft/
-│   ├── source.txt
-│   └── translation.txt
-├── review/
-│   ├── source.txt
-│   └── translation.txt
-├── final/
-│   ├── source.txt
-│   └── translation.txt
-├── translation_prompt.txt
-├── qa/
-│   ├── source_qa.json
-│   ├── source_qa.md
-│   ├── translation_qa.json
-│   └── translation_qa.md
-├── terminology/
+│   ├── draft.txt
+│   ├── review.txt
+│   ├── qa.md
+│   └── final.txt
+├── 03_terminology/
 │   ├── glossary_review.tsv
 │   └── termbase.json
-└── state/
-    ├── segmentation.json
-    ├── source_qa.json
-    ├── source_review.json
-    ├── glossary_build.json
-    ├── glossary_import.json
-    ├── translation.json
-    └── translation_review.json
+├── 04_translation/
+│   ├── prompt.txt
+│   ├── draft.txt
+│   ├── review.txt
+│   ├── qa.md
+│   └── revisions/
+├── 05_output/
+│   └── translation.txt
+└── .glk/                             # 직접 수정하지 않는 내부 데이터
+    ├── cache/
+    │   ├── pdf/
+    │   │   ├── pages/
+    │   │   ├── fragments/
+    │   │   └── layouts/
+    │   └── ocr/results/
+    ├── segments/
+    │   ├── source.jsonl
+    │   ├── approved_source.jsonl
+    │   ├── translation.jsonl
+    │   └── approved_translation.jsonl
+    ├── state/
+    └── reports/
 ```
 
 ## 용어 기준
 
 | 용어 | 의미 | 대표 파일 |
 |---|---|---|
-| 원문 획득 결과 | PDF 추출 또는 이미지 OCR 직후의 provider별 결과 | `source/layouts/`, `source/ocr/results/` |
-| 검수용 중간 원문 | QA와 사람 검수를 위해 같은 block 형식으로 정규화한 데이터 | `segments/source.jsonl` |
-| 자동 생성 기준본 | 원문 변경 비교에 사용하는 수정 금지 TXT | `draft/source.txt` |
-| 검토 작업본 | 사람이 원본과 비교하며 수정하는 TXT | `review/source.txt` |
-| 최종 원문 TXT | 검토 작업본의 구조 검증을 통과한 TXT | `final/source.txt` |
-| 최종 공통 원문 | raw/corrected text와 원본 위치를 보존하는 후속 단계 기준 데이터 | `segments/approved_source.jsonl` |
-| 초벌 번역 | 모델 출력과 원문·prompt·termbase hash를 보존하는 검수 입력 | `segments/translation.jsonl` |
-| 최종 번역 | 초벌 번역과 실제 사람 수정을 분리해 보존하는 승인 데이터 | `segments/approved_translation.jsonl` |
+| 원문 획득 결과 | PDF 추출 또는 이미지 OCR 직후의 provider별 결과 | `.glk/cache/pdf/layouts/`, `.glk/cache/ocr/results/` |
+| 검수용 중간 원문 | QA와 사람 검수를 위해 같은 block 형식으로 정규화한 데이터 | `.glk/segments/source.jsonl` |
+| 자동 생성 기준본 | 원문 변경 비교에 사용하는 수정 금지 TXT | `02_source/draft.txt` |
+| 검토 작업본 | 사람이 원본과 비교하며 수정하는 TXT | `02_source/review.txt` |
+| 최종 원문 TXT | 검토 작업본의 구조 검증을 통과한 TXT | `02_source/final.txt` |
+| 최종 공통 원문 | raw/corrected text와 원본 위치를 보존하는 후속 단계 기준 데이터 | `.glk/segments/approved_source.jsonl` |
+| 초벌 번역 | 모델 출력과 원문·prompt·termbase hash를 보존하는 검수 입력 | `.glk/segments/translation.jsonl` |
+| 최종 번역 | 초벌 번역과 실제 사람 수정을 분리해 보존하는 승인 데이터 | `.glk/segments/approved_translation.jsonl` |
 
-`segments/source.jsonl`은 최종 원문이 아닙니다. 사람이 검수를 마치고 `glk review finalize`를 통과한 `segments/approved_source.jsonl`만 최종 공통 원문으로 부릅니다.
+`.glk/segments/source.jsonl`은 최종 원문이 아닙니다. 사람이 검수를 마치고 `glk review finalize`를 통과한 `.glk/segments/approved_source.jsonl`만 최종 공통 원문으로 부릅니다.
 
 ## 문서 갱신 규칙
 

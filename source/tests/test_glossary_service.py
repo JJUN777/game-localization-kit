@@ -31,7 +31,7 @@ def make_block(
         schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
         id=f"pdf-p0001-b{order:04d}-{order:010d}",
         source_type="pdf",
-        source_file="source/original.pdf",
+        source_file="02_source/assets/original.pdf",
         page=1 + (order // 3),
         source_order=order,
         block_order=order,
@@ -62,15 +62,15 @@ def create_approved_project(workspace_root: Path, blocks: list[SourceBlock]) -> 
     ]
     source_data = serialize_blocks(raw_blocks)
     approved_data = serialize_blocks(blocks)
-    source_path = project_path / "segments/source.jsonl"
-    approved_path = project_path / "segments/approved_source.jsonl"
-    review_path = project_path / "review/source.txt"
-    final_path = project_path / "final/source.txt"
+    source_path = project_path / ".glk/segments/source.jsonl"
+    approved_path = project_path / ".glk/segments/approved_source.jsonl"
+    review_path = project_path / "02_source/review.txt"
+    final_path = project_path / "02_source/final.txt"
     source_path.write_bytes(source_data)
     approved_path.write_bytes(approved_data)
     review_path.write_text("review source", encoding="utf-8")
     final_path.write_text("final source", encoding="utf-8")
-    (project_path / "state/source_review.json").write_text(
+    (project_path / ".glk/state/source_review.json").write_text(
         json.dumps(
             {
                 "status": "approved",
@@ -148,7 +148,7 @@ class GlossaryBuildServiceTests(unittest.TestCase):
             )
             self.assertTrue(first.created)
             self.assertGreater(first.candidate_count, 0)
-            output_path = project_path / "terminology/glossary_review.tsv"
+            output_path = project_path / "03_terminology/glossary_review.tsv"
             rows = list(
                 csv.DictReader(
                     io.StringIO(output_path.read_text(encoding="utf-8-sig")),
@@ -207,7 +207,7 @@ class GlossaryBuildServiceTests(unittest.TestCase):
             )
             self.assertTrue(result.dry_run)
             self.assertGreater(result.candidate_count, 0)
-            self.assertFalse((project_path / "terminology/glossary_review.tsv").exists())
+            self.assertFalse((project_path / "03_terminology/glossary_review.tsv").exists())
 
 
 class GlossaryImportServiceTests(unittest.TestCase):
@@ -223,12 +223,12 @@ class GlossaryImportServiceTests(unittest.TestCase):
             self.assertEqual(build.candidate_count, 0)
             result = import_project_glossary(
                 project="glossary_project",
-                file="terminology/glossary_review.tsv",
+                file="03_terminology/glossary_review.tsv",
                 workspace_root=workspace_root,
             )
             self.assertEqual(result.entry_count, 0)
             termbase = json.loads(
-                (project_path / "terminology/termbase.json").read_text(encoding="utf-8")
+                (project_path / "03_terminology/termbase.json").read_text(encoding="utf-8")
             )
             self.assertEqual(termbase["entries"], [])
 
@@ -243,7 +243,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
             build_project_glossary_candidates(
                 project="glossary_project", workspace_root=workspace_root
             )
-            review_path = project_path / "terminology/glossary_review.tsv"
+            review_path = project_path / "03_terminology/glossary_review.tsv"
             rows = read_review_rows(review_path)
             reject_all(rows)
             hunter = next(row for row in rows if row["source_term"] == "Hunter")
@@ -269,7 +269,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
 
             result = import_project_glossary(
                 project="glossary_project",
-                file="terminology/glossary_review.tsv",
+                file="03_terminology/glossary_review.tsv",
                 workspace_root=workspace_root,
             )
             self.assertEqual(result.entry_count, len(rows))
@@ -278,7 +278,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
             self.assertEqual(result.unverified_count, 0)
 
             termbase = json.loads(
-                (project_path / "terminology/termbase.json").read_text(encoding="utf-8")
+                (project_path / "03_terminology/termbase.json").read_text(encoding="utf-8")
             )
             by_source = {entry["source_term"]: entry for entry in termbase["entries"]}
             self.assertEqual(by_source["Hunter"]["translation"], "사냥꾼")
@@ -317,7 +317,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
             build_project_glossary_candidates(
                 project="glossary_project", workspace_root=workspace_root
             )
-            review_path = project_path / "terminology/glossary_review.tsv"
+            review_path = project_path / "03_terminology/glossary_review.tsv"
             rows = read_review_rows(review_path)
             reject_all(rows)
             rows.append(
@@ -342,7 +342,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
                     file=review_path,
                     workspace_root=workspace_root,
                 )
-            self.assertFalse((project_path / "terminology/termbase.json").exists())
+            self.assertFalse((project_path / "03_terminology/termbase.json").exists())
 
             result = import_project_glossary(
                 project="glossary_project",
@@ -353,7 +353,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
             self.assertEqual(result.unverified_count, 1)
             self.assertTrue(result.warnings)
             termbase = json.loads(
-                (project_path / "terminology/termbase.json").read_text(encoding="utf-8")
+                (project_path / "03_terminology/termbase.json").read_text(encoding="utf-8")
             )
             future = next(
                 entry
@@ -370,7 +370,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
             build_project_glossary_candidates(
                 project="glossary_project", workspace_root=workspace_root
             )
-            review_path = project_path / "terminology/glossary_review.tsv"
+            review_path = project_path / "03_terminology/glossary_review.tsv"
             rows = read_review_rows(review_path)
             reject_all(rows)
             write_review_rows(review_path, rows)
@@ -379,7 +379,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
                 file=review_path,
                 workspace_root=workspace_root,
             )
-            termbase_path = project_path / "terminology/termbase.json"
+            termbase_path = project_path / "03_terminology/termbase.json"
             existing_termbase = termbase_path.read_bytes()
 
             rows = read_review_rows(review_path)
@@ -400,7 +400,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
             build_project_glossary_candidates(
                 project="glossary_project", workspace_root=workspace_root
             )
-            review_path = project_path / "terminology/glossary_review.tsv"
+            review_path = project_path / "03_terminology/glossary_review.tsv"
             rows = read_review_rows(review_path)
             reject_all(rows)
             rows.pop()
@@ -439,7 +439,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
                 build_project_glossary_candidates(
                     project="glossary_project", workspace_root=workspace_root
                 )
-                review_path = project_path / "terminology/glossary_review.tsv"
+                review_path = project_path / "03_terminology/glossary_review.tsv"
                 rows = read_review_rows(review_path)
                 reject_all(rows)
                 rows[0]["status"] = status
@@ -463,7 +463,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
             build_project_glossary_candidates(
                 project="glossary_project", workspace_root=workspace_root
             )
-            review_path = project_path / "terminology/glossary_review.tsv"
+            review_path = project_path / "03_terminology/glossary_review.tsv"
             rows = read_review_rows(review_path)
             reject_all(rows)
             rows.append(

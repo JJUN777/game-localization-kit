@@ -18,6 +18,7 @@ from glk.application.project_service import (
     load_project,
     update_project_source,
 )
+from glk.domain.workspace import PDF_SOURCE_FILE, WorkspacePaths
 from glk.extraction.layout import (
     LayoutProvider,
     POSTPROCESS_VERSION,
@@ -140,7 +141,8 @@ def _resolve_project_source(
 def _register_source(
     location: ProjectLocation, source_path: Path, force: bool
 ) -> tuple[ProjectLocation, Path, str]:
-    destination = location.path / "source/original.pdf"
+    paths = WorkspacePaths(location.path)
+    destination = paths.source_pdf
     destination.parent.mkdir(parents=True, exist_ok=True)
     source_hash = _sha256_file(source_path)
     same_path = source_path == destination.resolve()
@@ -148,7 +150,7 @@ def _register_source(
         destination_hash = _sha256_file(destination)
         if destination_hash != source_hash and not force:
             raise ExtractionError(
-                "A different source/original.pdf is already registered. "
+                f"A different {PDF_SOURCE_FILE} is already registered. "
                 "Use --force to replace the project source."
             )
         if destination_hash != source_hash or force:
@@ -158,8 +160,8 @@ def _register_source(
     registered_hash = _sha256_file(destination)
     if registered_hash != source_hash:
         raise ExtractionError("Registered PDF hash does not match the input PDF.")
-    if location.manifest.source_file != "source/original.pdf":
-        location = update_project_source(location, "source/original.pdf")
+    if location.manifest.source_file != PDF_SOURCE_FILE:
+        location = update_project_source(location, PDF_SOURCE_FILE)
     return location, destination, registered_hash
 
 
@@ -234,11 +236,11 @@ def extract_project_pdf(
 
     active_provider = provider or GeminiLayoutProvider.from_environment(model_name)
     location, registered_source, source_hash = _register_source(location, source_path, force)
-    pages_dir = location.path / "source/pages"
-    fragments_dir = location.path / "source/fragments"
-    layouts_dir = location.path / "source/layouts"
-    state_dir = location.path / "state"
-    for directory in (pages_dir, fragments_dir, layouts_dir, state_dir):
+    paths = WorkspacePaths(location.path)
+    pages_dir = paths.pdf_pages
+    fragments_dir = paths.pdf_fragments
+    layouts_dir = paths.pdf_layouts
+    for directory in (pages_dir, fragments_dir, layouts_dir, paths.state_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
     document = pymupdf.open(registered_source)
@@ -322,14 +324,14 @@ def extract_project_pdf(
         f"[PAGE {page_number}]\n{successful_text[page_number]}"
         for page_number in successful_pages
     )
-    output_path = location.path / "source/extracted.txt"
+    output_path = paths.source_extracted
     if failures:
-        output_path = location.path / "source/extracted.partial.txt"
+        output_path = paths.source_extracted_partial
     _write_text_atomic(output_path, combined)
     run_status = {
         "schema_version": 1,
         "status": "complete" if not failures else "partial",
-        "source_file": "source/original.pdf",
+        "source_file": PDF_SOURCE_FILE,
         "source_sha256": source_hash,
         "page_count": page_count,
         "selected_pages": list(selected_pages),
@@ -341,8 +343,7 @@ def extract_project_pdf(
         "output_file": str(output_path.relative_to(location.path)),
         "updated_at": _utc_now(),
     }
-    _write_json_atomic(location.path / "source/document.json", run_status)
-    _write_json_atomic(state_dir / "extraction.json", run_status)
+    _write_json_atomic(paths.pdf_acquisition_state, run_status)
     return ExtractionResult(
         project_path=str(location.path),
         source_pdf=str(registered_source),

@@ -19,6 +19,7 @@ from glk.extraction.image_ocr import (
 )
 from glk.infrastructure.gemini_layout import (
     GeminiConfigurationError,
+    load_gemini_environment,
     resolve_model_name,
 )
 
@@ -65,10 +66,9 @@ class GeminiImageOcrProvider:
     def from_environment(
         cls, model_name: str | None = None
     ) -> GeminiImageOcrProvider:
-        from dotenv import load_dotenv
         import os
 
-        load_dotenv(Path.cwd() / ".env", override=False)
+        load_gemini_environment()
         api_key = os.getenv("GEMINI_API_KEY", "").strip()
         if not api_key:
             raise GeminiConfigurationError(

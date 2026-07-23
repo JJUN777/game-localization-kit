@@ -74,15 +74,15 @@ class ImageOcrServiceTests(unittest.TestCase):
             project_path = workspace_root / "card_set"
             self.assertEqual(
                 load_project("card_set", workspace_root).manifest.source_file,
-                "source/images",
+                "02_source/assets/images",
             )
-            self.assertTrue((project_path / "source/images/card-1.png").is_file())
+            self.assertTrue((project_path / "02_source/assets/images/card-1.png").is_file())
             self.assertEqual(
-                (project_path / "source/ocr/individual/card-1.txt").read_text().strip(),
+                (project_path / "02_source/ocr/individual/card-1.txt").read_text().strip(),
                 "Deal 1{DMGR}.",
             )
             self.assertEqual(
-                (project_path / "source/ocr/combined.txt").read_text().strip(),
+                (project_path / "02_source/ocr/combined.txt").read_text().strip(),
                 "[card-1.txt]\nDeal 1{DMGR}.\n\n======================",
             )
 
@@ -114,7 +114,7 @@ class ImageOcrServiceTests(unittest.TestCase):
             self.assertTrue(result.dry_run)
             self.assertEqual(result.selected_images, ("sample.jpg",))
             self.assertFalse(
-                (workspace_root / "dry_cards/source/images/sample.jpg").exists()
+                (workspace_root / "dry_cards/02_source/assets/images/sample.jpg").exists()
             )
 
 

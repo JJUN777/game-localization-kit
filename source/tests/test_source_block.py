@@ -15,7 +15,7 @@ class SourceBlockTests(unittest.TestCase):
             schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
             id="pdf-p0001-b0001-1234567890",
             source_type="pdf",
-            source_file="source/original.pdf",
+            source_file="02_source/assets/original.pdf",
             page=1,
             source_order=1,
             block_order=1,

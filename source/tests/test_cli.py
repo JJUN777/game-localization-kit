@@ -42,6 +42,44 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertRegex(output.getvalue(), r"^glk \d+\.\d+\.\d+\n$")
 
+    def test_projects_command_lists_workspace_as_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "init",
+                        "First Game",
+                        "--workspace-root",
+                        str(workspace_root),
+                    ]
+                )
+                main(
+                    [
+                        "init",
+                        "Second Game",
+                        "--workspace-root",
+                        str(workspace_root),
+                    ]
+                )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(
+                    [
+                        "projects",
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--json",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["count"], 2)
+            self.assertEqual(
+                [project["project_id"] for project in payload["projects"]],
+                ["first_game", "second_game"],
+            )
+
     def test_retry_failed_command_reports_result_as_json(self) -> None:
         result = TranslationRetryResult(
             project_path="/tmp/workspaces/game",
@@ -52,8 +90,8 @@ class CliTests(unittest.TestCase):
             previous_error_count=3,
             remaining_error_count=0,
             warning_count=1,
-            review_file="/tmp/workspaces/game/review/translation.txt",
-            revision_file="/tmp/workspaces/game/revisions/retry.json",
+            review_file="/tmp/workspaces/game/04_translation/review.txt",
+            revision_file="/tmp/workspaces/game/04_translation/revisions/retry.json",
         )
         output = io.StringIO()
         with (
@@ -185,6 +223,80 @@ class CliTests(unittest.TestCase):
             self.assertTrue(payload["dry_run"])
             self.assertEqual(payload["selected_images"], ["characters/card.png"])
 
+    def test_run_auto_detects_pdf_from_project_input_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "init",
+                        "Default PDF",
+                        "--workspace-root",
+                        str(workspace_root),
+                    ]
+                )
+            pdf_path = workspace_root / "default_pdf/01_input/pdf/rulebook.pdf"
+            document = pymupdf.open()
+            page = document.new_page()
+            page.insert_text((72, 72), "Sample page")
+            document.save(pdf_path)
+            document.close()
+
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                exit_code = main(
+                    [
+                        "run",
+                        "--project",
+                        "default_pdf",
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["input_type"], "pdf")
+            self.assertEqual(Path(payload["source_pdf"]).resolve(), pdf_path.resolve())
+
+    def test_run_auto_detects_images_from_project_input_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "init",
+                        "Default Images",
+                        "--workspace-root",
+                        str(workspace_root),
+                    ]
+                )
+            image_folder = workspace_root / "default_images/01_input/images"
+            nested = image_folder / "characters"
+            nested.mkdir()
+            Image.new("RGB", (8, 8), "white").save(nested / "card.png")
+
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                exit_code = main(
+                    [
+                        "run",
+                        "--project",
+                        "default_images",
+                        "--workspace-root",
+                        str(workspace_root),
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["input_type"], "images")
+            self.assertEqual(payload["selected_images"], ["characters/card.png"])
+
     def test_run_prepares_review_and_qa_after_successful_acquisition(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -201,7 +313,7 @@ class CliTests(unittest.TestCase):
             project_path = workspace_root / "integrated_run"
             acquisition = ExtractionResult(
                 project_path=str(project_path),
-                source_pdf=str(project_path / "source/original.pdf"),
+                source_pdf=str(project_path / "02_source/assets/original.pdf"),
                 source_sha256="a" * 64,
                 model="test-model",
                 prompt_version="test-v1",
@@ -209,7 +321,7 @@ class CliTests(unittest.TestCase):
                 successful_pages=(1, 2),
                 cached_pages=(),
                 failures=(),
-                output_file=str(project_path / "source/extracted.txt"),
+                output_file=str(project_path / "02_source/extracted.txt"),
             )
             segmentation = SegmentationResult(
                 project_path=str(project_path),
@@ -217,9 +329,9 @@ class CliTests(unittest.TestCase):
                 input_sha256="b" * 64,
                 total_blocks=12,
                 flagged_blocks=0,
-                output_file=str(project_path / "segments/source.jsonl"),
-                draft_file=str(project_path / "draft/source.txt"),
-                review_file=str(project_path / "review/source.txt"),
+                output_file=str(project_path / ".glk/segments/source.jsonl"),
+                draft_file=str(project_path / "02_source/draft.txt"),
+                review_file=str(project_path / "02_source/review.txt"),
                 review_status="current",
                 review_created=True,
             )
@@ -233,8 +345,8 @@ class CliTests(unittest.TestCase):
                 warning_count=2,
                 info_count=0,
                 allowed_tokens=(),
-                output_file=str(project_path / "qa/source_qa.json"),
-                human_report_file=str(project_path / "qa/source_qa.md"),
+                output_file=str(project_path / ".glk/reports/source_qa.json"),
+                human_report_file=str(project_path / "02_source/qa.md"),
             )
             output = io.StringIO()
             with (
@@ -282,7 +394,7 @@ class CliTests(unittest.TestCase):
                 )
             acquisition = ExtractionResult(
                 project_path=str(workspace_root / "partial_run"),
-                source_pdf="source/original.pdf",
+                source_pdf="02_source/assets/original.pdf",
                 source_sha256="a" * 64,
                 model="test-model",
                 prompt_version="test-v1",
@@ -290,7 +402,7 @@ class CliTests(unittest.TestCase):
                 successful_pages=(1,),
                 cached_pages=(),
                 failures=(PageFailure(page=2, error="layout failed"),),
-                output_file="source/extracted.txt",
+                output_file="02_source/extracted.txt",
             )
             output = io.StringIO()
             with (
@@ -466,7 +578,7 @@ class CliTests(unittest.TestCase):
                 schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
                 id="pdf-p0001-b0001-0000000001",
                 source_type="pdf",
-                source_file="source/original.pdf",
+                source_file="02_source/assets/original.pdf",
                 page=1,
                 source_order=1,
                 block_order=1,
@@ -480,7 +592,7 @@ class CliTests(unittest.TestCase):
                 source_refs=("P001-F001",),
                 source_hash="sha256:" + hashlib.sha256(text.encode()).hexdigest(),
             )
-            source_path = workspace_root / "cli_review/segments/source.jsonl"
+            source_path = workspace_root / "cli_review/.glk/segments/source.jsonl"
             source_path.write_text(
                 json.dumps(block.to_dict(), ensure_ascii=False) + "\n",
                 encoding="utf-8",
@@ -501,7 +613,7 @@ class CliTests(unittest.TestCase):
                 )
             self.assertEqual(prepare_exit, 0)
             self.assertTrue(json.loads(prepare_output.getvalue())["review_created"])
-            review_path = workspace_root / "cli_review/review/source.txt"
+            review_path = workspace_root / "cli_review/02_source/review.txt"
             review_path.write_text(
                 review_path.read_text(encoding="utf-8").replace("l0", "10"),
                 encoding="utf-8",
@@ -523,14 +635,14 @@ class CliTests(unittest.TestCase):
             self.assertEqual(finalize_exit, 0)
             payload = json.loads(finalize_output.getvalue())
             self.assertEqual(payload["changed_blocks"], 1)
-            self.assertTrue((workspace_root / "cli_review/final/source.txt").is_file())
+            self.assertTrue((workspace_root / "cli_review/02_source/final.txt").is_file())
 
     def test_glossary_build_command_outputs_single_json_result(self) -> None:
         result = GlossaryBuildResult(
             project_path="/tmp/workspaces/game",
             approved_source_sha256="a" * 64,
             candidate_count=17,
-            output_file="/tmp/workspaces/game/terminology/glossary_review.tsv",
+            output_file="/tmp/workspaces/game/03_terminology/glossary_review.tsv",
             status="current",
             created=True,
         )
@@ -567,8 +679,8 @@ class CliTests(unittest.TestCase):
             rejected_count=6,
             manual_count=2,
             unverified_count=1,
-            review_file="/tmp/workspaces/game/terminology/glossary_review.tsv",
-            output_file="/tmp/workspaces/game/terminology/termbase.json",
+            review_file="/tmp/workspaces/game/03_terminology/glossary_review.tsv",
+            output_file="/tmp/workspaces/game/03_terminology/termbase.json",
             warnings=("One manual term is unverified.",),
         )
         output = io.StringIO()
@@ -584,7 +696,7 @@ class CliTests(unittest.TestCase):
                     "--project",
                     "game",
                     "--file",
-                    "terminology/glossary_review.tsv",
+                    "03_terminology/glossary_review.tsv",
                     "--allow-missing-terms",
                     "--json",
                 ]
@@ -608,11 +720,11 @@ class CliTests(unittest.TestCase):
             total_chunks=3,
             completed_blocks=24,
             completed_chunks=3,
-            output_file="/tmp/workspaces/game/segments/translation.jsonl",
-            draft_file="/tmp/workspaces/game/draft/translation.txt",
-            review_file="/tmp/workspaces/game/review/translation.txt",
+            output_file="/tmp/workspaces/game/.glk/segments/translation.jsonl",
+            draft_file="/tmp/workspaces/game/04_translation/draft.txt",
+            review_file="/tmp/workspaces/game/04_translation/review.txt",
             review_status="current",
-            prompt_file="/tmp/workspaces/game/translation_prompt.txt",
+            prompt_file="/tmp/workspaces/game/04_translation/prompt.txt",
             review_created=True,
         )
         output = io.StringIO()
@@ -651,8 +763,8 @@ class CliTests(unittest.TestCase):
             warning_count=1,
             info_count=0,
             issues=(),
-            json_report="/tmp/workspaces/game/qa/translation_qa.json",
-            markdown_report="/tmp/workspaces/game/qa/translation_qa.md",
+            json_report="/tmp/workspaces/game/.glk/reports/translation_qa.json",
+            markdown_report="/tmp/workspaces/game/04_translation/qa.md",
         )
         qa_output = io.StringIO()
         with (
@@ -681,12 +793,12 @@ class CliTests(unittest.TestCase):
             error_count=0,
             warning_count=1,
             issues=(),
-            output_file="/tmp/workspaces/game/final/translation.txt",
+            output_file="/tmp/workspaces/game/05_output/translation.txt",
             approved_segments_file=(
-                "/tmp/workspaces/game/segments/approved_translation.jsonl"
+                "/tmp/workspaces/game/.glk/segments/approved_translation.jsonl"
             ),
-            json_report="/tmp/workspaces/game/qa/translation_qa.json",
-            markdown_report="/tmp/workspaces/game/qa/translation_qa.md",
+            json_report="/tmp/workspaces/game/.glk/reports/translation_qa.json",
+            markdown_report="/tmp/workspaces/game/04_translation/qa.md",
             finalized=True,
         )
         finalize_output = io.StringIO()
@@ -810,7 +922,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             payload = json.loads(output.getvalue())
             self.assertTrue(payload["dry_run"])
-            self.assertFalse((workspace_root / "sample/source/original.pdf").exists())
+            self.assertFalse((workspace_root / "sample/02_source/assets/original.pdf").exists())
 
 
 if __name__ == "__main__":

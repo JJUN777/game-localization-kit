@@ -21,6 +21,7 @@ from glk.domain.translation_segment import (
     TranslationSegment,
     TranslationSegmentValidationError,
 )
+from glk.domain.workspace import WorkspacePaths
 
 
 TRANSLATION_REVIEW_VERSION = "translation-review-v1"
@@ -242,15 +243,16 @@ def _require_current_translation(
     workspace_root: str | Path,
 ) -> tuple[Path, dict[str, Any], tuple[TranslationSegment, ...]]:
     location = load_project(project, workspace_root)
+    paths = WorkspacePaths(location.path)
     pipeline = inspect_project(location.path)["pipeline"]
     if pipeline["translation_status"] != "current":
         raise TranslationReviewError(
             "Translation draft is not current. Complete or refresh glk translate first."
         )
     state = _load_json_object(
-        location.path / "state/translation.json", "translation state"
+        paths.translation_state, "translation state"
     )
-    segments = _load_segments(location.path / "segments/translation.jsonl")
+    segments = _load_segments(paths.translation_segments)
     return location.path, state, segments
 
 
@@ -261,12 +263,13 @@ def prepare_project_translation_review(
     force: bool = False,
     dry_run: bool = False,
 ) -> TranslationReviewPrepareResult:
-    """Create or deliberately reset review/translation.txt from the current draft."""
+    """Create or deliberately reset 04_translation/review.txt from the draft."""
     project_path, state, segments = _require_current_translation(
         project, workspace_root
     )
-    draft_path = project_path / "draft/translation.txt"
-    review_path = project_path / "review/translation.txt"
+    paths = WorkspacePaths(project_path)
+    draft_path = paths.translation_draft
+    review_path = paths.translation_review
     if not draft_path.is_file():
         raise TranslationReviewError(f"Translation draft not found: {draft_path}")
     draft_data = draft_path.read_bytes()
@@ -296,7 +299,7 @@ def prepare_project_translation_review(
                 "updated_at": _utc_now(),
             }
         )
-        _write_json_atomic(project_path / "state/translation.json", state)
+        _write_json_atomic(paths.translation_state, state)
 
     return TranslationReviewPrepareResult(
         project_path=str(project_path),
@@ -463,22 +466,23 @@ def _load_review_context(
     workspace_root: str | Path,
 ) -> _ReviewContext:
     location = load_project(project, workspace_root)
+    paths = WorkspacePaths(location.path)
     pipeline = inspect_project(location.path)["pipeline"]
     if pipeline["translation_status"] != "current":
         raise TranslationReviewError(
             "Translation draft is not current. Complete or refresh glk translate first."
         )
     state = _load_json_object(
-        location.path / "state/translation.json", "translation state"
+        paths.translation_state, "translation state"
     )
-    translation_path = location.path / "segments/translation.jsonl"
+    translation_path = paths.translation_segments
     translation_data = translation_path.read_bytes()
     translation_hash = _sha256_bytes(translation_data)
     if state.get("translation_output_sha256") != translation_hash:
         raise TranslationReviewError("Translation segments do not match their state.")
     segments = _load_segments(translation_path)
 
-    draft_path = location.path / "draft/translation.txt"
+    draft_path = paths.translation_draft
     if not draft_path.is_file():
         raise TranslationReviewError(f"Translation draft not found: {draft_path}")
     draft_hash = _sha256_bytes(draft_path.read_bytes())
@@ -493,14 +497,14 @@ def _load_review_context(
             "glk translation prepare --force to reset it deliberately."
         )
 
-    review_path = location.path / "review/translation.txt"
+    review_path = paths.translation_review
     if not review_path.is_file():
         raise TranslationReviewError(
             f"Translation review TXT not found: {review_path}. "
             "Run glk translation prepare first."
         )
     review_data = review_path.read_bytes()
-    termbase_path = location.path / "terminology/termbase.json"
+    termbase_path = paths.termbase
     return _ReviewContext(
         project_path=location.path,
         project_id=location.manifest.project_id,
@@ -720,7 +724,8 @@ def save_project_translation_review(
         normalized[segment.source_block_id] = text
 
     review_data = _render_review_text(context.segments, normalized)
-    _write_bytes_atomic(context.project_path / "review/translation.txt", review_data)
+    paths = WorkspacePaths(context.project_path)
+    _write_bytes_atomic(paths.translation_review, review_data)
     return get_project_translation_review_document(
         project=context.project_path,
         workspace_root=workspace_root,
@@ -804,8 +809,9 @@ def _write_qa_artifacts(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     ).encode("utf-8")
     markdown_data = _markdown_report(payload)
-    json_path = context.project_path / "qa/translation_qa.json"
-    markdown_path = context.project_path / "qa/translation_qa.md"
+    paths = WorkspacePaths(context.project_path)
+    json_path = paths.translation_qa_json
+    markdown_path = paths.translation_qa_markdown
     _write_bytes_atomic(json_path, json_data)
     _write_bytes_atomic(markdown_path, markdown_data)
     errors, warnings, information = _issue_counts(issues)
@@ -821,13 +827,13 @@ def _write_qa_artifacts(
         "error_count": errors,
         "warning_count": warnings,
         "info_count": information,
-        "qa_json_file": "qa/translation_qa.json",
+        "qa_json_file": paths.relative(paths.translation_qa_json),
         "qa_json_sha256": _sha256_bytes(json_data),
-        "qa_markdown_file": "qa/translation_qa.md",
+        "qa_markdown_file": paths.relative(paths.translation_qa_markdown),
         "qa_markdown_sha256": _sha256_bytes(markdown_data),
         "updated_at": _utc_now(),
     }
-    _write_json_atomic(context.project_path / "state/translation_review.json", state)
+    _write_json_atomic(paths.translation_review_state, state)
     return json_path, markdown_path, state
 
 
@@ -971,8 +977,9 @@ def finalize_project_translation_review(
     changed_blocks = sum(item.corrected_translation is not None for item in approved)
     approved_data = _serialize_approved(approved)
     final_data = _render_final_translation(approved)
-    approved_path = context.project_path / "segments/approved_translation.jsonl"
-    final_path = context.project_path / "final/translation.txt"
+    paths = WorkspacePaths(context.project_path)
+    approved_path = paths.approved_translation_segments
+    final_path = paths.final_translation
     if not dry_run:
         _write_bytes_atomic(approved_path, approved_data)
         _write_bytes_atomic(final_path, final_data)
@@ -982,15 +989,17 @@ def finalize_project_translation_review(
             {
                 "status": "approved",
                 "changed_blocks": changed_blocks,
-                "approved_segments_file": "segments/approved_translation.jsonl",
+                "approved_segments_file": paths.relative(
+                    paths.approved_translation_segments
+                ),
                 "approved_segments_sha256": _sha256_bytes(approved_data),
-                "final_file": "final/translation.txt",
+                "final_file": paths.relative(paths.final_translation),
                 "final_sha256": _sha256_bytes(final_data),
                 "approved_at": _utc_now(),
             }
         )
         _write_json_atomic(
-            context.project_path / "state/translation_review.json", state
+            paths.translation_review_state, state
         )
 
     return TranslationFinalizeResult(

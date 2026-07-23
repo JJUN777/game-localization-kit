@@ -20,10 +20,10 @@ def write_json(path: Path, value: object) -> None:
 
 def create_pdf_source(workspace_root: Path) -> Path:
     location = create_project(name="PDF Source", workspace_root=workspace_root)
-    update_project_source(location, "source/original.pdf")
+    update_project_source(location, "02_source/assets/original.pdf")
     project_path = location.path
     write_json(
-        project_path / "source/document.json",
+        project_path / ".glk/state/pdf_acquisition.json",
         {
             "status": "complete",
             "successful_pages": [1],
@@ -31,7 +31,7 @@ def create_pdf_source(workspace_root: Path) -> Path:
         },
     )
     write_json(
-        project_path / "source/fragments/page_001.json",
+        project_path / ".glk/cache/pdf/fragments/page_001.json",
         {
             "page_size": [100, 200],
             "fragments": [
@@ -42,7 +42,7 @@ def create_pdf_source(workspace_root: Path) -> Path:
         },
     )
     write_json(
-        project_path / "source/layouts/page_001.json",
+        project_path / ".glk/cache/pdf/layouts/page_001.json",
         {
             "reconstructed_blocks": [
                 {
@@ -71,10 +71,10 @@ def create_pdf_source(workspace_root: Path) -> Path:
 
 def create_image_source(workspace_root: Path, *, status: str = "complete") -> Path:
     location = create_project(name="Image Source", workspace_root=workspace_root)
-    update_project_source(location, "source/images")
+    update_project_source(location, "02_source/assets/images")
     project_path = location.path
     write_json(
-        project_path / "source/ocr/run_summary.json",
+        project_path / ".glk/state/image_ocr.json",
         {
             "status": status,
             "successful_images": ["characters/card-2.jpg"],
@@ -82,9 +82,9 @@ def create_image_source(workspace_root: Path, *, status: str = "complete") -> Pa
         },
     )
     write_json(
-        project_path / "source/ocr/results/characters/card-2.json",
+        project_path / ".glk/cache/ocr/results/characters/card-2.json",
         {
-            "source_image": "source/images/characters/card-2.jpg",
+            "source_image": "02_source/assets/images/characters/card-2.jpg",
             "ocr": {
                 "blocks": [
                     {
@@ -126,11 +126,11 @@ class SegmentationServiceTests(unittest.TestCase):
             )
             self.assertEqual(first.total_blocks, 2)
             self.assertEqual(first.flagged_blocks, 0)
-            blocks = read_blocks(project_path / "segments/source.jsonl")
+            blocks = read_blocks(project_path / ".glk/segments/source.jsonl")
             self.assertEqual([block.raw_text for block in blocks], ["Title", "Body text."])
             self.assertEqual(
-                (project_path / "draft/source.txt").read_bytes(),
-                (project_path / "review/source.txt").read_bytes(),
+                (project_path / "02_source/draft.txt").read_bytes(),
+                (project_path / "02_source/review.txt").read_bytes(),
             )
             self.assertTrue(first.review_created)
             self.assertEqual(blocks[0].bbox, (100.0, 100.0, 500.0, 200.0))
@@ -142,7 +142,7 @@ class SegmentationServiceTests(unittest.TestCase):
             )
             self.assertTrue(cached.cached)
 
-            document_path = project_path / "source/document.json"
+            document_path = project_path / ".glk/state/pdf_acquisition.json"
             document = json.loads(document_path.read_text(encoding="utf-8"))
             document["updated_at"] = "2099-01-01T00:00:00Z"
             document["cached_pages"] = [1]
@@ -152,7 +152,7 @@ class SegmentationServiceTests(unittest.TestCase):
             )
             self.assertTrue(volatile_metadata_change.cached)
 
-            layout_path = project_path / "source/layouts/page_001.json"
+            layout_path = project_path / ".glk/cache/pdf/layouts/page_001.json"
             layout = json.loads(layout_path.read_text(encoding="utf-8"))
             layout["reconstructed_blocks"][1]["text"] = "Changed body text."
             write_json(layout_path, layout)
@@ -161,7 +161,7 @@ class SegmentationServiceTests(unittest.TestCase):
             )
             self.assertFalse(changed.cached)
             self.assertEqual(changed.review_status, "stale")
-            changed_blocks = read_blocks(project_path / "segments/source.jsonl")
+            changed_blocks = read_blocks(project_path / ".glk/segments/source.jsonl")
             self.assertEqual([block.id for block in changed_blocks], first_ids)
             self.assertNotEqual(changed_blocks[1].source_hash, blocks[1].source_hash)
 
@@ -174,8 +174,8 @@ class SegmentationServiceTests(unittest.TestCase):
             )
             self.assertEqual(result.total_blocks, 2)
             self.assertEqual(result.flagged_blocks, 1)
-            blocks = read_blocks(project_path / "segments/source.jsonl")
-            self.assertEqual(blocks[0].source_file, "source/images/characters/card-2.jpg")
+            blocks = read_blocks(project_path / ".glk/segments/source.jsonl")
+            self.assertEqual(blocks[0].source_file, "02_source/assets/images/characters/card-2.jpg")
             self.assertEqual(blocks[0].bbox, (100.0, 50.0, 900.0, 150.0))
             self.assertEqual(blocks[0].status, "raw")
             self.assertEqual(blocks[1].status, "flagged")
@@ -199,7 +199,7 @@ class SegmentationServiceTests(unittest.TestCase):
             )
             self.assertTrue(result.dry_run)
             self.assertEqual(result.total_blocks, 2)
-            self.assertFalse((project_path / "segments/source.jsonl").exists())
+            self.assertFalse((project_path / ".glk/segments/source.jsonl").exists())
 
 
 if __name__ == "__main__":

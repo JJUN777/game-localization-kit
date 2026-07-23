@@ -28,7 +28,7 @@ def make_block(
         schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
         id=f"image-card-b{order:04d}-{order:010d}",
         source_type="image",
-        source_file="source/images/card.jpg",
+        source_file="02_source/assets/images/card.jpg",
         page=None,
         source_order=order,
         block_order=order,
@@ -109,8 +109,8 @@ class SourceQaServiceTests(unittest.TestCase):
             workspace_root = Path(temporary_directory) / "workspaces"
             location = create_project(name="QA Project", workspace_root=workspace_root)
             blocks = [make_block(1, "Deal 10 {DMGR}.")]
-            write_blocks(location.path / "segments/source.jsonl", blocks)
-            prompt_path = location.path / "source/ocr_prompt.txt"
+            write_blocks(location.path / ".glk/segments/source.jsonl", blocks)
+            prompt_path = location.path / "02_source/assets/ocr_prompt.txt"
             prompt_path.write_text("Eight-point burst: {DMGR}", encoding="utf-8")
 
             first = run_project_source_qa(
@@ -118,10 +118,10 @@ class SourceQaServiceTests(unittest.TestCase):
             )
             self.assertEqual(first.total_issues, 0)
             self.assertEqual(first.allowed_tokens, ("DMGR",))
-            report_path = location.path / "qa/source_qa.json"
+            report_path = location.path / ".glk/reports/source_qa.json"
             report = json.loads(report_path.read_text(encoding="utf-8"))
             self.assertEqual(report["issues"], [])
-            human_report = (location.path / "qa/source_qa.md").read_text(encoding="utf-8")
+            human_report = (location.path / "02_source/qa.md").read_text(encoding="utf-8")
             self.assertIn("발견된 의심 항목이 없습니다", human_report)
 
             cached = run_project_source_qa(
@@ -137,7 +137,7 @@ class SourceQaServiceTests(unittest.TestCase):
             self.assertEqual(changed.total_issues, 1)
             changed_report = json.loads(report_path.read_text(encoding="utf-8"))
             self.assertEqual(changed_report["issues"][0]["code"], "TOKEN_UNKNOWN")
-            human_report = (location.path / "qa/source_qa.md").read_text(encoding="utf-8")
+            human_report = (location.path / "02_source/qa.md").read_text(encoding="utf-8")
             self.assertIn("TOKEN_UNKNOWN", human_report)
             self.assertIn(blocks[0].id, human_report)
 
@@ -146,7 +146,7 @@ class SourceQaServiceTests(unittest.TestCase):
             workspace_root = Path(temporary_directory) / "workspaces"
             location = create_project(name="QA Dry Run", workspace_root=workspace_root)
             write_blocks(
-                location.path / "segments/source.jsonl",
+                location.path / ".glk/segments/source.jsonl",
                 [make_block(1, "[ILLEGIBLE]", legibility="uncertain")],
             )
             result = run_project_source_qa(
@@ -154,7 +154,7 @@ class SourceQaServiceTests(unittest.TestCase):
             )
             self.assertTrue(result.dry_run)
             self.assertGreater(result.total_issues, 0)
-            self.assertFalse((location.path / "qa/source_qa.json").exists())
+            self.assertFalse((location.path / ".glk/reports/source_qa.json").exists())
 
 
 if __name__ == "__main__":

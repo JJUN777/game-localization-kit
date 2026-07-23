@@ -14,6 +14,7 @@ from typing import Any, Iterable
 from glk.application.project_service import load_project
 from glk.application.source_review_service import prepare_project_source_review
 from glk.domain.source_block import SOURCE_BLOCK_SCHEMA_VERSION, SourceBlock
+from glk.domain.workspace import IMAGE_SOURCE_ROOT, PDF_SOURCE_FILE, WorkspacePaths
 
 
 SEGMENTATION_VERSION = "source-block-v2"
@@ -81,7 +82,10 @@ def _fingerprint_files(project_path: Path, paths: Iterable[Path]) -> str:
         digest.update(len(relative).to_bytes(4, "big"))
         digest.update(relative)
         data = path.read_bytes()
-        if relative_name in {"source/document.json", "source/ocr/run_summary.json"}:
+        if relative_name in {
+            ".glk/state/pdf_acquisition.json",
+            ".glk/state/image_ocr.json",
+        }:
             try:
                 metadata = json.loads(data.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -206,7 +210,8 @@ def _validate_complete_run(metadata: dict[str, Any], path: Path) -> None:
 
 
 def _build_pdf_blocks(project_path: Path) -> tuple[list[SourceBlock], list[Path]]:
-    document_path = project_path / "source/document.json"
+    paths = WorkspacePaths(project_path)
+    document_path = paths.pdf_acquisition_state
     document = _read_json(document_path)
     _validate_complete_run(document, document_path)
     pages = document.get("successful_pages")
@@ -220,8 +225,8 @@ def _build_pdf_blocks(project_path: Path) -> tuple[list[SourceBlock], list[Path]
             raise SegmentationError(f"Invalid successful page number: {page_value!r}")
         page = page_value
         stem = f"page_{page:03d}"
-        layout_path = project_path / f"source/layouts/{stem}.json"
-        fragment_path = project_path / f"source/fragments/{stem}.json"
+        layout_path = paths.pdf_layouts / f"{stem}.json"
+        fragment_path = paths.pdf_fragments / f"{stem}.json"
         layout = _read_json(layout_path)
         fragment_data = _read_json(fragment_path)
         input_paths.extend((layout_path, fragment_path))
@@ -253,12 +258,12 @@ def _build_pdf_blocks(project_path: Path) -> tuple[list[SourceBlock], list[Path]
                 schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
                 id=_block_id(
                     source_type="pdf",
-                    source_file="source/original.pdf",
+                    source_file=PDF_SOURCE_FILE,
                     page=page,
                     block_order=block_order,
                 ),
                 source_type="pdf",
-                source_file="source/original.pdf",
+                source_file=PDF_SOURCE_FILE,
                 page=page,
                 source_order=source_order,
                 block_order=block_order,
@@ -301,7 +306,8 @@ def _normalized_image_bbox(value: Any) -> tuple[float, float, float, float]:
 
 
 def _build_image_blocks(project_path: Path) -> tuple[list[SourceBlock], list[Path]]:
-    summary_path = project_path / "source/ocr/run_summary.json"
+    paths = WorkspacePaths(project_path)
+    summary_path = paths.image_ocr_state
     summary = _read_json(summary_path)
     _validate_complete_run(summary, summary_path)
     images = summary.get("successful_images")
@@ -312,7 +318,7 @@ def _build_image_blocks(project_path: Path) -> tuple[list[SourceBlock], list[Pat
     source_order = 0
     for image_value in images:
         relative = _safe_image_relative(image_value)
-        result_path = project_path / "source/ocr/results" / Path(
+        result_path = paths.ocr_results / Path(
             *relative.with_suffix(".json").parts
         )
         result = _read_json(result_path)
@@ -327,7 +333,7 @@ def _build_image_blocks(project_path: Path) -> tuple[list[SourceBlock], list[Pat
             raise SegmentationError(f"Invalid OCR warnings: {result_path}")
         source_file = result.get("source_image")
         _safe_image_relative(source_file)
-        expected_source_file = f"source/images/{relative.as_posix()}"
+        expected_source_file = f"{IMAGE_SOURCE_ROOT}/{relative.as_posix()}"
         if source_file != expected_source_file:
             raise SegmentationError(
                 f"OCR result source mismatch: expected {expected_source_file}, "
@@ -398,7 +404,7 @@ def _load_cached_result(
         ):
             return None
         return SegmentationResult(
-            project_path=str(state_path.parents[1]),
+            project_path=str(state_path.parents[2]),
             source_type=source_type,
             input_sha256=input_sha256,
             total_blocks=int(state["total_blocks"]),
@@ -418,10 +424,11 @@ def segment_project_source(
     dry_run: bool = False,
 ) -> SegmentationResult:
     location = load_project(project, workspace_root)
-    if location.manifest.source_file == "source/original.pdf":
+    paths = WorkspacePaths(location.path)
+    if location.manifest.source_file == PDF_SOURCE_FILE:
         source_type = "pdf"
         blocks, input_paths = _build_pdf_blocks(location.path)
-    elif location.manifest.source_file == "source/images":
+    elif location.manifest.source_file == IMAGE_SOURCE_ROOT:
         source_type = "image"
         blocks, input_paths = _build_image_blocks(location.path)
     else:
@@ -429,9 +436,9 @@ def segment_project_source(
             "Project has no supported registered source; run glk extract or glk ocr first."
         )
     input_hash = _fingerprint_files(location.path, input_paths)
-    output_path = location.path / "segments/source.jsonl"
-    state_path = location.path / "state/segmentation.json"
-    manifest_path = location.path / "segments/source_manifest.json"
+    output_path = paths.source_segments
+    state_path = paths.segmentation_state
+    manifest_path = paths.source_manifest
     flagged_count = sum(block.status == "flagged" for block in blocks)
     if dry_run:
         return SegmentationResult(
@@ -472,7 +479,7 @@ def segment_project_source(
         "block_schema_version": SOURCE_BLOCK_SCHEMA_VERSION,
         "total_blocks": len(blocks),
         "flagged_blocks": flagged_count,
-        "output_file": "segments/source.jsonl",
+        "output_file": paths.relative(paths.source_segments),
         "output_sha256": output_hash,
         "updated_at": _utc_now(),
     }

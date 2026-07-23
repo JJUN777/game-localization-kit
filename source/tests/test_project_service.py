@@ -8,9 +8,11 @@ from pathlib import Path
 
 from glk.application.project_service import (
     PROJECT_DIRECTORIES,
+    PROJECT_INPUT_DIRECTORIES,
     ProjectExistsError,
     create_project,
     inspect_project,
+    list_projects,
     load_project,
 )
 from glk.domain.project import ProjectManifest, ProjectValidationError, normalize_project_id
@@ -31,6 +33,14 @@ class ProjectManifestTests(unittest.TestCase):
         with self.assertRaises(ProjectValidationError):
             ProjectManifest.from_dict(value)
 
+    def test_manifest_rejects_legacy_workspace_schema(self) -> None:
+        value = ProjectManifest.create(name="Test").to_dict()
+        value["schema_version"] = 1
+        with self.assertRaisesRegex(
+            ProjectValidationError, "Unsupported project schema version: 1"
+        ):
+            ProjectManifest.from_dict(value)
+
 
 class ProjectServiceTests(unittest.TestCase):
     def test_create_and_load_project(self) -> None:
@@ -39,14 +49,43 @@ class ProjectServiceTests(unittest.TestCase):
             location = create_project(name="Demo Game", workspace_root=root)
 
             self.assertTrue((location.path / "project.json").is_file())
-            for relative_path in PROJECT_DIRECTORIES:
+            for relative_path in PROJECT_INPUT_DIRECTORIES + PROJECT_DIRECTORIES:
                 self.assertTrue((location.path / relative_path).is_dir())
 
             with (location.path / "project.json").open(encoding="utf-8") as file:
                 raw_manifest = json.load(file)
+            self.assertEqual(raw_manifest["schema_version"], 2)
             self.assertIsNone(raw_manifest["source_file"])
             self.assertEqual(load_project("demo_game", root).manifest.name, "Demo Game")
             self.assertTrue(inspect_project("demo_game", root)["ok"])
+            self.assertEqual(
+                {
+                    path.name
+                    for path in location.path.iterdir()
+                    if path.is_dir()
+                },
+                {
+                    "01_input",
+                    "02_source",
+                    "03_terminology",
+                    "04_translation",
+                    "05_output",
+                    ".glk",
+                },
+            )
+            for legacy_directory in (
+                "input",
+                "source",
+                "segments",
+                "draft",
+                "review",
+                "final",
+                "terminology",
+                "qa",
+                "state",
+                "output",
+            ):
+                self.assertFalse((location.path / legacy_directory).exists())
 
     def test_duplicate_project_does_not_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -64,6 +103,31 @@ class ProjectServiceTests(unittest.TestCase):
             self.assertTrue(location.dry_run)
             self.assertFalse(root.exists())
 
+    def test_lists_projects_and_skips_damaged_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory) / "workspaces"
+            beta = create_project(name="Beta Game", workspace_root=root)
+            alpha = create_project(name="Alpha Game", workspace_root=root)
+            (alpha.path / "01_input/pdf/rulebook.pdf").write_bytes(b"%PDF-1.4\n")
+            (beta.path / "01_input/images/card.png").write_bytes(b"image")
+            damaged = root / "damaged"
+            damaged.mkdir()
+            (damaged / "project.json").write_text("{", encoding="utf-8")
+            (root / "unrelated").mkdir()
+
+            result = list_projects(root)
+
+            self.assertEqual(
+                [project.project_id for project in result.projects],
+                ["alpha_game", "beta_game"],
+            )
+            self.assertEqual(result.projects[0].source_type, "pdf")
+            self.assertEqual(result.projects[1].source_type, "images")
+            self.assertEqual(result.projects[0].stage, "not_started")
+            self.assertFalse(result.projects[0].final_translation_approved)
+            self.assertEqual(len(result.warnings), 1)
+            self.assertEqual(result.warnings[0].directory, "damaged")
+
     def test_pipeline_status_distinguishes_pending_approved_and_stale(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory) / "workspaces"
@@ -72,17 +136,17 @@ class ProjectServiceTests(unittest.TestCase):
             self.assertFalse(initial["source_acquired"])
             self.assertEqual(initial["human_review"], "not_ready")
 
-            manifest = location.manifest.with_source_file("source/original.pdf")
+            manifest = location.manifest.with_source_file("02_source/assets/original.pdf")
             (location.path / "project.json").write_text(
                 json.dumps(manifest.to_dict()), encoding="utf-8"
             )
-            (location.path / "source/document.json").write_text(
+            (location.path / ".glk/state/pdf_acquisition.json").write_text(
                 json.dumps({"status": "complete", "failures": []}), encoding="utf-8"
             )
-            source_path = location.path / "segments/source.jsonl"
+            source_path = location.path / ".glk/segments/source.jsonl"
             source_path.write_text('{"block":"one"}\n', encoding="utf-8")
             source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
-            (location.path / "state/source_qa.json").write_text(
+            (location.path / ".glk/state/source_qa.json").write_text(
                 json.dumps(
                     {
                         "status": "complete",
@@ -92,8 +156,8 @@ class ProjectServiceTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (location.path / "review/source.txt").write_text("review", encoding="utf-8")
-            review_state_path = location.path / "state/source_review.json"
+            (location.path / "02_source/review.txt").write_text("review", encoding="utf-8")
+            review_state_path = location.path / ".glk/state/source_review.json"
             review_state_path.write_text(
                 json.dumps(
                     {
@@ -110,8 +174,8 @@ class ProjectServiceTests(unittest.TestCase):
             self.assertEqual(pending["qa_issues"], 2)
             self.assertEqual(pending["human_review"], "pending")
 
-            final_path = location.path / "final/source.txt"
-            approved_path = location.path / "segments/approved_source.jsonl"
+            final_path = location.path / "02_source/final.txt"
+            approved_path = location.path / ".glk/segments/approved_source.jsonl"
             final_path.write_text("final", encoding="utf-8")
             approved_path.write_text(
                 "approved\n", encoding="utf-8"
@@ -122,7 +186,7 @@ class ProjectServiceTests(unittest.TestCase):
                         "status": "approved",
                         "source_sha256": source_hash,
                         "review_sha256": hashlib.sha256(
-                            (location.path / "review/source.txt").read_bytes()
+                            (location.path / "02_source/review.txt").read_bytes()
                         ).hexdigest(),
                         "final_sha256": hashlib.sha256(final_path.read_bytes()).hexdigest(),
                         "approved_blocks_sha256": hashlib.sha256(
@@ -137,9 +201,9 @@ class ProjectServiceTests(unittest.TestCase):
             self.assertTrue(approved["final_source_approved"])
             self.assertEqual(approved["glossary_status"], "not_built")
 
-            glossary_path = location.path / "terminology/glossary_review.tsv"
+            glossary_path = location.path / "03_terminology/glossary_review.tsv"
             glossary_path.write_text("status\tsource_term\n", encoding="utf-8")
-            (location.path / "state/glossary_build.json").write_text(
+            (location.path / ".glk/state/glossary_build.json").write_text(
                 json.dumps(
                     {
                         "status": "complete",
@@ -157,9 +221,9 @@ class ProjectServiceTests(unittest.TestCase):
             self.assertEqual(glossary_ready["glossary_candidates"], 12)
             self.assertEqual(glossary_ready["termbase_status"], "not_built")
 
-            termbase_path = location.path / "terminology/termbase.json"
+            termbase_path = location.path / "03_terminology/termbase.json"
             termbase_path.write_text('{"entries": []}\n', encoding="utf-8")
-            (location.path / "state/glossary_import.json").write_text(
+            (location.path / ".glk/state/glossary_import.json").write_text(
                 json.dumps(
                     {
                         "status": "complete",
@@ -190,7 +254,7 @@ class ProjectServiceTests(unittest.TestCase):
             self.assertEqual(termbase_stale["termbase_status"], "stale")
             self.assertEqual(termbase_stale["translation_status"], "not_ready")
 
-            (location.path / "review/source.txt").write_text(
+            (location.path / "02_source/review.txt").write_text(
                 "edited after approval", encoding="utf-8"
             )
             modified = inspect_project("pipeline_state", root)["pipeline"]

@@ -18,6 +18,7 @@ from typing import Any
 
 from glk.application.project_service import inspect_project, load_project
 from glk.domain.source_block import SourceBlock, SourceBlockValidationError
+from glk.domain.workspace import IMAGE_SOURCE_ROOT, WorkspacePaths
 
 
 GLOSSARY_BUILD_VERSION = "glossary-candidates-local-v1"
@@ -254,7 +255,7 @@ def _write_json_atomic(path: Path, value: Any) -> None:
 
 
 def _load_approved_blocks(project_path: Path) -> tuple[list[SourceBlock], bytes]:
-    path = project_path / "segments/approved_source.jsonl"
+    path = WorkspacePaths(project_path).approved_source_segments
     if not path.is_file():
         raise GlossaryBuildError(
             f"Final common source not found: {path}. Run glk review finalize first."
@@ -336,7 +337,7 @@ def _clean_example(text: str, limit: int = 240) -> str:
 def _block_location(block: SourceBlock) -> str:
     if block.source_type == "pdf":
         return f"p{block.page}"
-    prefix = "source/images/"
+    prefix = IMAGE_SOURCE_ROOT + "/"
     return block.source_file[len(prefix) :] if block.source_file.startswith(prefix) else block.source_file
 
 
@@ -528,6 +529,7 @@ def build_project_glossary_candidates(
     dry_run: bool = False,
 ) -> GlossaryBuildResult:
     location = load_project(project, workspace_root)
+    paths = WorkspacePaths(location.path)
     pipeline = inspect_project(location.path)["pipeline"]
     if not pipeline["final_source_approved"]:
         raise GlossaryBuildError(
@@ -542,8 +544,8 @@ def build_project_glossary_candidates(
         max_words=max_words,
         max_candidates=max_candidates,
     )
-    output_path = location.path / "terminology/glossary_review.tsv"
-    state_path = location.path / "state/glossary_build.json"
+    output_path = paths.glossary_review
+    state_path = paths.glossary_build_state
     state = _read_state(state_path)
     parameters = {
         "min_frequency": min_frequency,
@@ -590,11 +592,11 @@ def build_project_glossary_candidates(
             "schema_version": 1,
             "status": "complete",
             "version": GLOSSARY_BUILD_VERSION,
-            "input_file": "segments/approved_source.jsonl",
+            "input_file": paths.relative(paths.approved_source_segments),
             "approved_source_sha256": approved_hash,
             "parameters": parameters,
             "candidate_count": len(candidates),
-            "output_file": "terminology/glossary_review.tsv",
+            "output_file": paths.relative(paths.glossary_review),
             "baseline_output_sha256": _sha256_bytes(output_data),
             "updated_at": _utc_now(),
         },
@@ -712,6 +714,7 @@ def import_project_glossary(
     allow_missing_terms: bool = False,
 ) -> GlossaryImportResult:
     location = load_project(project, workspace_root)
+    paths = WorkspacePaths(location.path)
     pipeline = inspect_project(location.path)["pipeline"]
     if not pipeline["final_source_approved"]:
         raise GlossaryImportError(
@@ -726,7 +729,7 @@ def import_project_glossary(
 
     blocks, approved_data = _load_approved_blocks(location.path)
     approved_hash = _sha256_bytes(approved_data)
-    build_state_path = location.path / "state/glossary_build.json"
+    build_state_path = paths.glossary_build_state
     build_state = _read_state(build_state_path)
     if (
         not build_state
@@ -907,9 +910,9 @@ def import_project_glossary(
 
     normalized_tsv = _render_imported_review_tsv(normalized_rows)
     review_hash = _sha256_bytes(normalized_tsv)
-    canonical_review_path = location.path / "terminology/glossary_review.tsv"
-    output_path = location.path / "terminology/termbase.json"
-    state_path = location.path / "state/glossary_import.json"
+    canonical_review_path = paths.glossary_review
+    output_path = paths.termbase
+    state_path = paths.glossary_import_state
     import_state = _read_state(state_path)
     if (
         import_state
@@ -967,10 +970,10 @@ def import_project_glossary(
             "schema_version": 1,
             "status": "complete",
             "version": GLOSSARY_IMPORT_VERSION,
-            "input_file": "terminology/glossary_review.tsv",
+            "input_file": paths.relative(paths.glossary_review),
             "approved_source_sha256": approved_hash,
             "review_tsv_sha256": review_hash,
-            "output_file": "terminology/termbase.json",
+            "output_file": paths.relative(paths.termbase),
             "termbase_sha256": termbase_hash,
             "entry_count": len(entries),
             "active_count": active_count,

@@ -30,7 +30,7 @@ def make_block(order: int, text: str, *, block_type: str = "body") -> SourceBloc
         schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
         id=f"pdf-p0001-b{order:04d}-{order:010d}",
         source_type="pdf",
-        source_file="source/original.pdf",
+        source_file="02_source/assets/original.pdf",
         page=1,
         source_order=order,
         block_order=order,
@@ -63,15 +63,15 @@ def create_translation_project(
     ]
     source_data = serialize_blocks(raw_blocks)
     approved_data = serialize_blocks(blocks)
-    source_path = project_path / "segments/source.jsonl"
-    approved_path = project_path / "segments/approved_source.jsonl"
-    review_path = project_path / "review/source.txt"
-    final_path = project_path / "final/source.txt"
+    source_path = project_path / ".glk/segments/source.jsonl"
+    approved_path = project_path / ".glk/segments/approved_source.jsonl"
+    review_path = project_path / "02_source/review.txt"
+    final_path = project_path / "02_source/final.txt"
     source_path.write_bytes(source_data)
     approved_path.write_bytes(approved_data)
     review_path.write_text("review source", encoding="utf-8")
     final_path.write_text("final source", encoding="utf-8")
-    (project_path / "state/source_review.json").write_text(
+    (project_path / ".glk/state/source_review.json").write_text(
         json.dumps(
             {
                 "status": "approved",
@@ -84,14 +84,14 @@ def create_translation_project(
         encoding="utf-8",
     )
 
-    glossary_path = project_path / "terminology/glossary_review.tsv"
+    glossary_path = project_path / "03_terminology/glossary_review.tsv"
     glossary_path.write_text(
         "status\tsource_term\ttranslation\tcategory\tnote\tvariants\t"
         "occurrences\tlocations\texample\tcandidate_id\n",
         encoding="utf-8",
     )
     approved_hash = hashlib.sha256(approved_data).hexdigest()
-    (project_path / "state/glossary_build.json").write_text(
+    (project_path / ".glk/state/glossary_build.json").write_text(
         json.dumps(
             {
                 "status": "complete",
@@ -158,12 +158,12 @@ def create_translation_project(
             },
         ],
     }
-    termbase_path = project_path / "terminology/termbase.json"
+    termbase_path = project_path / "03_terminology/termbase.json"
     termbase_path.write_text(
         json.dumps(termbase, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    (project_path / "state/glossary_import.json").write_text(
+    (project_path / ".glk/state/glossary_import.json").write_text(
         json.dumps(
             {
                 "status": "complete",
@@ -288,7 +288,7 @@ class TranslationFoundationTests(unittest.TestCase):
             segments = [
                 TranslationSegment.from_dict(json.loads(line))
                 for line in (
-                    project_path / "segments/translation.jsonl"
+                    project_path / ".glk/segments/translation.jsonl"
                 ).read_text(encoding="utf-8").splitlines()
             ]
             self.assertEqual(len(segments), 3)
@@ -296,7 +296,7 @@ class TranslationFoundationTests(unittest.TestCase):
                 segments[1].translated_text,
                 "각 사냥꾼은 스태미나 2를 얻습니다.",
             )
-            draft = (project_path / "draft/translation.txt").read_text(
+            draft = (project_path / "04_translation/draft.txt").read_text(
                 encoding="utf-8"
             )
             self.assertIn("[ORIGINAL]", draft)
@@ -349,7 +349,7 @@ class TranslationFoundationTests(unittest.TestCase):
                     provider=provider,
                 )
             state = json.loads(
-                (project_path / "state/translation.json").read_text(encoding="utf-8")
+                (project_path / ".glk/state/translation.json").read_text(encoding="utf-8")
             )
             self.assertEqual(state["status"], "partial")
             self.assertEqual(state["completed_blocks"], 0)
@@ -383,8 +383,8 @@ class TranslationFoundationTests(unittest.TestCase):
             self.assertTrue(result.dry_run)
             self.assertEqual(result.total_blocks, 3)
             self.assertEqual(result.total_chunks, 3)
-            self.assertFalse((project_path / "translation_prompt.txt").exists())
-            self.assertFalse((project_path / "segments/translation.jsonl").exists())
+            self.assertFalse((project_path / "04_translation/prompt.txt").exists())
+            self.assertFalse((project_path / ".glk/segments/translation.jsonl").exists())
 
     def test_prompt_edit_marks_translation_stale(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -396,7 +396,7 @@ class TranslationFoundationTests(unittest.TestCase):
                 workspace_root=workspace_root,
                 provider=SequenceProvider([valid_response(blocks)]),
             )
-            (project_path / "translation_prompt.txt").write_text(
+            (project_path / "04_translation/prompt.txt").write_text(
                 "Changed project style.", encoding="utf-8"
             )
             pipeline = inspect_project("translation_project", workspace_root)["pipeline"]
@@ -412,7 +412,7 @@ class TranslationFoundationTests(unittest.TestCase):
                 workspace_root=workspace_root,
                 provider=SequenceProvider([valid_response(blocks)]),
             )
-            review_path = project_path / "review/translation.txt"
+            review_path = project_path / "04_translation/review.txt"
             human_review = review_path.read_text(encoding="utf-8").replace(
                 "전투", "전투 단계"
             )
@@ -430,7 +430,7 @@ class TranslationFoundationTests(unittest.TestCase):
             self.assertEqual(review_path.read_text(encoding="utf-8"), human_review)
             self.assertIn(
                 "전투 규칙",
-                (project_path / "draft/translation.txt").read_text(encoding="utf-8"),
+                (project_path / "04_translation/draft.txt").read_text(encoding="utf-8"),
             )
 
 
@@ -453,7 +453,7 @@ class TranslationReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
             project_path, _ = self._translated_project(workspace_root)
-            review_path = project_path / "review/translation.txt"
+            review_path = project_path / "04_translation/review.txt"
             review_path.write_text(
                 review_path.read_text(encoding="utf-8").replace(
                     "[TRANSLATION]\n전투\n", "[TRANSLATION]\n전투 단계\n"
@@ -490,7 +490,7 @@ class TranslationReviewTests(unittest.TestCase):
             approved = [
                 ApprovedTranslationSegment.from_dict(json.loads(line))
                 for line in (
-                    project_path / "segments/approved_translation.jsonl"
+                    project_path / ".glk/segments/approved_translation.jsonl"
                 ).read_text(encoding="utf-8").splitlines()
             ]
             self.assertEqual(approved[0].draft_translation, "전투")
@@ -498,7 +498,7 @@ class TranslationReviewTests(unittest.TestCase):
             self.assertIsNone(approved[1].corrected_translation)
             self.assertIn(
                 "전투 단계",
-                (project_path / "final/translation.txt").read_text(encoding="utf-8"),
+                (project_path / "05_output/translation.txt").read_text(encoding="utf-8"),
             )
             pipeline = inspect_project(
                 "translation_project", workspace_root
@@ -522,7 +522,7 @@ class TranslationReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
             project_path, _ = self._translated_project(workspace_root)
-            review_path = project_path / "review/translation.txt"
+            review_path = project_path / "04_translation/review.txt"
             review_path.write_text(
                 review_path.read_text(encoding="utf-8").replace(
                     "[ORIGINAL]\nCombat\n", "[ORIGINAL]\nChanged source\n"
@@ -549,14 +549,14 @@ class TranslationReviewTests(unittest.TestCase):
             )
             self.assertFalse(finalized.valid)
             self.assertFalse(
-                (project_path / "segments/approved_translation.jsonl").exists()
+                (project_path / ".glk/segments/approved_translation.jsonl").exists()
             )
 
     def test_qa_blocks_number_token_and_approved_term_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
             project_path, _ = self._translated_project(workspace_root)
-            review_path = project_path / "review/translation.txt"
+            review_path = project_path / "04_translation/review.txt"
             reviewed = review_path.read_text(encoding="utf-8")
             reviewed = reviewed.replace(
                 "각 사냥꾼은 스태미나 2를 얻습니다.",
@@ -578,15 +578,15 @@ class TranslationReviewTests(unittest.TestCase):
             self.assertIn("curly_token_changed", codes)
             self.assertIn("approved_term_missing", codes)
             self.assertGreaterEqual(qa.error_count, 3)
-            self.assertFalse((project_path / "qa/translation_qa.json").exists())
+            self.assertFalse((project_path / ".glk/reports/translation_qa.json").exists())
 
     def test_prepare_requires_force_to_reset_a_stale_review(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
             project_path, _ = self._translated_project(workspace_root)
-            review_path = project_path / "review/translation.txt"
+            review_path = project_path / "04_translation/review.txt"
             review_path.write_text("human edits", encoding="utf-8")
-            state_path = project_path / "state/translation.json"
+            state_path = project_path / ".glk/state/translation.json"
             state = json.loads(state_path.read_text(encoding="utf-8"))
             state["review_status"] = "stale"
             state_path.write_text(json.dumps(state), encoding="utf-8")
@@ -608,7 +608,7 @@ class TranslationReviewTests(unittest.TestCase):
             self.assertEqual(reset.review_status, "current")
             self.assertEqual(
                 review_path.read_bytes(),
-                (project_path / "draft/translation.txt").read_bytes(),
+                (project_path / "04_translation/draft.txt").read_bytes(),
             )
             self.assertEqual(
                 inspect_project("translation_project", workspace_root)["pipeline"][
@@ -621,8 +621,8 @@ class TranslationReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
             project_path, blocks = self._translated_project(workspace_root)
-            draft_before = (project_path / "draft/translation.txt").read_bytes()
-            review_path = project_path / "review/translation.txt"
+            draft_before = (project_path / "04_translation/draft.txt").read_bytes()
+            review_path = project_path / "04_translation/review.txt"
             reviewed = review_path.read_text(encoding="utf-8")
             reviewed = reviewed.replace(
                 "[TRANSLATION]\n전투\n",
@@ -668,7 +668,7 @@ class TranslationReviewTests(unittest.TestCase):
             self.assertIn("[TRANSLATION]\n전투 단계\n", review_after)
             self.assertIn("각 사냥꾼은 스태미나 2를 얻습니다.", review_after)
             self.assertEqual(
-                (project_path / "draft/translation.txt").read_bytes(),
+                (project_path / "04_translation/draft.txt").read_bytes(),
                 draft_before,
             )
             revision = json.loads(
@@ -690,7 +690,7 @@ class TranslationReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
             project_path, blocks = self._translated_project(workspace_root)
-            review_path = project_path / "review/translation.txt"
+            review_path = project_path / "04_translation/review.txt"
             review_path.write_text(
                 review_path.read_text(encoding="utf-8").replace(
                     "사냥꾼들은 {HP} 10을 사용할 수 있습니다.",
@@ -717,7 +717,7 @@ class TranslationReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
             project_path, blocks = self._translated_project(workspace_root)
-            review_path = project_path / "review/translation.txt"
+            review_path = project_path / "04_translation/review.txt"
             review_path.write_text(
                 review_path.read_text(encoding="utf-8").replace(
                     "각 사냥꾼은 스태미나 2를 얻습니다.",

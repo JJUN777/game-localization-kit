@@ -101,7 +101,7 @@ class ExtractionServiceTests(unittest.TestCase):
             self.assertIn("A wrapped rulebook sentence.", Path(first.output_file).read_text())
             self.assertEqual(
                 load_project("rulebook", workspace_root).manifest.source_file,
-                "source/original.pdf",
+                "02_source/assets/original.pdf",
             )
 
             cached_provider = FakeLayoutProvider(fail_if_called=True)
@@ -113,7 +113,7 @@ class ExtractionServiceTests(unittest.TestCase):
             self.assertTrue(second.ok)
             self.assertEqual(cached_provider.calls, 0)
             self.assertEqual(second.cached_pages, (1,))
-            metadata = json.loads((project_path / "source/document.json").read_text())
+            metadata = json.loads((project_path / ".glk/state/pdf_acquisition.json").read_text())
             self.assertEqual(metadata["status"], "complete")
 
     def test_different_registered_source_requires_force(self) -> None:
@@ -156,7 +156,7 @@ class ExtractionServiceTests(unittest.TestCase):
             self.assertEqual(result.successful_pages, ())
             self.assertIn("fragment validation", result.failures[0].error)
             self.assertFalse(
-                (workspace_root / "rulebook/source/layouts/page_001.json").exists()
+                (workspace_root / "rulebook/.glk/cache/pdf/layouts/page_001.json").exists()
             )
 
 

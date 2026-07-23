@@ -28,6 +28,7 @@ from glk.application.translation_service import (
     validate_translation_response,
 )
 from glk.infrastructure.gemini_translation import GeminiTranslationProvider
+from glk.domain.workspace import WorkspacePaths
 
 
 ProgressCallback = Callable[[str], None]
@@ -59,7 +60,7 @@ class TranslationRetryResult:
 
 
 def _read_translation_model(project_path: Path) -> str | None:
-    state_path = project_path / "state/translation.json"
+    state_path = WorkspacePaths(project_path).translation_state
     try:
         value = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
@@ -70,7 +71,10 @@ def _read_translation_model(project_path: Path) -> str | None:
 
 def _revision_path(project_path: Path) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    return project_path / "revisions" / f"translation_retry_{stamp}.json"
+    return (
+        WorkspacePaths(project_path).translation_revisions
+        / f"translation_retry_{stamp}.json"
+    )
 
 
 def retry_failed_translations(
@@ -86,6 +90,7 @@ def retry_failed_translations(
     """Retranslate only block-linked QA errors and preserve every other review block."""
     notify = progress or (lambda _: None)
     location = load_project(project, workspace_root)
+    paths = WorkspacePaths(location.path)
     document = get_project_translation_review_document(
         project=location.path,
         workspace_root=workspace_root,
@@ -131,7 +136,7 @@ def retry_failed_translations(
             previous_error_count=previous_error_count,
             remaining_error_count=previous_error_count,
             warning_count=int(document["summary"]["warnings"]),
-            review_file=None if dry_run else str(location.path / "review/translation.txt"),
+            review_file=None if dry_run else str(paths.translation_review),
             revision_file=None,
             dry_run=dry_run,
         )
@@ -249,6 +254,6 @@ def retry_failed_translations(
         previous_error_count=previous_error_count,
         remaining_error_count=qa_result.error_count,
         warning_count=qa_result.warning_count,
-        review_file=str(location.path / "review/translation.txt"),
+        review_file=str(paths.translation_review),
         revision_file=str(revision_path),
     )

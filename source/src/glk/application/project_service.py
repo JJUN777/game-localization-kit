@@ -7,11 +7,17 @@ import hashlib
 import os
 import shutil
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 from glk.domain.project import ProjectError, ProjectManifest
+from glk.domain.workspace import (
+    IMAGE_SOURCE_ROOT,
+    PDF_SOURCE_FILE,
+    WORKSPACE_DIRECTORIES,
+    WorkspacePaths,
+)
 
 
 DEFAULT_WORKSPACE_ROOT = Path("workspaces")
@@ -19,18 +25,11 @@ GLOSSARY_BUILD_VERSION = "glossary-candidates-local-v1"
 TERMBASE_IMPORT_VERSION = "termbase-import-v1"
 TRANSLATION_RUN_VERSION = "translation-run-v1"
 TRANSLATION_REVIEW_VERSION = "translation-review-v1"
-PROJECT_DIRECTORIES = (
-    Path("source/pages"),
-    Path("segments"),
-    Path("draft"),
-    Path("review"),
-    Path("final"),
-    Path("terminology"),
-    Path("qa"),
-    Path("revisions"),
-    Path("output"),
-    Path("state"),
+PROJECT_INPUT_DIRECTORIES = (Path("01_input/pdf"), Path("01_input/images"))
+PROJECT_DIRECTORIES = tuple(
+    path for path in WORKSPACE_DIRECTORIES if path not in PROJECT_INPUT_DIRECTORIES
 )
+PROJECT_CREATED_DIRECTORIES = PROJECT_INPUT_DIRECTORIES + PROJECT_DIRECTORIES
 
 
 class ProjectExistsError(ProjectError):
@@ -47,6 +46,48 @@ class ProjectLocation:
     manifest: ProjectManifest
     created_paths: tuple[str, ...]
     dry_run: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectSummary:
+    project_id: str
+    name: str
+    source_type: str | None
+    stage: str
+    final_translation_approved: bool
+    path: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectListWarning:
+    directory: str
+    message: str
+
+    def to_dict(self) -> dict[str, str]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectListResult:
+    workspace_root: str
+    projects: tuple[ProjectSummary, ...]
+    warnings: tuple[ProjectListWarning, ...]
+
+    @property
+    def ok(self) -> bool:
+        return True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "workspace_root": self.workspace_root,
+            "count": len(self.projects),
+            "projects": [project.to_dict() for project in self.projects],
+            "warnings": [warning.to_dict() for warning in self.warnings],
+        }
 
 
 def _resolve_path(path: str | Path) -> Path:
@@ -85,7 +126,10 @@ def create_project(
     )
     root = _resolve_path(workspace_root)
     project_path = root / manifest.project_id
-    created_paths = ("project.json", *(path.as_posix() for path in PROJECT_DIRECTORIES))
+    created_paths = (
+        "project.json",
+        *(path.as_posix() for path in PROJECT_CREATED_DIRECTORIES),
+    )
     if project_path.exists():
         raise ProjectExistsError(
             f"Project workspace already exists: {project_path}. "
@@ -98,7 +142,7 @@ def create_project(
     staging_path = root / f".{manifest.project_id}.init-{uuid.uuid4().hex}"
     try:
         staging_path.mkdir()
-        for relative_path in PROJECT_DIRECTORIES:
+        for relative_path in PROJECT_CREATED_DIRECTORIES:
             (staging_path / relative_path).mkdir(parents=True, exist_ok=False)
         _write_json_atomic(staging_path / "project.json", manifest.to_dict())
         staging_path.rename(project_path)
@@ -171,6 +215,101 @@ def inspect_project(
     }
 
 
+def _project_stage(pipeline: dict[str, Any]) -> str:
+    if pipeline["final_translation_approved"]:
+        return "completed"
+    if pipeline["translation_review"] == "qa_failed":
+        return "translation_qa_failed"
+    if pipeline["translation_review"] in {"pending", "stale", "qa_passed"}:
+        return "translation_review"
+    if pipeline["translation_status"] == "partial":
+        return "translation_partial"
+    if pipeline["translation_status"] == "current":
+        return "translation_review"
+    if pipeline["termbase_status"] == "current":
+        return "ready_to_translate"
+    if pipeline["glossary_status"] in {"current", "stale"}:
+        return "glossary_review"
+    if pipeline["final_source_approved"]:
+        return "glossary"
+    if pipeline["review_source_ready"] or pipeline["source_acquired"]:
+        return "source_review"
+    return "not_started"
+
+
+def _project_source_type(project_path: Path, pipeline: dict[str, Any]) -> str | None:
+    registered = pipeline["source_type"]
+    if registered:
+        return str(registered)
+    has_pdf = any(
+        path.is_file() and path.suffix.casefold() == ".pdf"
+        for path in WorkspacePaths(project_path).input_pdf_dir.glob("*")
+    )
+    image_extensions = {".png", ".jpg", ".jpeg", ".webp"}
+    has_images = any(
+        path.is_file() and path.suffix.casefold() in image_extensions
+        for path in WorkspacePaths(project_path).input_images_dir.rglob("*")
+    )
+    if has_pdf and has_images:
+        return "mixed"
+    if has_pdf:
+        return "pdf"
+    if has_images:
+        return "images"
+    return None
+
+
+def list_projects(
+    workspace_root: str | Path = DEFAULT_WORKSPACE_ROOT,
+) -> ProjectListResult:
+    """List valid project workspaces without letting one damaged project abort the scan."""
+    root = _resolve_path(workspace_root)
+    if not root.exists():
+        return ProjectListResult(str(root), (), ())
+    if not root.is_dir():
+        raise ProjectError(f"Workspace root is not a directory: {root}")
+
+    projects: list[ProjectSummary] = []
+    warnings: list[ProjectListWarning] = []
+    for candidate in sorted(root.iterdir(), key=lambda path: path.name.casefold()):
+        if (
+            not candidate.is_dir()
+            or candidate.name.startswith(".")
+            or not (candidate / "project.json").is_file()
+        ):
+            continue
+        try:
+            status = inspect_project(candidate)
+            manifest = status["manifest"]
+            pipeline = status["pipeline"]
+            projects.append(
+                ProjectSummary(
+                    project_id=manifest["project_id"],
+                    name=manifest["name"],
+                    source_type=_project_source_type(candidate, pipeline),
+                    stage=_project_stage(pipeline),
+                    final_translation_approved=bool(
+                        pipeline["final_translation_approved"]
+                    ),
+                    path=str(candidate.resolve()),
+                )
+            )
+        except (
+            ProjectError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as error:
+            warnings.append(
+                ProjectListWarning(directory=candidate.name, message=str(error))
+            )
+    projects.sort(key=lambda project: project.project_id.casefold())
+    return ProjectListResult(str(root), tuple(projects), tuple(warnings))
+
+
 def _read_optional_json(path: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
@@ -192,11 +331,12 @@ def _sha256_file(path: Path) -> str | None:
 
 def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
     project_path = location.path
-    if location.manifest.source_file == "source/original.pdf":
-        acquisition = _read_optional_json(project_path / "source/document.json")
+    paths = WorkspacePaths(project_path)
+    if location.manifest.source_file == PDF_SOURCE_FILE:
+        acquisition = _read_optional_json(paths.pdf_acquisition_state)
         source_type = "pdf"
-    elif location.manifest.source_file == "source/images":
-        acquisition = _read_optional_json(project_path / "source/ocr/run_summary.json")
+    elif location.manifest.source_file == IMAGE_SOURCE_ROOT:
+        acquisition = _read_optional_json(paths.image_ocr_state)
         source_type = "images"
     else:
         acquisition = None
@@ -207,11 +347,11 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
         and not acquisition.get("failures")
     )
 
-    source_blocks_path = project_path / "segments/source.jsonl"
+    source_blocks_path = paths.source_segments
     source_sha256 = _sha256_file(source_blocks_path)
     review_source_ready = source_sha256 is not None
 
-    qa_state = _read_optional_json(project_path / "state/source_qa.json")
+    qa_state = _read_optional_json(paths.source_qa_state)
     if qa_state is None:
         qa_status = "not_run"
         qa_issues = None
@@ -222,10 +362,10 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
         qa_status = "complete"
         qa_issues = qa_state.get("total_issues")
 
-    review_path = project_path / "review/source.txt"
-    review_state = _read_optional_json(project_path / "state/source_review.json")
-    final_path = project_path / "final/source.txt"
-    approved_path = project_path / "segments/approved_source.jsonl"
+    review_path = paths.source_review
+    review_state = _read_optional_json(paths.source_review_state)
+    final_path = paths.source_final
+    approved_path = paths.approved_source_segments
     approved_sha256 = _sha256_file(approved_path)
     if not review_path.is_file() or review_state is None:
         human_review = "not_ready"
@@ -241,8 +381,8 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
     else:
         human_review = "pending"
 
-    glossary_path = project_path / "terminology/glossary_review.tsv"
-    glossary_state = _read_optional_json(project_path / "state/glossary_build.json")
+    glossary_path = paths.glossary_review
+    glossary_state = _read_optional_json(paths.glossary_build_state)
     if not glossary_path.is_file() or glossary_state is None:
         glossary_status = "not_built" if human_review == "approved" else "not_ready"
         glossary_candidates = None
@@ -258,8 +398,8 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
         glossary_status = "current"
         glossary_candidates = glossary_state.get("candidate_count")
 
-    termbase_path = project_path / "terminology/termbase.json"
-    termbase_state = _read_optional_json(project_path / "state/glossary_import.json")
+    termbase_path = paths.termbase
+    termbase_state = _read_optional_json(paths.glossary_import_state)
     if not termbase_path.is_file() or termbase_state is None:
         termbase_status = "not_built" if glossary_status == "current" else "not_ready"
         termbase_entries = None
@@ -277,9 +417,9 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
         termbase_status = "current"
         termbase_entries = termbase_state.get("entry_count")
 
-    translation_path = project_path / "segments/translation.jsonl"
-    translation_state = _read_optional_json(project_path / "state/translation.json")
-    translation_prompt_path = project_path / "translation_prompt.txt"
+    translation_path = paths.translation_segments
+    translation_state = _read_optional_json(paths.translation_state)
+    translation_prompt_path = paths.translation_prompt
     if translation_state is None:
         translation_status = "not_run" if termbase_status == "current" else "not_ready"
         translated_blocks = None
@@ -308,17 +448,13 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
         translation_status = "current"
         translated_blocks = translation_state.get("completed_blocks")
 
-    translation_review_path = project_path / "review/translation.txt"
-    translation_draft_path = project_path / "draft/translation.txt"
-    translation_review_state = _read_optional_json(
-        project_path / "state/translation_review.json"
-    )
-    translation_qa_json_path = project_path / "qa/translation_qa.json"
-    translation_qa_markdown_path = project_path / "qa/translation_qa.md"
-    approved_translation_path = (
-        project_path / "segments/approved_translation.jsonl"
-    )
-    final_translation_path = project_path / "final/translation.txt"
+    translation_review_path = paths.translation_review
+    translation_draft_path = paths.translation_draft
+    translation_review_state = _read_optional_json(paths.translation_review_state)
+    translation_qa_json_path = paths.translation_qa_json
+    translation_qa_markdown_path = paths.translation_qa_markdown
+    approved_translation_path = paths.approved_translation_segments
+    final_translation_path = paths.final_translation
     if translation_status != "current":
         translation_review_status = (
             "stale"

@@ -29,7 +29,17 @@ class GeminiConfigurationError(ValueError):
     """Raised when Gemini credentials or model settings are unavailable."""
 
 
+def load_gemini_environment() -> None:
+    """Load .env from the working directory or editable source root."""
+    working_env = Path.cwd() / ".env"
+    load_dotenv(working_env, override=False)
+    source_env = Path(__file__).resolve().parents[3] / ".env"
+    if source_env != working_env:
+        load_dotenv(source_env, override=False)
+
+
 def resolve_model_name(model_name: str | None = None) -> str:
+    load_gemini_environment()
     if model_name and model_name.strip():
         return model_name.strip()
     environment_model = os.getenv("GEMINI_MODEL", "").strip()
@@ -71,7 +81,7 @@ class GeminiLayoutProvider:
 
     @classmethod
     def from_environment(cls, model_name: str | None = None) -> GeminiLayoutProvider:
-        load_dotenv(Path.cwd() / ".env", override=False)
+        load_gemini_environment()
         api_key = os.getenv("GEMINI_API_KEY", "").strip()
         if not api_key:
             raise GeminiConfigurationError(

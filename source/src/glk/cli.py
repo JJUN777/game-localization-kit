@@ -9,14 +9,23 @@ from collections.abc import Sequence
 
 from glk import __version__
 from glk.application.extraction_service import ExtractionError, extract_project_pdf
-from glk.application.image_ocr_service import ImageOcrError, ocr_project_images
+from glk.application.image_ocr_service import (
+    IMAGE_EXTENSIONS,
+    ImageOcrError,
+    ocr_project_images,
+)
 from glk.application.glossary_service import (
     GlossaryBuildError,
     GlossaryImportError,
     build_project_glossary_candidates,
     import_project_glossary,
 )
-from glk.application.project_service import create_project, inspect_project, load_project
+from glk.application.project_service import (
+    create_project,
+    inspect_project,
+    list_projects,
+    load_project,
+)
 from glk.application.segmentation_service import SegmentationError, segment_project_source
 from glk.application.source_review_service import (
     SourceReviewError,
@@ -33,6 +42,7 @@ from glk.application.translation_review_service import (
     run_project_translation_qa,
 )
 from glk.domain.project import ProjectError
+from glk.domain.workspace import IMAGE_SOURCE_ROOT, PDF_SOURCE_FILE, WorkspacePaths
 from glk.infrastructure.gemini_layout import GeminiConfigurationError
 from glk.infrastructure.translation_review_server import serve_translation_review
 
@@ -101,6 +111,9 @@ def _run_init(args: argparse.Namespace) -> int:
     else:
         action = "Would create" if location.dry_run else "Created"
         print(f"{action} project '{location.manifest.project_id}' at {location.path}")
+        paths = WorkspacePaths(location.path)
+        print(f"PDF input: {paths.input_pdf_dir}")
+        print(f"Image input: {paths.input_images_dir}")
     return 0
 
 
@@ -157,6 +170,52 @@ def _run_status(args: argparse.Namespace) -> int:
             f"{'approved' if pipeline['final_translation_approved'] else 'not approved'}"
         )
     return 0 if status["ok"] else EXIT_ERROR
+
+
+def _run_projects(args: argparse.Namespace) -> int:
+    try:
+        result = list_projects(args.workspace_root)
+    except (ProjectError, OSError, ValueError) as error:
+        return _print_error(args, "PROJECT_LIST_FAILED", str(error))
+
+    if args.json:
+        print(json.dumps(result.to_dict(), ensure_ascii=False))
+    else:
+        print(f"Workspace: {result.workspace_root}")
+        if not result.projects:
+            print("No projects found.")
+        else:
+            headers = ("PROJECT ID", "NAME", "SOURCE", "STAGE", "FINAL", "PATH")
+            rows = [
+                (
+                    project.project_id,
+                    project.name,
+                    project.source_type or "-",
+                    project.stage,
+                    "yes" if project.final_translation_approved else "no",
+                    project.path,
+                )
+                for project in result.projects
+            ]
+            widths = [
+                max(len(headers[index]), *(len(row[index]) for row in rows))
+                for index in range(len(headers))
+            ]
+            print("  ".join(value.ljust(widths[index]) for index, value in enumerate(headers)))
+            print("  ".join("-" * width for width in widths))
+            for row in rows:
+                print(
+                    "  ".join(
+                        value.ljust(widths[index])
+                        for index, value in enumerate(row)
+                    )
+                )
+    for warning in result.warnings:
+        print(
+            f"Warning: skipped {warning.directory}: {warning.message}",
+            file=sys.stderr,
+        )
+    return 0
 
 
 def _run_extract(args: argparse.Namespace) -> int:
@@ -285,10 +344,45 @@ def _prompt_source_path(input_type: str) -> str:
 def _registered_input_type(args: argparse.Namespace) -> str | None:
     location = load_project(args.project, args.workspace_root)
     source_file = location.manifest.source_file
-    if source_file == "source/original.pdf":
+    if source_file == PDF_SOURCE_FILE:
         return "pdf"
-    if source_file == "source/images":
+    if source_file == IMAGE_SOURCE_ROOT:
         return "images"
+    return None
+
+
+def _default_project_pdf(args: argparse.Namespace) -> str | None:
+    location = load_project(args.project, args.workspace_root)
+    folder = WorkspacePaths(location.path).input_pdf_dir
+    if not folder.is_dir():
+        return None
+    candidates = sorted(
+        (
+            path
+            for path in folder.iterdir()
+            if path.is_file() and path.suffix.casefold() == ".pdf"
+        ),
+        key=lambda path: path.name.casefold(),
+    )
+    if len(candidates) > 1:
+        names = ", ".join(path.name for path in candidates[:5])
+        raise RunInputError(
+            f"Multiple PDFs found in {folder}: {names}. "
+            "Keep one PDF there or select one with --file."
+        )
+    return str(candidates[0]) if candidates else None
+
+
+def _default_project_image_folder(args: argparse.Namespace) -> str | None:
+    location = load_project(args.project, args.workspace_root)
+    folder = WorkspacePaths(location.path).input_images_dir
+    if not folder.is_dir():
+        return None
+    if any(
+        path.is_file() and path.suffix.casefold() in IMAGE_EXTENSIONS
+        for path in folder.rglob("*")
+    ):
+        return str(folder)
     return None
 
 
@@ -308,10 +402,16 @@ def _resolve_run_input_type(args: argparse.Namespace) -> str:
     registered = _registered_input_type(args)
     if registered:
         return registered
+    default_pdf = _default_project_pdf(args)
+    default_images = _default_project_image_folder(args)
+    if default_pdf and not default_images:
+        return "pdf"
+    if default_images and not default_pdf:
+        return "images"
     if args.json or not sys.stdin.isatty():
         raise RunInputError(
-            "Input type is required in non-interactive mode; use "
-            "--input-type pdf or --input-type images."
+            "Could not determine the input type. Put one PDF in 01_input/pdf, "
+            "put images in 01_input/images, or use --input-type."
         )
     return _prompt_source_type()
 
@@ -329,18 +429,23 @@ def _run_pipeline(args: argparse.Namespace) -> int:
             if args.prompt:
                 raise RunInputError("--prompt is only available for image OCR.")
             if args.file is None and registered != "pdf":
+                args.file = _default_project_pdf(args)
+            if args.file is None and registered != "pdf":
                 if args.json or not sys.stdin.isatty():
                     raise RunInputError(
-                        "PDF file is required; provide --file or use interactive mode."
+                        "No PDF found in 01_input/pdf; add one PDF there or provide --file."
                     )
                 args.file = _prompt_source_path("pdf")
         else:
             if args.pages:
                 raise RunInputError("--pages is only available for PDF extraction.")
             if args.folder is None and registered != "images":
+                args.folder = _default_project_image_folder(args)
+            if args.folder is None and registered != "images":
                 if args.json or not sys.stdin.isatty():
                     raise RunInputError(
-                        "Image folder is required; provide --folder or use interactive mode."
+                        "No images found in 01_input/images; add images there or "
+                        "provide --folder."
                     )
                 args.folder = _prompt_source_path("images")
     except (ProjectError, RunInputError, OSError) as error:
@@ -393,7 +498,7 @@ def _run_pipeline(args: argparse.Namespace) -> int:
     )
     if acquisition.dry_run:
         payload["planned_stages"] = ["acquire", "segment", "qa", "human_review"]
-        payload["next_action"] = "Run without --dry-run to prepare review/source.txt."
+        payload["next_action"] = "Run without --dry-run to prepare 02_source/review.txt."
         if args.json:
             print(json.dumps(payload, ensure_ascii=False))
         elif input_type == "pdf":
@@ -449,12 +554,12 @@ def _run_pipeline(args: argparse.Namespace) -> int:
     elif segmentation.review_status == "stale":
         pipeline_status = "review_stale"
         next_action = (
-            "Compare draft/source.txt with the preserved review/source.txt, then "
+            "Compare 02_source/draft.txt with the preserved 02_source/review.txt, then "
             "reset explicitly with glk review prepare --force if needed."
         )
     else:
         pipeline_status = "awaiting_human_review"
-        next_action = "Edit review/source.txt, then run glk review finalize --dry-run."
+        next_action = "Edit 02_source/review.txt, then run glk review finalize --dry-run."
     payload.update(
         {
             "ok": True,
@@ -579,7 +684,7 @@ def _run_review_prepare(args: argparse.Namespace) -> int:
     elif result.dry_run:
         action = "reset" if result.review_created else "preserve"
         print(
-            f"Would refresh draft/source.txt and {action} review/source.txt "
+            f"Would refresh 02_source/draft.txt and {action} 02_source/review.txt "
             f"for {result.total_blocks} blocks"
         )
     elif result.review_created:
@@ -589,7 +694,7 @@ def _run_review_prepare(args: argparse.Namespace) -> int:
         if result.review_status == "stale":
             print(
                 "The review TXT is based on an older draft. Compare it with "
-                "draft/source.txt before using --force.",
+                "02_source/draft.txt before using --force.",
                 file=sys.stderr,
             )
     return 0
@@ -758,7 +863,7 @@ def _run_translation_review_prepare(args: argparse.Namespace) -> int:
     elif result.dry_run:
         action = "reset" if result.review_created else "preserve"
         print(
-            f"Would {action} review/translation.txt for "
+            f"Would {action} 04_translation/review.txt for "
             f"{result.total_blocks} blocks"
         )
     elif result.review_created:
@@ -767,7 +872,7 @@ def _run_translation_review_prepare(args: argparse.Namespace) -> int:
         print(f"Preserved translation review TXT at {result.review_file}")
         if result.review_status == "stale":
             print(
-                "Compare it with draft/translation.txt, then use --force "
+                "Compare it with 04_translation/draft.txt, then use --force "
                 "only when you intend to reset the review.",
                 file=sys.stderr,
             )
@@ -1021,7 +1126,7 @@ def build_parser() -> argparse.ArgumentParser:
         "translate", help="Translate approved source blocks with the current termbase"
     )
     translate_parser.add_argument(
-        "--prompt", help="Project translation instructions; defaults to translation_prompt.txt"
+        "--prompt", help="Project translation instructions; defaults to 04_translation/prompt.txt"
     )
     translate_parser.add_argument("--model", help="Gemini model override")
     translate_parser.add_argument(
@@ -1174,6 +1279,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status_parser.add_argument("--json", action="store_true", help="Print machine-readable output")
     status_parser.set_defaults(handler=_run_status)
+
+    projects_parser = subparsers.add_parser(
+        "projects", help="List projects in the workspace root"
+    )
+    projects_parser.add_argument(
+        "--workspace-root", default="workspaces", help="Parent directory for project workspaces"
+    )
+    projects_parser.add_argument(
+        "--json", action="store_true", help="Print machine-readable output"
+    )
+    projects_parser.set_defaults(handler=_run_projects)
 
     retry_parser = subparsers.add_parser(
         "retry", help="Retranslate only translation blocks that failed QA"

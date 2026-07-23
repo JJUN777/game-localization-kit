@@ -5,15 +5,15 @@
 ## 처리 흐름
 
 ```text
-segments/approved_source.jsonl
+.glk/segments/approved_source.jsonl
 → glk glossary build
-→ terminology/glossary_review.tsv
+→ 03_terminology/glossary_review.tsv
 → 사람이 translation/status/category/note 수정 및 누락 용어 행 추가
 → glk glossary import
-→ terminology/termbase.json
+→ 03_terminology/termbase.json
 ```
 
-`segments/approved_source.jsonl`이 없거나 현재 원문 기준으로 stale이면 후보 생성을 시작하지 않습니다.
+`.glk/segments/approved_source.jsonl`이 없거나 현재 원문 기준으로 stale이면 후보 생성을 시작하지 않습니다.
 
 `glk glossary build`와 `glk glossary import`는 구현 완료됐습니다. 첫 후보 생성은 API를 호출하지 않고 제목·고유명사와 반복 1~4단어 표현을 로컬 규칙으로 수집합니다. LLM을 이용한 후보 의미 분류는 현재 범위에 포함하지 않습니다.
 
@@ -22,7 +22,7 @@ segments/approved_source.jsonl
 사람이 수정하는 기본 파일은 UTF-8 TSV입니다.
 
 ```text
-terminology/glossary_review.tsv
+03_terminology/glossary_review.tsv
 ```
 
 CSV 대신 TSV를 사용해 예문에 포함된 쉼표 때문에 셀이 복잡해지는 문제를 피합니다. Excel, Numbers, LibreOffice와 일반 텍스트 편집기에서 열 수 있어야 합니다.
@@ -58,7 +58,7 @@ glk glossary build --project primal --min-frequency 2 --max-words 4 --max-candid
 glk glossary build --project primal --dry-run
 ```
 
-실행 기준은 `state/glossary_build.json`에 기록합니다. 승인 원문 hash와 후보 생성 설정이 같을 때 기존 TSV를 현재 결과로 인정하며, 설정이나 승인 원문이 달라지면 `glk status`에서 `stale`로 표시합니다. `--force`는 사람이 수정한 TSV를 초기화하므로 기존 파일을 비교·백업한 뒤에만 사용합니다.
+실행 기준은 `.glk/state/glossary_build.json`에 기록합니다. 승인 원문 hash와 후보 생성 설정이 같을 때 기존 TSV를 현재 결과로 인정하며, 설정이나 승인 원문이 달라지면 `glk status`에서 `stale`로 표시합니다. `--force`는 사람이 수정한 TSV를 초기화하므로 기존 파일을 비교·백업한 뒤에만 사용합니다.
 
 ## 상태와 카테고리
 
@@ -119,18 +119,18 @@ approved⇥Critical Hit⇥치명타⇥term⇥항상 치명타로 번역⇥⇥⇥
 ```bash
 glk glossary import \
   --project primal \
-  --file terminology/glossary_review.tsv \
+  --file 03_terminology/glossary_review.tsv \
   --allow-missing-terms
 ```
 
 이 경우 termbase에 `origin: manual`, `source_verified: false`를 기록하고 경고를 남깁니다.
 
-`--file`이 상대 경로이면 project workspace 내부를 먼저 찾고, 없으면 현재 작업 디렉터리를 확인합니다. workspace 외부의 검토 TSV를 지정해도 검증 성공 후 정규화된 결과는 프로젝트의 `terminology/glossary_review.tsv`에 기록됩니다.
+`--file`이 상대 경로이면 project workspace 내부를 먼저 찾고, 없으면 현재 작업 디렉터리를 확인합니다. workspace 외부의 검토 TSV를 지정해도 검증 성공 후 정규화된 결과는 프로젝트의 `03_terminology/glossary_review.tsv`에 기록됩니다.
 
 ## 최종 출력
 
 ```text
-terminology/termbase.json
+03_terminology/termbase.json
 ```
 
 최종 termbase에는 source term, translation, category, status, note, variants, 근거 위치, origin과 source 검증 여부를 저장합니다. 이후 번역 prompt에는 `approved`와 `keep` 항목만 전달하고, 번역 QA는 확정 용어와 보호 token의 일관성을 검사합니다.

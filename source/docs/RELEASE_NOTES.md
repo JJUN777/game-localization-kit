@@ -12,11 +12,18 @@ PDF 룰북 또는 이미지 폴더에서 원문을 가져오고, 사람이 원�
 
 - Windows와 macOS에서 동일한 `glk` 명령 사용
 - 프로젝트별 독립 workspace 생성
+- 프로젝트별 `01_input/pdf`, `01_input/images` 원본 투입 폴더 자동 생성
+- 사용자 작업 결과를 `02_source`~`05_output` 단계별 폴더로 분리
+- 캐시·상태·내부 JSONL을 직접 수정하지 않는 `.glk` 영역으로 분리
+- 새 단계별 workspace를 manifest `schema_version: 2`로 명시
+- 한쪽 입력 폴더에 원본이 있으면 `glk run`에서 종류와 경로 자동 감지
+- `glk projects`로 프로젝트 ID, 입력 방식, 진행 단계와 완료 여부 조회
 - 대화형 또는 명시적인 CLI 옵션으로 PDF·이미지 입력 선택
 - 단계별 상태, 캐시와 stale 여부 확인
 
 ```bash
 glk init "Project Name" --project-id project_id
+glk projects
 glk run --project project_id
 glk status --project project_id
 ```
@@ -42,8 +49,8 @@ glk status --project project_id
 ### 원문 QA와 사람 검수
 
 - PDF와 이미지 결과를 같은 block 구조로 정규화
-- 자동 생성 기준본 `draft/source.txt`
-- 사람이 수정하는 `review/source.txt`
+- 자동 생성 기준본 `02_source/draft.txt`
+- 사람이 수정하는 `02_source/review.txt`
 - 숫자·아이콘 token·판독 불가 표시와 OCR 혼동 후보 검사
 - marker, block 순서와 원문 hash 검증
 - 사람이 승인한 최종 원문과 JSONL 생성
@@ -81,7 +88,7 @@ glk status --project project_id
 최종 결과:
 
 ```text
-workspaces/<project_id>/final/translation.txt
+workspaces/<project_id>/05_output/translation.txt
 ```
 
 ## 구조와 보안
@@ -126,7 +133,7 @@ glk 1.0.0
 
 ## 검증
 
-- 전체 자동 테스트 84개 통과
+- 전체 자동 테스트 88개 통과
 - CLI 설치와 `glk version` 확인
 - PDF·이미지 원문 획득과 검수 흐름 회귀 검사
 - 용어 후보 생성·import 검증 회귀 검사

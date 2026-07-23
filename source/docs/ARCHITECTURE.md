@@ -27,7 +27,7 @@ flowchart LR
 | 계층 | 책임 | 현재 주요 모듈 |
 |---|---|---|
 | CLI | 인자, 대화형 입력, 사람이 읽는 출력, 종료 코드 | `src/glk/cli.py` |
-| Application | 프로젝트 단위 use case, 캐시, 원자적 출력, 단계 연결 | `extraction_service`, `image_ocr_service`, `segmentation_service`, `source_qa_service`, `source_review_service`, `glossary_service`, `translation_service`, `translation_review_service` |
+| Application | 프로젝트 단위 use case, 캐시, 원자적 출력, 단계 연결 | `extraction_service`, `image_ocr_service`, `segmentation_service`, `source_qa_service`, `source_review_service`, `glossary_service`, `translation_service`, `translation_review_service`, `translation_retry_service` |
 | Domain | 외부 SDK와 파일 포맷에 독립적인 모델·검증 | `project.py`, `source_block.py`, `source_qa.py`, `translation_segment.py`, `translation_qa.py`, `approved_translation.py` |
 | Extraction | PDF layout과 이미지 OCR 결과 처리 계약 | `layout.py`, `image_ocr.py` |
 | Infrastructure | 외부 모델 adapter와 로컬 검수 서버 | `gemini_layout.py`, `gemini_ocr.py`, `gemini_translation.py`, `translation_review_server.py` |
@@ -40,19 +40,21 @@ CLI의 통합 명령과 개별 명령은 application service를 공유합니다.
 
 | 필드 | 의미 |
 |---|---|
-| `schema_version` | manifest 호환성 버전 |
+| `schema_version` | workspace 구조 호환성 버전. 단계별 구조는 `2` |
 | `project_id` | 플랫폼에 안전한 workspace 식별자 |
 | `name` | 사람이 읽는 프로젝트 이름 |
 | `profile` | 게임별 설정 프로필 |
 | `source_language` / `target_language` | 언어 코드 |
-| `source_file` | workspace 내부에 등록된 PDF 또는 `source/images` |
+| `source_file` | workspace 내부에 등록된 PDF 또는 `02_source/assets/images` |
 | `created_at` | UTC 생성 시각 |
 
 외부 절대 경로나 `..`가 포함된 원문 경로는 manifest에 저장하지 않습니다. 원문을 workspace 안으로 등록한 뒤 상대 경로만 기록합니다.
 
+프로젝트 생성 시 `01_input/pdf/`와 `01_input/images/`를 함께 만듭니다. 이 폴더는 사람이 원본을 넣는 진입점이고, `glk run`은 한쪽에만 원본이 있으면 입력 종류를 자동 감지합니다. application service는 선택된 원본을 프로그램 관리 영역인 `02_source/assets/original.pdf` 또는 `02_source/assets/images/`로 복사한 뒤 manifest에 등록하므로 사용자 입력과 생성 데이터가 섞이지 않습니다.
+
 ## 공통 SourceBlock
 
-PDF fragment와 이미지 OCR block은 `segments/source.jsonl`에서 `SourceBlock`으로 통일됩니다.
+PDF fragment와 이미지 OCR block은 `.glk/segments/source.jsonl`에서 `SourceBlock`으로 통일됩니다.
 
 | 필드 | 역할 |
 |---|---|
@@ -74,12 +76,12 @@ PDF fragment와 이미지 OCR block은 `segments/source.jsonl`에서 `SourceBloc
 ## 검수 파일과 승인 gate
 
 ```text
-segments/source.jsonl
-├── draft/source.txt       # 자동 생성 기준본
-└── review/source.txt      # 사람이 수정
+.glk/segments/source.jsonl
+├── 02_source/draft.txt       # 자동 생성 기준본
+└── 02_source/review.txt      # 사람이 수정
         ↓ glk review finalize
-final/source.txt
-segments/approved_source.jsonl
+02_source/final.txt
+.glk/segments/approved_source.jsonl
 ```
 
 review TXT는 `[PAGE]` 또는 `[SOURCE]`, `[BLOCK]`, `[[GLK_END ...]]` marker로 SourceBlock과 연결됩니다. 최종화는 다음을 확인합니다.
@@ -95,23 +97,23 @@ review TXT는 `[PAGE]` 또는 `[SOURCE]`, `[BLOCK]`, `[[GLK_END ...]]` marker로
 
 원문 QA는 결정적인 로컬 규칙만 사용하며 모든 issue의 `auto_fixable`은 현재 `false`입니다. issue는 안정적인 ID, block ID, severity, code, evidence, 원본 위치와 bbox를 가집니다.
 
-프로그램용 `qa/source_qa.json`과 사람용 `qa/source_qa.md`를 함께 생성합니다. 의미 판단이 필요한 항목을 임의 수정하지 않고, 사람이 원본을 확인할 위치만 제공합니다.
+프로그램용 `.glk/reports/source_qa.json`과 사람용 `02_source/qa.md`를 함께 생성합니다. 의미 판단이 필요한 항목을 임의 수정하지 않고, 사람이 원본을 확인할 위치만 제공합니다.
 
 ## 캐시와 stale 판정
 
-각 단계는 결과에 영향을 주는 입력과 설정의 hash를 `state/*.json`에 기록합니다.
+각 단계는 결과에 영향을 주는 입력과 설정의 hash를 `.glk/state/*.json`에 기록합니다.
 
 | 단계 | 주요 입력 기준 | state |
 |---|---|---|
-| PDF 추출 | 원본 PDF, fragment, 페이지, 모델, prompt version | `source/document.json`과 페이지 layout |
-| 이미지 OCR | 이미지 bytes, 공통·개별 prompt, 모델, prompt version | `source/ocr/run_summary.json`과 결과 JSON |
-| Segmentation | 실제 획득 결과 JSON과 schema version | `state/segmentation.json` |
-| 원문 QA | source JSONL, 허용 token prompt, QA version | `state/source_qa.json` |
-| 사람 승인 | draft/review/final/approved 파일 hash | `state/source_review.json` |
-| 용어 후보 | approved JSONL, 후보 생성 파라미터 | `state/glossary_build.json` |
-| Termbase import | approved JSONL, 정규화된 검토 TSV, termbase hash | `state/glossary_import.json` |
-| 초벌 번역 | approved JSONL, termbase, project prompt, 모델, hard rule·청크 설정 | `state/translation.json` |
-| 번역 승인 | translation JSONL, draft/review, termbase, QA/final 파일 hash | `state/translation_review.json` |
+| PDF 추출 | 원본 PDF, fragment, 페이지, 모델, prompt version | `.glk/state/pdf_acquisition.json`과 페이지 layout |
+| 이미지 OCR | 이미지 bytes, 공통·개별 prompt, 모델, prompt version | `.glk/state/image_ocr.json`과 결과 JSON |
+| Segmentation | 실제 획득 결과 JSON과 schema version | `.glk/state/segmentation.json` |
+| 원문 QA | source JSONL, 허용 token prompt, QA version | `.glk/state/source_qa.json` |
+| 사람 승인 | draft/review/final/approved 파일 hash | `.glk/state/source_review.json` |
+| 용어 후보 | approved JSONL, 후보 생성 파라미터 | `.glk/state/glossary_build.json` |
+| Termbase import | approved JSONL, 정규화된 검토 TSV, termbase hash | `.glk/state/glossary_import.json` |
+| 초벌 번역 | approved JSONL, termbase, project prompt, 모델, hard rule·청크 설정 | `.glk/state/translation.json` |
+| 번역 승인 | translation JSONL, draft/review, termbase, QA/final 파일 hash | `.glk/state/translation_review.json` |
 
 실행 시각, 캐시 적중 건수처럼 내용에 영향을 주지 않는 메타데이터는 다음 단계 입력 hash에서 제외합니다. 캐시 불일치는 자동 결과에는 재생성 근거가 되지만, 사람이 편집한 review와 glossary TSV는 덮어쓰지 않고 stale로 표시합니다.
 
@@ -131,10 +133,10 @@ review TXT는 `[PAGE]` 또는 `[SOURCE]`, `[BLOCK]`, `[[GLK_END ...]]` marker로
 수동 용어는 승인 원문에서 대소문자와 보수적인 단수·복수 변형을 검색해 ID, 빈도, block ID, 위치와 예문을 다시 계산합니다. 명시적인 `--allow-missing-terms` 없이는 근거가 없는 용어를 허용하지 않습니다.
 
 ```text
-terminology/glossary_review.tsv
+03_terminology/glossary_review.tsv
         ↓ 구조·ID·원문 근거 검증
-terminology/termbase.json
-state/glossary_import.json
+03_terminology/termbase.json
+.glk/state/glossary_import.json
 ```
 
 termbase entry는 source term, translation, category, status, note, variants, occurrences, block IDs, locations, example, origin과 source 검증 여부를 보존합니다. `approved`와 `keep`만 번역 prompt의 활성 용어가 되고 `rejected`는 검토 결정 이력으로 유지됩니다.
@@ -152,7 +154,7 @@ hard rules → relevant termbase entries → project instructions → input bloc
         ↓ Gemini JSON response
 ID·순서·숫자·token·HTML·용어 검증
         ↓
-segments/translation.jsonl
+.glk/segments/translation.jsonl
 ```
 
 프로젝트 prompt는 hard rules와 termbase를 대체하지 않고 지정된 영역에만 삽입합니다. 전체 termbase 대신 현재 청크의 source term 또는 variants가 발견된 활성 항목만 전달합니다.
@@ -162,18 +164,18 @@ segments/translation.jsonl
 ## 번역 검수와 승인 gate
 
 ```text
-segments/translation.jsonl
-├── draft/translation.txt
-└── review/translation.txt
+.glk/segments/translation.jsonl
+├── 04_translation/draft.txt
+└── 04_translation/review.txt
         ↑ glk translation review
         │ localhost HTML 편집·저장·ERROR 선택 재번역
-        ├── revisions/translation_retry_*.json
+        ├── 04_translation/revisions/translation_retry_*.json
         ↓ marker·원문·숫자·token·태그·용어 검사
-qa/translation_qa.json
-qa/translation_qa.md
+.glk/reports/translation_qa.json
+04_translation/qa.md
         ↓ error 0개
-segments/approved_translation.jsonl
-final/translation.txt
+.glk/segments/approved_translation.jsonl
+05_output/translation.txt
 ```
 
 번역 review parser는 machine draft의 block 순서와 원문을 기준으로 `[PAGE]`·`[SOURCE]`, `[BLOCK]`, `[ORIGINAL]`, `[TRANSLATION]`, end marker를 대조합니다. 사람은 번역 본문만 수정할 수 있으며 원문이나 구조가 바뀌면 최종화를 차단합니다.

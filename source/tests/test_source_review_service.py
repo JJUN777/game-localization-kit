@@ -20,7 +20,7 @@ def make_block(order: int, text: str, *, page: int | None = 1) -> SourceBlock:
         schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
         id=f"pdf-p0001-b{order:04d}-{order:010d}",
         source_type="pdf",
-        source_file="source/original.pdf",
+        source_file="02_source/assets/original.pdf",
         page=page,
         source_order=order,
         block_order=order,
@@ -58,7 +58,7 @@ def read_blocks(path: Path) -> list[SourceBlock]:
 class SourceReviewServiceTests(unittest.TestCase):
     def create_source(self, workspace_root: Path, blocks: list[SourceBlock]) -> Path:
         location = create_project(name="Review Project", workspace_root=workspace_root)
-        write_blocks(location.path / "segments/source.jsonl", blocks)
+        write_blocks(location.path / ".glk/segments/source.jsonl", blocks)
         return location.path
 
     def test_prepare_creates_identical_files_and_preserves_edited_review(self) -> None:
@@ -72,8 +72,8 @@ class SourceReviewServiceTests(unittest.TestCase):
                 project="review_project", workspace_root=workspace_root
             )
             self.assertTrue(first.review_created)
-            draft_path = project_path / "draft/source.txt"
-            review_path = project_path / "review/source.txt"
+            draft_path = project_path / "02_source/draft.txt"
+            review_path = project_path / "02_source/review.txt"
             self.assertEqual(draft_path.read_bytes(), review_path.read_bytes())
 
             edited = review_path.read_text(encoding="utf-8").replace(
@@ -97,7 +97,7 @@ class SourceReviewServiceTests(unittest.TestCase):
             prepare_project_source_review(
                 project="review_project", workspace_root=workspace_root
             )
-            review_path = project_path / "review/source.txt"
+            review_path = project_path / "02_source/review.txt"
             review_path.write_text(
                 review_path.read_text(encoding="utf-8").replace("l0", "10"),
                 encoding="utf-8",
@@ -107,12 +107,12 @@ class SourceReviewServiceTests(unittest.TestCase):
                 project="review_project", workspace_root=workspace_root
             )
             self.assertEqual(result.changed_blocks, 1)
-            approved = read_blocks(project_path / "segments/approved_source.jsonl")
+            approved = read_blocks(project_path / ".glk/segments/approved_source.jsonl")
             self.assertEqual(approved[0].raw_text, "Increase HP by l0.")
             self.assertEqual(approved[0].corrected_text, "Increase HP by 10.")
             self.assertEqual(approved[1].corrected_text, None)
             self.assertTrue(all(block.status == "approved" for block in approved))
-            self.assertIn("Increase HP by 10.", (project_path / "final/source.txt").read_text())
+            self.assertIn("Increase HP by 10.", (project_path / "02_source/final.txt").read_text())
 
     def test_source_change_marks_existing_review_stale_until_forced_reset(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -124,7 +124,7 @@ class SourceReviewServiceTests(unittest.TestCase):
                 project="review_project", workspace_root=workspace_root
             )
             write_blocks(
-                project_path / "segments/source.jsonl",
+                project_path / ".glk/segments/source.jsonl",
                 [make_block(1, "New extraction.")],
             )
 
@@ -132,8 +132,8 @@ class SourceReviewServiceTests(unittest.TestCase):
                 project="review_project", workspace_root=workspace_root
             )
             self.assertEqual(stale.review_status, "stale")
-            self.assertIn("New extraction.", (project_path / "draft/source.txt").read_text())
-            self.assertIn("First extraction.", (project_path / "review/source.txt").read_text())
+            self.assertIn("New extraction.", (project_path / "02_source/draft.txt").read_text())
+            self.assertIn("First extraction.", (project_path / "02_source/review.txt").read_text())
             with self.assertRaises(SourceReviewError):
                 finalize_project_source_review(
                     project="review_project", workspace_root=workspace_root
@@ -143,7 +143,7 @@ class SourceReviewServiceTests(unittest.TestCase):
                 project="review_project", workspace_root=workspace_root, force=True
             )
             self.assertEqual(reset.review_status, "current")
-            self.assertIn("New extraction.", (project_path / "review/source.txt").read_text())
+            self.assertIn("New extraction.", (project_path / "02_source/review.txt").read_text())
 
     def test_finalize_rejects_marker_damage_and_unresolved_text(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -154,7 +154,7 @@ class SourceReviewServiceTests(unittest.TestCase):
             prepare_project_source_review(
                 project="review_project", workspace_root=workspace_root
             )
-            review_path = project_path / "review/source.txt"
+            review_path = project_path / "02_source/review.txt"
             review_path.write_text(
                 review_path.read_text(encoding="utf-8").replace("[PAGE 1]", "[PAGE 2]"),
                 encoding="utf-8",
@@ -184,13 +184,13 @@ class SourceReviewServiceTests(unittest.TestCase):
             project_path = self.create_source(
                 workspace_root, [make_block(1, "Gain {HP}.")]
             )
-            (project_path / "source/ocr_prompt.txt").write_text(
+            (project_path / "02_source/assets/ocr_prompt.txt").write_text(
                 "Heart: {HP}\nShield: {DEF}\n", encoding="utf-8"
             )
             prepare_project_source_review(
                 project="review_project", workspace_root=workspace_root
             )
-            review_path = project_path / "review/source.txt"
+            review_path = project_path / "02_source/review.txt"
             edited = review_path.read_text(encoding="utf-8").replace("{HP}", "{DEF}")
             review_path.write_bytes(edited.replace("\n", "\r\n").encode("utf-8"))
 
@@ -204,7 +204,7 @@ class SourceReviewServiceTests(unittest.TestCase):
                 allow_token_changes=True,
             )
             self.assertEqual(result.changed_blocks, 1)
-            approved = read_blocks(project_path / "segments/approved_source.jsonl")
+            approved = read_blocks(project_path / ".glk/segments/approved_source.jsonl")
             self.assertEqual(approved[0].corrected_text, "Gain {DEF}.")
 
 

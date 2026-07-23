@@ -13,6 +13,7 @@ from typing import Any
 
 from glk.application.project_service import load_project
 from glk.domain.source_block import SourceBlock, SourceBlockValidationError
+from glk.domain.workspace import WorkspacePaths
 from glk.domain.source_qa import SOURCE_QA_SCHEMA_VERSION, SourceQaIssue
 
 
@@ -116,7 +117,7 @@ def _load_blocks(path: Path) -> tuple[list[SourceBlock], bytes]:
 
 
 def _load_allowed_tokens(project_path: Path) -> tuple[tuple[str, ...], bytes]:
-    prompt_path = project_path / "source/ocr_prompt.txt"
+    prompt_path = WorkspacePaths(project_path).source_ocr_prompt
     if not prompt_path.is_file():
         return (), b""
     data = prompt_path.read_bytes()
@@ -384,7 +385,8 @@ def run_project_source_qa(
     dry_run: bool = False,
 ) -> SourceQaResult:
     location = load_project(project, workspace_root)
-    source_path = location.path / "segments/source.jsonl"
+    paths = WorkspacePaths(location.path)
+    source_path = paths.source_segments
     blocks, source_data = _load_blocks(source_path)
     allowed_tokens, prompt_data = _load_allowed_tokens(location.path)
     input_hash = _qa_input_hash(source_data, prompt_data)
@@ -396,9 +398,9 @@ def run_project_source_qa(
     flagged_ids = {
         issue.block_id for issue in issues if issue.severity in {"error", "warning"}
     }
-    output_path = location.path / "qa/source_qa.json"
-    human_report_path = location.path / "qa/source_qa.md"
-    state_path = location.path / "state/source_qa.json"
+    output_path = paths.source_qa_json
+    human_report_path = paths.source_qa_markdown
+    state_path = paths.source_qa_state
     if dry_run:
         return SourceQaResult(
             project_path=str(location.path),
@@ -442,7 +444,7 @@ def run_project_source_qa(
         "schema_version": 1,
         "status": "complete",
         "version": SOURCE_QA_VERSION,
-        "input_file": "segments/source.jsonl",
+        "input_file": paths.relative(paths.source_segments),
         "input_sha256": input_hash,
         "source_sha256": _sha256_bytes(source_data),
         "prompt_sha256": _sha256_bytes(prompt_data),
@@ -465,9 +467,9 @@ def run_project_source_qa(
     )
     _write_bytes_atomic(human_report_path, human_report_bytes)
     state = {key: value for key, value in report.items() if key != "issues"}
-    state["output_file"] = "qa/source_qa.json"
+    state["output_file"] = paths.relative(paths.source_qa_json)
     state["output_sha256"] = _sha256_bytes(output_bytes)
-    state["human_report_file"] = "qa/source_qa.md"
+    state["human_report_file"] = paths.relative(paths.source_qa_markdown)
     state["human_report_sha256"] = _sha256_bytes(human_report_bytes)
     _write_json_atomic(state_path, state)
     return SourceQaResult(

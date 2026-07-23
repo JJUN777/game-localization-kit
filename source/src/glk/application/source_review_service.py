@@ -14,6 +14,7 @@ from typing import Any
 
 from glk.application.project_service import load_project
 from glk.domain.source_block import SourceBlock, SourceBlockValidationError
+from glk.domain.workspace import WorkspacePaths
 
 
 SOURCE_REVIEW_FORMAT_VERSION = 1
@@ -102,7 +103,7 @@ def _write_json_atomic(path: Path, value: Any) -> None:
 
 
 def _load_source_blocks(project_path: Path) -> tuple[list[SourceBlock], bytes]:
-    source_path = project_path / "segments/source.jsonl"
+    source_path = WorkspacePaths(project_path).source_segments
     if not source_path.is_file():
         raise SourceReviewError(
             f"Review-source blocks not found: {source_path}. Run glk segment first."
@@ -184,14 +185,15 @@ def prepare_project_source_review(
     force: bool = False,
     dry_run: bool = False,
 ) -> ReviewPrepareResult:
-    """Refresh draft/source.txt and create review/source.txt without overwriting it."""
+    """Refresh source draft and create review TXT without overwriting it."""
     location = load_project(project, workspace_root)
+    paths = WorkspacePaths(location.path)
     blocks, source_data = _load_source_blocks(location.path)
     source_sha256 = _sha256_bytes(source_data)
     rendered = render_source_review_text(blocks)
-    draft_path = location.path / "draft/source.txt"
-    review_path = location.path / "review/source.txt"
-    state_path = location.path / "state/source_review.json"
+    draft_path = paths.source_draft
+    review_path = paths.source_review
+    state_path = paths.source_review_state
     review_created = force or not review_path.exists()
     if review_created:
         review_status = "current"
@@ -200,18 +202,17 @@ def prepare_project_source_review(
 
     if not dry_run:
         _write_if_changed(draft_path, rendered)
-        (location.path / "final").mkdir(parents=True, exist_ok=True)
         if review_created:
             _write_bytes_atomic(review_path, rendered)
             state = {
                 "schema_version": 1,
                 "status": "prepared",
                 "format_version": SOURCE_REVIEW_FORMAT_VERSION,
-                "source_file": "segments/source.jsonl",
+                "source_file": paths.relative(paths.source_segments),
                 "source_sha256": source_sha256,
                 "total_blocks": len(blocks),
-                "draft_file": "draft/source.txt",
-                "review_file": "review/source.txt",
+                "draft_file": paths.relative(paths.source_draft),
+                "review_file": paths.relative(paths.source_review),
                 "prepared_at": _utc_now(),
             }
             _write_json_atomic(state_path, state)
@@ -286,7 +287,7 @@ def _parse_review_text(data: bytes, blocks: list[SourceBlock]) -> dict[str, str]
 
 
 def _load_allowed_tokens(project_path: Path) -> set[str]:
-    prompt_path = project_path / "source/ocr_prompt.txt"
+    prompt_path = WorkspacePaths(project_path).source_ocr_prompt
     if not prompt_path.is_file():
         return set()
     try:
@@ -355,10 +356,11 @@ def finalize_project_source_review(
 ) -> ReviewFinalizeResult:
     """Validate the edited review TXT and produce approved TXT/JSONL outputs."""
     location = load_project(project, workspace_root)
+    paths = WorkspacePaths(location.path)
     blocks, source_data = _load_source_blocks(location.path)
     source_sha256 = _sha256_bytes(source_data)
-    review_path = location.path / "review/source.txt"
-    state_path = location.path / "state/source_review.json"
+    review_path = paths.source_review
+    state_path = paths.source_review_state
     if not review_path.is_file():
         raise SourceReviewError(
             f"Review TXT not found: {review_path}. Run glk review prepare first."
@@ -392,8 +394,8 @@ def finalize_project_source_review(
 
     final_text = render_source_review_text(approved_blocks)
     approved_data = _serialize_blocks(approved_blocks)
-    final_path = location.path / "final/source.txt"
-    approved_path = location.path / "segments/approved_source.jsonl"
+    final_path = paths.source_final
+    approved_path = paths.approved_source_segments
     if not dry_run:
         _write_bytes_atomic(final_path, final_text)
         _write_bytes_atomic(approved_path, approved_data)
@@ -403,9 +405,11 @@ def finalize_project_source_review(
                 "status": "approved",
                 "changed_blocks": changed_blocks,
                 "review_sha256": _sha256_bytes(review_path.read_bytes()),
-                "final_file": "final/source.txt",
+                "final_file": paths.relative(paths.source_final),
                 "final_sha256": _sha256_bytes(final_text),
-                "approved_blocks_file": "segments/approved_source.jsonl",
+                "approved_blocks_file": paths.relative(
+                    paths.approved_source_segments
+                ),
                 "approved_blocks_sha256": _sha256_bytes(approved_data),
                 "approved_at": _utc_now(),
             }

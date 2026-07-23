@@ -20,6 +20,7 @@ from glk.domain.translation_segment import (
     TranslationSegmentValidationError,
 )
 from glk.domain.translation_qa import check_translation_contract
+from glk.domain.workspace import WorkspacePaths
 from glk.infrastructure.gemini_layout import resolve_model_name
 from glk.infrastructure.gemini_translation import GeminiTranslationProvider
 
@@ -130,7 +131,7 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _load_approved_blocks(project_path: Path) -> tuple[list[SourceBlock], bytes]:
-    path = project_path / "segments/approved_source.jsonl"
+    path = WorkspacePaths(project_path).approved_source_segments
     if not path.is_file():
         raise TranslationError(
             f"Final common source not found: {path}. Run glk review finalize first."
@@ -167,7 +168,7 @@ def _load_approved_blocks(project_path: Path) -> tuple[list[SourceBlock], bytes]
 
 
 def _load_termbase(project_path: Path) -> tuple[list[dict[str, Any]], bytes]:
-    path = project_path / "terminology/termbase.json"
+    path = WorkspacePaths(project_path).termbase
     if not path.is_file():
         raise TranslationError(
             f"Current termbase not found: {path}. Run glk glossary import first."
@@ -209,7 +210,7 @@ def _load_termbase(project_path: Path) -> tuple[list[dict[str, Any]], bytes]:
 def _resolve_prompt(
     prompt_file: str | Path | None, project_path: Path
 ) -> tuple[str, Path | None, bool]:
-    canonical_path = project_path / "translation_prompt.txt"
+    canonical_path = WorkspacePaths(project_path).translation_prompt
     if prompt_file is None:
         if canonical_path.is_file():
             try:
@@ -541,6 +542,7 @@ def translate_project(
 ) -> TranslationRunResult:
     notify = progress or (lambda _: None)
     location = load_project(project, workspace_root)
+    paths = WorkspacePaths(location.path)
     pipeline = inspect_project(location.path)["pipeline"]
     if not pipeline["final_source_approved"]:
         raise TranslationError(
@@ -604,10 +606,10 @@ def translate_project(
     if prompt_needs_write or not canonical_prompt_path.is_file():
         _write_bytes_atomic(canonical_prompt_path, prompt_data)
 
-    output_path = location.path / "segments/translation.jsonl"
-    state_path = location.path / "state/translation.json"
-    draft_path = location.path / "draft/translation.txt"
-    review_path = location.path / "review/translation.txt"
+    output_path = paths.translation_segments
+    state_path = paths.translation_state
+    draft_path = paths.translation_draft
+    review_path = paths.translation_review
     previous_state = _read_json(state_path)
     existing_segments: list[TranslationSegment] = []
     state_matches = bool(
@@ -754,7 +756,7 @@ def translate_project(
                     "approved_source_sha256": approved_hash,
                     "termbase_sha256": termbase_hash,
                     "project_prompt_sha256": prompt_hash,
-                    "project_prompt_file": "translation_prompt.txt",
+                    "project_prompt_file": paths.relative(paths.translation_prompt),
                     "model": active_provider.model_name,
                     "provider_prompt_version": active_provider.prompt_version,
                     "max_characters": max_characters,
@@ -807,7 +809,7 @@ def translate_project(
                 "approved_source_sha256": approved_hash,
                 "termbase_sha256": termbase_hash,
                 "project_prompt_sha256": prompt_hash,
-                "project_prompt_file": "translation_prompt.txt",
+                "project_prompt_file": paths.relative(paths.translation_prompt),
                 "model": active_provider.model_name,
                 "provider_prompt_version": active_provider.prompt_version,
                 "max_characters": max_characters,
@@ -854,7 +856,7 @@ def translate_project(
             "approved_source_sha256": approved_hash,
             "termbase_sha256": termbase_hash,
             "project_prompt_sha256": prompt_hash,
-            "project_prompt_file": "translation_prompt.txt",
+            "project_prompt_file": paths.relative(paths.translation_prompt),
             "hard_rules_version": TRANSLATION_HARD_RULES_VERSION,
             "model": active_provider.model_name,
             "provider_prompt_version": active_provider.prompt_version,
@@ -863,11 +865,11 @@ def translate_project(
             "total_chunks": len(chunks),
             "completed_blocks": len(ordered_segments),
             "completed_chunks": len(chunks),
-            "translation_output_file": "segments/translation.jsonl",
+            "translation_output_file": paths.relative(paths.translation_segments),
             "translation_output_sha256": _sha256_bytes(output_data),
-            "draft_file": "draft/translation.txt",
+            "draft_file": paths.relative(paths.translation_draft),
             "draft_sha256": draft_hash,
-            "review_file": "review/translation.txt",
+            "review_file": paths.relative(paths.translation_review),
             "review_status": review_status,
             "review_base_draft_sha256": review_base_draft_hash,
             "failed_chunk": None,

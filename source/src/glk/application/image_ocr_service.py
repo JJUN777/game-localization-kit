@@ -19,6 +19,7 @@ from glk.application.project_service import (
     load_project,
     update_project_source,
 )
+from glk.domain.workspace import IMAGE_SOURCE_ROOT, WorkspacePaths
 from glk.extraction.image_ocr import (
     build_combined_text,
     build_individual_text,
@@ -214,14 +215,14 @@ def _load_cached_result(
 
 
 def _registered_source_folder(location: ProjectLocation) -> Path:
-    if location.manifest.source_file != "source/images":
+    if location.manifest.source_file != IMAGE_SOURCE_ROOT:
         if location.manifest.source_file:
             raise ImageOcrError(
                 f"Project source is already registered as {location.manifest.source_file}. "
                 "Provide --folder with --force to replace the project source type."
             )
         raise ImageOcrError("No image folder is registered; provide --folder.")
-    return location.path / "source/images"
+    return WorkspacePaths(location.path).source_images
 
 
 def _register_images(
@@ -231,12 +232,12 @@ def _register_images(
     *,
     force: bool,
 ) -> tuple[ProjectLocation, Path, list[Path]]:
-    if location.manifest.source_file not in {None, "source/images"} and not force:
+    if location.manifest.source_file not in {None, IMAGE_SOURCE_ROOT} and not force:
         raise ImageOcrError(
             f"Project source is already registered as {location.manifest.source_file}. "
             "Use --force to replace the project source type."
         )
-    destination_root = location.path / "source/images"
+    destination_root = WorkspacePaths(location.path).source_images
     registered: list[Path] = []
     for source_image in images:
         relative = source_image.relative_to(source_folder)
@@ -260,8 +261,8 @@ def _register_images(
             destination_sidecar = destination.with_name(destination.name + ".prompt.txt")
             if sidecar.resolve() != destination_sidecar.resolve():
                 _copy_file_atomic(sidecar, destination_sidecar)
-    if location.manifest.source_file != "source/images":
-        location = update_project_source(location, "source/images")
+    if location.manifest.source_file != IMAGE_SOURCE_ROOT:
+        location = update_project_source(location, IMAGE_SOURCE_ROOT)
     return location, destination_root, registered
 
 
@@ -279,6 +280,7 @@ def ocr_project_images(
 ) -> ImageOcrRunResult:
     notify = progress or (lambda _: None)
     location = load_project(project, workspace_root)
+    paths = WorkspacePaths(location.path)
     if folder is None:
         source_folder = _registered_source_folder(location)
     else:
@@ -294,7 +296,7 @@ def ocr_project_images(
         folder_prompt = source_folder / "ocr_prompt.txt"
         requested_prompt = folder_prompt if folder_prompt.is_file() else None
     if requested_prompt is None:
-        registered_prompt = location.path / "source/ocr_prompt.txt"
+        registered_prompt = paths.source_ocr_prompt
         requested_prompt = registered_prompt if registered_prompt.is_file() else None
 
     if dry_run:
@@ -323,19 +325,17 @@ def ocr_project_images(
 
     registered_prompt: Path | None = None
     if requested_prompt is not None:
-        registered_prompt = location.path / "source/ocr_prompt.txt"
+        registered_prompt = paths.source_ocr_prompt
         if requested_prompt.resolve() != registered_prompt.resolve():
             _copy_file_atomic(requested_prompt, registered_prompt)
-    elif (location.path / "source/ocr_prompt.txt").is_file():
-        registered_prompt = location.path / "source/ocr_prompt.txt"
+    elif paths.source_ocr_prompt.is_file():
+        registered_prompt = paths.source_ocr_prompt
 
     common_instructions = _read_text(registered_prompt)
     common_prompt_hash = _sha256_bytes(common_instructions.encode("utf-8"))
     active_provider = provider or GeminiImageOcrProvider.from_environment(model_name)
-    output_root = location.path / "source/ocr"
-    individual_dir = output_root / "individual"
-    results_dir = output_root / "results"
-    state_dir = location.path / "state"
+    individual_dir = paths.ocr_individual
+    results_dir = paths.ocr_results
     combined_items: list[tuple[str, str]] = []
     successful: list[str] = []
     cached_images: list[str] = []
@@ -373,14 +373,16 @@ def ocr_project_images(
                     result_path,
                     {
                         "schema_version": 1,
-                        "source_image": f"source/images/{relative.as_posix()}",
+                        "source_image": f"{IMAGE_SOURCE_ROOT}/{relative.as_posix()}",
                         "image_sha256": image_hash,
                         "common_prompt_file": (
-                            "source/ocr_prompt.txt" if registered_prompt else None
+                            paths.relative(paths.source_ocr_prompt)
+                            if registered_prompt
+                            else None
                         ),
                         "common_prompt_sha256": common_prompt_hash,
                         "image_prompt_file": (
-                            f"source/images/{relative_name}.prompt.txt"
+                            f"{IMAGE_SOURCE_ROOT}/{relative_name}.prompt.txt"
                             if image_prompt_path.is_file()
                             else None
                         ),
@@ -403,14 +405,17 @@ def ocr_project_images(
             combined_items.append((text_relative.as_posix(), ""))
             notify(f"Image {index}/{len(registered_images)}: failed: {error}")
 
-    combined_name = "combined.partial.txt" if failures else "combined.txt"
-    combined_path = output_root / combined_name
+    combined_path = (
+        paths.ocr_combined_partial if failures else paths.ocr_combined
+    )
     _write_text_atomic(combined_path, build_combined_text(combined_items))
     run_status = {
         "schema_version": 1,
         "status": "partial" if failures else "complete",
-        "source_folder": "source/images",
-        "prompt_file": "source/ocr_prompt.txt" if registered_prompt else None,
+        "source_folder": IMAGE_SOURCE_ROOT,
+        "prompt_file": (
+            paths.relative(paths.source_ocr_prompt) if registered_prompt else None
+        ),
         "model": active_provider.model_name,
         "prompt_version": active_provider.prompt_version,
         "total_images": len(registered_images),
@@ -421,8 +426,7 @@ def ocr_project_images(
         "output_file": str(combined_path.relative_to(location.path)),
         "updated_at": _utc_now(),
     }
-    _write_json_atomic(output_root / "run_summary.json", run_status)
-    _write_json_atomic(state_dir / "image_ocr.json", run_status)
+    _write_json_atomic(paths.image_ocr_state, run_status)
     return ImageOcrRunResult(
         project_path=str(location.path),
         source_folder=str(registered_folder),
