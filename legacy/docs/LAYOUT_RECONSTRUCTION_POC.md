@@ -1,6 +1,6 @@
 # PDF 레이아웃 복원 PoC
 
-> 상태: PDF 다단 읽기 순서와 줄바꿈 복원 방식을 검증한 PoC 기록입니다. 현재 사용법은 [전체 작업 흐름](../../source/docs/guides/workflow.md)을 기준으로 합니다.
+> 상태: PDF 다단 읽기 순서와 줄바꿈 복원 방식을 검증한 PoC 기록입니다. 현재 사용법은 [전체 작업 흐름](../../source/docs/WORKFLOW.md)을 기준으로 합니다.
 
 > 상태: PoC 완료, 통합 CLI extraction service로 이전됨  
 > 입력: `legacy/data/9999. final/PoC.pdf` 4페이지

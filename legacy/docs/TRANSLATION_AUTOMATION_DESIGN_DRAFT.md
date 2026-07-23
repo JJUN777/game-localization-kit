@@ -1,8 +1,8 @@
 # 번역 자동화 파이프라인 설계 초안
 
-> 상태: 초기 전체 구상을 보존한 설계 기록입니다. 현재 구현 구조는 [아키텍처](../../source/docs/reference/architecture.md), 실제 사용 순서는 [전체 작업 흐름](../../source/docs/guides/workflow.md)을 기준으로 합니다.
+> 상태: 초기 전체 구상을 보존한 설계 기록입니다. 현재 구현 구조는 [아키텍처](../../source/docs/ARCHITECTURE.md), 실제 사용 순서는 [전체 작업 흐름](../../source/docs/WORKFLOW.md)을 기준으로 합니다.
 
-현재 구현된 전체 실행 순서와 용어의 단일 기준은 [전체 작업 흐름](../../source/docs/guides/workflow.md)입니다.
+현재 구현된 전체 실행 순서와 용어의 단일 기준은 [전체 작업 흐름](../../source/docs/WORKFLOW.md)입니다.
 
 > 상태: Draft 0.1  
 > 대상: 보드게임 룰북, 카드 텍스트, 앱/스크립트 문자열의 한국어 현지화  
@@ -566,7 +566,7 @@ Action (99회)
 status,source_term,translation,category,note,variants,occurrences,locations,example,candidate_id
 ```
 
-실제 파일은 쉼표가 포함된 예문을 편하게 다루도록 tab으로 구분합니다. 사람이 누락 용어를 추가할 때는 `candidate_id`와 근거 컬럼을 비운 새 행을 작성하고, import가 최종 공통 원문에서 빈도·위치·예문을 다시 계산합니다. 확정 필드와 검증 규칙은 [용어집 검토 사양](../../source/docs/guides/glossary.md)을 따릅니다.
+실제 파일은 쉼표가 포함된 예문을 편하게 다루도록 tab으로 구분합니다. 사람이 누락 용어를 추가할 때는 `candidate_id`와 근거 컬럼을 비운 새 행을 작성하고, import가 최종 공통 원문에서 빈도·위치·예문을 다시 계산합니다. 확정 필드와 검증 규칙은 [용어집 검토 사양](../../source/docs/GLOSSARY.md)을 따릅니다.
 
 ### 8.3 승인 흐름
 
@@ -1000,7 +1000,7 @@ MVP에서 제외할 항목:
 ### 기능이 너무 빠르게 커지는 문제
 
 - GUI보다 통합 CLI와 데이터 모델을 우선합니다.
-- MVP 범위 밖의 현재 기능은 `docs/project/roadmap.md`에서 관리합니다.
+- MVP 범위 밖의 현재 기능은 활성 `source/README.md`의 제한사항을 기준으로 확인합니다.
 - 각 Phase가 실제 작업에 사용 가능한 상태로 끝나게 합니다.
 
 ## 20. 결정이 필요한 항목

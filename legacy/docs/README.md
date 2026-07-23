@@ -1,6 +1,6 @@
 # 문서 기록 보관소
 
-이 폴더는 구현 과정의 판단 근거와 과거 상태를 보존합니다. 현재 명령과 동작을 확인할 때는 [활성 README](../../source/README.md), [전체 작업 흐름](../../source/docs/guides/workflow.md), [아키텍처](../../source/docs/reference/architecture.md), [로드맵](../../source/docs/project/roadmap.md)을 우선합니다.
+이 폴더는 구현 과정의 판단 근거와 과거 상태를 보존합니다. 현재 명령과 동작을 확인할 때는 [활성 README](../../source/README.md), [전체 작업 흐름](../../source/docs/WORKFLOW.md), [아키텍처](../../source/docs/ARCHITECTURE.md)를 우선합니다.
 
 | 문서 | 보관 목적 |
 |---|---|

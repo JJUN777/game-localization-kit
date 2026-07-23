@@ -213,7 +213,7 @@ glk glossary build --project primal
 glk glossary build --project primal --force
 ```
 
-TSV에서 모든 자동 후보를 `approved`, `keep`, `rejected` 중 하나로 확정하고, 자동 후보에 없는 용어는 `candidate_id`와 근거 필드를 비운 행으로 추가합니다. 정확한 컬럼과 상태값은 [용어집 검토 사양](glossary.md)을 따릅니다.
+TSV에서 모든 자동 후보를 `approved`, `keep`, `rejected` 중 하나로 확정하고, 자동 후보에 없는 용어는 `candidate_id`와 근거 필드를 비운 행으로 추가합니다. 정확한 컬럼과 상태값은 [용어집 검토 사양](GLOSSARY.md)을 따릅니다.
 
 검토가 끝나면 termbase로 가져옵니다. 상대 경로는 먼저 project workspace 내부에서 찾습니다.
 
@@ -463,7 +463,5 @@ workspaces/<project_id>/
 ## 문서 갱신 규칙
 
 - 사용 순서·명령·출력·사람 판단 지점 변경: 이 문서와 Mermaid 갱신
-- 데이터 모델·계층·hash 정책 변경: [아키텍처](../reference/architecture.md) 갱신
-- TSV·termbase 계약 변경: [용어집 검토 사양](glossary.md) 갱신
-- 구현 우선순위 변경: [로드맵](../project/roadmap.md) 갱신
-- 작업을 마치거나 다른 환경으로 이동: [인수인계](../project/handoff.md) 갱신
+- 데이터 모델·계층·hash 정책 변경: [아키텍처](ARCHITECTURE.md) 갱신
+- TSV·termbase 계약 변경: [용어집 검토 사양](GLOSSARY.md) 갱신
