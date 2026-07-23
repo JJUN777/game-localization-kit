@@ -10,6 +10,12 @@ from collections.abc import Sequence
 from glk import __version__
 from glk.application.extraction_service import ExtractionError, extract_project_pdf
 from glk.application.image_ocr_service import ImageOcrError, ocr_project_images
+from glk.application.glossary_service import (
+    GlossaryBuildError,
+    GlossaryImportError,
+    build_project_glossary_candidates,
+    import_project_glossary,
+)
 from glk.application.project_service import create_project, inspect_project, load_project
 from glk.application.segmentation_service import SegmentationError, segment_project_source
 from glk.application.source_review_service import (
@@ -18,8 +24,16 @@ from glk.application.source_review_service import (
     prepare_project_source_review,
 )
 from glk.application.source_qa_service import SourceQaError, run_project_source_qa
+from glk.application.translation_service import TranslationError, translate_project
+from glk.application.translation_review_service import (
+    TranslationReviewError,
+    finalize_project_translation_review,
+    prepare_project_translation_review,
+    run_project_translation_qa,
+)
 from glk.domain.project import ProjectError
 from glk.infrastructure.gemini_layout import GeminiConfigurationError
+from glk.infrastructure.translation_review_server import serve_translation_review
 
 
 EXIT_ERROR = 1
@@ -121,6 +135,26 @@ def _run_status(args: argparse.Namespace) -> int:
         print(
             "Final source: "
             f"{'approved' if pipeline['final_source_approved'] else 'not approved'}"
+        )
+        glossary_detail = pipeline["glossary_status"]
+        if pipeline["glossary_candidates"] is not None:
+            glossary_detail += f" ({pipeline['glossary_candidates']} candidates)"
+        print(f"Glossary review: {glossary_detail}")
+        termbase_detail = pipeline["termbase_status"]
+        if pipeline["termbase_entries"] is not None:
+            termbase_detail += f" ({pipeline['termbase_entries']} entries)"
+        print(f"Termbase: {termbase_detail}")
+        translation_detail = pipeline["translation_status"]
+        if pipeline["translated_blocks"] is not None:
+            translation_detail += f" ({pipeline['translated_blocks']} blocks)"
+        print(f"Translation: {translation_detail}")
+        review_detail = pipeline["translation_review"]
+        if pipeline["translation_qa_issues"] is not None:
+            review_detail += f" ({pipeline['translation_qa_issues']} errors)"
+        print(f"Translation review: {review_detail}")
+        print(
+            "Final translation: "
+            f"{'approved' if pipeline['final_translation_approved'] else 'not approved'}"
         )
     return 0 if status["ok"] else EXIT_ERROR
 
@@ -588,6 +622,227 @@ def _run_review_finalize(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_glossary_build(args: argparse.Namespace) -> int:
+    try:
+        result = build_project_glossary_candidates(
+            project=args.project,
+            workspace_root=args.workspace_root,
+            min_frequency=args.min_frequency,
+            max_words=args.max_words,
+            max_candidates=args.max_candidates,
+            force=args.force,
+            dry_run=args.dry_run,
+        )
+    except (ProjectError, GlossaryBuildError, OSError, ValueError) as error:
+        return _print_error(args, "GLOSSARY_BUILD_FAILED", str(error))
+
+    if args.json:
+        print(json.dumps(result.to_dict(), ensure_ascii=False))
+    elif result.dry_run and result.status in {"would_create", "would_reset"}:
+        action = "reset" if result.status == "would_reset" else "create"
+        print(
+            f"Would {action} glossary review TSV with "
+            f"{result.candidate_count} candidates"
+        )
+    elif result.status == "stale":
+        print(f"Preserved existing glossary review TSV at {result.output_file}")
+        print(
+            "The approved source or build settings changed. Compare the existing "
+            "TSV before resetting it with 'glk glossary build --force'.",
+            file=sys.stderr,
+        )
+    elif result.cached:
+        print(
+            f"Preserved current glossary review TSV with "
+            f"{result.candidate_count} candidates at {result.output_file}"
+        )
+    else:
+        action = "Reset" if result.reset else "Created"
+        print(
+            f"{action} glossary review TSV with {result.candidate_count} candidates "
+            f"at {result.output_file}"
+        )
+        print("Next: fill translation/status/category and add any missing terms")
+    return 0
+
+
+def _run_glossary_import(args: argparse.Namespace) -> int:
+    try:
+        result = import_project_glossary(
+            project=args.project,
+            file=args.file,
+            workspace_root=args.workspace_root,
+            allow_missing_terms=args.allow_missing_terms,
+        )
+    except (ProjectError, GlossaryImportError, OSError, ValueError) as error:
+        return _print_error(args, "GLOSSARY_IMPORT_FAILED", str(error))
+
+    if args.json:
+        print(json.dumps(result.to_dict(), ensure_ascii=False))
+    elif result.cached:
+        print(
+            f"Termbase is current with {result.entry_count} entries at "
+            f"{result.output_file}"
+        )
+    else:
+        print(
+            f"Imported {result.entry_count} glossary entries "
+            f"({result.active_count} active, {result.rejected_count} rejected, "
+            f"{result.manual_count} manual) to {result.output_file}"
+        )
+        print(f"Updated review evidence at {result.review_file}")
+    for warning in result.warnings:
+        print(f"Warning: {warning}", file=sys.stderr)
+    return 0
+
+
+def _run_translate(args: argparse.Namespace) -> int:
+    try:
+        result = translate_project(
+            project=args.project,
+            workspace_root=args.workspace_root,
+            prompt_file=args.prompt,
+            model_name=args.model,
+            max_characters=args.max_characters,
+            resume=args.resume,
+            force=args.force,
+            dry_run=args.dry_run,
+            progress=lambda message: print(message, file=sys.stderr),
+        )
+    except (
+        ProjectError,
+        TranslationError,
+        GeminiConfigurationError,
+        OSError,
+        RuntimeError,
+        ValueError,
+    ) as error:
+        return _print_error(args, "TRANSLATION_FAILED", str(error))
+
+    if args.json:
+        print(json.dumps(result.to_dict(), ensure_ascii=False))
+    elif result.dry_run:
+        print(
+            f"Would translate {result.total_blocks} blocks in "
+            f"{result.total_chunks} chunks with {result.model}"
+        )
+    elif result.cached:
+        print(
+            f"Translation is current for {result.completed_blocks} blocks at "
+            f"{result.output_file}"
+        )
+    else:
+        action = "Resumed and translated" if result.resumed else "Translated"
+        print(
+            f"{action} {result.completed_blocks} blocks in "
+            f"{result.completed_chunks} chunks to {result.output_file}"
+        )
+        print(f"Draft: {result.draft_file}")
+        print(f"Review: {result.review_file} ({result.review_status})")
+    return 0
+
+
+def _run_translation_review_prepare(args: argparse.Namespace) -> int:
+    try:
+        result = prepare_project_translation_review(
+            project=args.project,
+            workspace_root=args.workspace_root,
+            force=args.force,
+            dry_run=args.dry_run,
+        )
+    except (ProjectError, TranslationReviewError, OSError, ValueError) as error:
+        return _print_error(args, "TRANSLATION_REVIEW_PREPARE_FAILED", str(error))
+
+    if args.json:
+        print(json.dumps(result.to_dict(), ensure_ascii=False))
+    elif result.dry_run:
+        action = "reset" if result.review_created else "preserve"
+        print(
+            f"Would {action} review/translation.txt for "
+            f"{result.total_blocks} blocks"
+        )
+    elif result.review_created:
+        print(f"Prepared translation review TXT at {result.review_file}")
+    else:
+        print(f"Preserved translation review TXT at {result.review_file}")
+        if result.review_status == "stale":
+            print(
+                "Compare it with draft/translation.txt, then use --force "
+                "only when you intend to reset the review.",
+                file=sys.stderr,
+            )
+    return 0
+
+
+def _run_translation_review_qa(args: argparse.Namespace) -> int:
+    try:
+        result = run_project_translation_qa(
+            project=args.project,
+            workspace_root=args.workspace_root,
+            dry_run=args.dry_run,
+        )
+    except (ProjectError, TranslationReviewError, OSError, ValueError) as error:
+        return _print_error(args, "TRANSLATION_QA_FAILED", str(error))
+
+    if args.json:
+        print(json.dumps(result.to_dict(), ensure_ascii=False))
+    else:
+        print(
+            f"Translation QA: {result.error_count} errors, "
+            f"{result.warning_count} warnings across {result.total_blocks} blocks"
+        )
+        if result.json_report:
+            print(f"JSON report: {result.json_report}")
+            print(f"Markdown report: {result.markdown_report}")
+    return 0 if result.passed else EXIT_ERROR
+
+
+def _run_translation_review_finalize(args: argparse.Namespace) -> int:
+    try:
+        result = finalize_project_translation_review(
+            project=args.project,
+            workspace_root=args.workspace_root,
+            dry_run=args.dry_run,
+        )
+    except (ProjectError, TranslationReviewError, OSError, ValueError) as error:
+        return _print_error(args, "TRANSLATION_FINALIZE_FAILED", str(error))
+
+    if args.json:
+        print(json.dumps(result.to_dict(), ensure_ascii=False))
+    elif not result.valid:
+        print(
+            f"Translation review failed QA with {result.error_count} errors. "
+            f"Report: {result.markdown_report or 'not written in dry-run'}",
+            file=sys.stderr,
+        )
+    elif result.dry_run:
+        print(
+            f"Translation review is valid: "
+            f"{result.changed_blocks}/{result.total_blocks} blocks changed; "
+            "no final files written"
+        )
+    else:
+        print(
+            f"Finalized {result.total_blocks} translation blocks "
+            f"({result.changed_blocks} corrected) to {result.output_file}"
+        )
+        print(f"Approved segments: {result.approved_segments_file}")
+    return 0 if result.valid else EXIT_ERROR
+
+
+def _run_translation_review_web(args: argparse.Namespace) -> int:
+    try:
+        serve_translation_review(
+            project=args.project,
+            workspace_root=args.workspace_root,
+            port=args.port,
+            open_browser=not args.no_open,
+        )
+    except (ProjectError, TranslationReviewError, OSError, ValueError) as error:
+        return _print_error(args, "TRANSLATION_REVIEW_SERVER_FAILED", str(error))
+    return 0
+
+
 def _run_planned_command(args: argparse.Namespace) -> int:
     command = args.command
     message = (
@@ -700,17 +955,147 @@ def build_parser() -> argparse.ArgumentParser:
     segment_parser.set_defaults(handler=_run_segment)
 
     glossary_parser = subparsers.add_parser(
-        "glossary", help="Analyze or import translation terminology"
+        "glossary", help="Build or import project terminology"
     )
-    glossary_parser.add_argument("--file", help="Source text or reviewed glossary path")
-    _add_execution_options(glossary_parser)
-    glossary_parser.set_defaults(handler=_run_planned_command)
+    glossary_subparsers = glossary_parser.add_subparsers(
+        dest="glossary_command", metavar="ACTION"
+    )
+    glossary_build_parser = glossary_subparsers.add_parser(
+        "build", help="Create a human-editable glossary candidate TSV"
+    )
+    glossary_build_parser.add_argument("--project", required=True, help="Project ID or path")
+    glossary_build_parser.add_argument(
+        "--workspace-root", default="workspaces", help="Parent directory for workspaces"
+    )
+    glossary_build_parser.add_argument(
+        "--min-frequency", type=int, default=2, help="Minimum repeated-term frequency"
+    )
+    glossary_build_parser.add_argument(
+        "--max-words", type=int, default=4, help="Maximum words in a candidate phrase"
+    )
+    glossary_build_parser.add_argument(
+        "--max-candidates", type=int, default=500, help="Maximum candidate rows"
+    )
+    glossary_build_parser.add_argument(
+        "--force", action="store_true", help="Reset TSV and discard human edits"
+    )
+    glossary_build_parser.add_argument(
+        "--dry-run", action="store_true", help="Analyze without writing files"
+    )
+    glossary_build_parser.add_argument(
+        "--json", action="store_true", help="Print machine-readable output"
+    )
+    glossary_build_parser.set_defaults(handler=_run_glossary_build)
 
-    translate_parser = subparsers.add_parser("translate", help="Translate source segments")
-    translate_parser.add_argument("--file", help="Source text path")
+    glossary_import_parser = glossary_subparsers.add_parser(
+        "import", help="Validate reviewed TSV and build the termbase"
+    )
+    glossary_import_parser.add_argument("--project", required=True, help="Project ID or path")
+    glossary_import_parser.add_argument("--file", required=True, help="Reviewed glossary TSV")
+    glossary_import_parser.add_argument(
+        "--workspace-root", default="workspaces", help="Parent directory for workspaces"
+    )
+    glossary_import_parser.add_argument(
+        "--allow-missing-terms", action="store_true", help="Allow unverified manual terms"
+    )
+    glossary_import_parser.add_argument("--json", action="store_true")
+    glossary_import_parser.set_defaults(handler=_run_glossary_import)
+
+    translate_parser = subparsers.add_parser(
+        "translate", help="Translate approved source blocks with the current termbase"
+    )
+    translate_parser.add_argument(
+        "--prompt", help="Project translation instructions; defaults to translation_prompt.txt"
+    )
+    translate_parser.add_argument("--model", help="Gemini model override")
+    translate_parser.add_argument(
+        "--max-characters",
+        type=int,
+        default=10000,
+        help="Maximum source characters per translation chunk",
+    )
     translate_parser.add_argument("--resume", action="store_true", help="Resume a previous run")
-    _add_execution_options(translate_parser)
-    translate_parser.set_defaults(handler=_run_planned_command)
+    translate_parser.add_argument(
+        "--workspace-root", default="workspaces", help="Parent directory for workspaces"
+    )
+    _add_execution_options(translate_parser, project_required=True)
+    translate_parser.set_defaults(handler=_run_translate)
+
+    translation_review_parser = subparsers.add_parser(
+        "translation", help="Review, QA, and finalize translated text"
+    )
+    translation_review_subparsers = translation_review_parser.add_subparsers(
+        dest="translation_command", metavar="ACTION"
+    )
+
+    translation_web_parser = translation_review_subparsers.add_parser(
+        "review", help="Open the local browser-based translation review UI"
+    )
+    translation_web_parser.add_argument(
+        "--project", required=True, help="Project ID or path"
+    )
+    translation_web_parser.add_argument(
+        "--workspace-root", default="workspaces", help="Parent directory for workspaces"
+    )
+    translation_web_parser.add_argument(
+        "--port", type=int, default=0, help="Local port; 0 selects an available port"
+    )
+    translation_web_parser.add_argument(
+        "--no-open", action="store_true", help="Do not open the default browser"
+    )
+    translation_web_parser.set_defaults(handler=_run_translation_review_web)
+
+    translation_prepare_parser = translation_review_subparsers.add_parser(
+        "prepare", help="Prepare or deliberately reset translation review TXT"
+    )
+    translation_prepare_parser.add_argument(
+        "--project", required=True, help="Project ID or path"
+    )
+    translation_prepare_parser.add_argument(
+        "--workspace-root", default="workspaces", help="Parent directory for workspaces"
+    )
+    translation_prepare_parser.add_argument(
+        "--force", action="store_true", help="Reset review TXT from the current draft"
+    )
+    translation_prepare_parser.add_argument(
+        "--dry-run", action="store_true", help="Validate without writing files"
+    )
+    translation_prepare_parser.add_argument("--json", action="store_true")
+    translation_prepare_parser.set_defaults(
+        handler=_run_translation_review_prepare
+    )
+
+    translation_qa_parser = translation_review_subparsers.add_parser(
+        "qa", help="Validate the edited translation and write QA reports"
+    )
+    translation_qa_parser.add_argument(
+        "--project", required=True, help="Project ID or path"
+    )
+    translation_qa_parser.add_argument(
+        "--workspace-root", default="workspaces", help="Parent directory for workspaces"
+    )
+    translation_qa_parser.add_argument(
+        "--dry-run", action="store_true", help="Validate without writing reports"
+    )
+    translation_qa_parser.add_argument("--json", action="store_true")
+    translation_qa_parser.set_defaults(handler=_run_translation_review_qa)
+
+    translation_finalize_parser = translation_review_subparsers.add_parser(
+        "finalize", help="Approve a QA-clean translation review"
+    )
+    translation_finalize_parser.add_argument(
+        "--project", required=True, help="Project ID or path"
+    )
+    translation_finalize_parser.add_argument(
+        "--workspace-root", default="workspaces", help="Parent directory for workspaces"
+    )
+    translation_finalize_parser.add_argument(
+        "--dry-run", action="store_true", help="Validate without writing final files"
+    )
+    translation_finalize_parser.add_argument("--json", action="store_true")
+    translation_finalize_parser.set_defaults(
+        handler=_run_translation_review_finalize
+    )
 
     qa_parser = subparsers.add_parser(
         "qa", help="Run deterministic local QA against review-source blocks"
@@ -765,11 +1150,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="Print machine-readable output"
     )
     review_finalize_parser.set_defaults(handler=_run_review_finalize)
-
-    export_parser = subparsers.add_parser("export", help="Export approved translation output")
-    export_parser.add_argument("--output", help="Destination file or directory")
-    _add_execution_options(export_parser)
-    export_parser.set_defaults(handler=_run_planned_command)
 
     status_parser = subparsers.add_parser("status", help="Show project pipeline status")
     status_parser.add_argument("--project", required=True, help="Project ID or workspace path")

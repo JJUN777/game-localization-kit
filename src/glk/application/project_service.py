@@ -15,6 +15,10 @@ from glk.domain.project import ProjectError, ProjectManifest
 
 
 DEFAULT_WORKSPACE_ROOT = Path("workspaces")
+GLOSSARY_BUILD_VERSION = "glossary-candidates-local-v1"
+TERMBASE_IMPORT_VERSION = "termbase-import-v1"
+TRANSLATION_RUN_VERSION = "translation-run-v1"
+TRANSLATION_REVIEW_VERSION = "translation-review-v1"
 PROJECT_DIRECTORIES = (
     Path("source/pages"),
     Path("segments"),
@@ -222,6 +226,7 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
     review_state = _read_optional_json(project_path / "state/source_review.json")
     final_path = project_path / "final/source.txt"
     approved_path = project_path / "segments/approved_source.jsonl"
+    approved_sha256 = _sha256_file(approved_path)
     if not review_path.is_file() or review_state is None:
         human_review = "not_ready"
     elif review_state.get("source_sha256") != source_sha256:
@@ -230,11 +235,148 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
         review_state.get("status") == "approved"
         and review_state.get("review_sha256") == _sha256_file(review_path)
         and review_state.get("final_sha256") == _sha256_file(final_path)
-        and review_state.get("approved_blocks_sha256") == _sha256_file(approved_path)
+        and review_state.get("approved_blocks_sha256") == approved_sha256
     ):
         human_review = "approved"
     else:
         human_review = "pending"
+
+    glossary_path = project_path / "terminology/glossary_review.tsv"
+    glossary_state = _read_optional_json(project_path / "state/glossary_build.json")
+    if not glossary_path.is_file() or glossary_state is None:
+        glossary_status = "not_built" if human_review == "approved" else "not_ready"
+        glossary_candidates = None
+    elif (
+        human_review != "approved"
+        or glossary_state.get("status") != "complete"
+        or glossary_state.get("version") != GLOSSARY_BUILD_VERSION
+        or glossary_state.get("approved_source_sha256") != approved_sha256
+    ):
+        glossary_status = "stale"
+        glossary_candidates = glossary_state.get("candidate_count")
+    else:
+        glossary_status = "current"
+        glossary_candidates = glossary_state.get("candidate_count")
+
+    termbase_path = project_path / "terminology/termbase.json"
+    termbase_state = _read_optional_json(project_path / "state/glossary_import.json")
+    if not termbase_path.is_file() or termbase_state is None:
+        termbase_status = "not_built" if glossary_status == "current" else "not_ready"
+        termbase_entries = None
+    elif (
+        glossary_status != "current"
+        or termbase_state.get("status") != "complete"
+        or termbase_state.get("version") != TERMBASE_IMPORT_VERSION
+        or termbase_state.get("approved_source_sha256") != approved_sha256
+        or termbase_state.get("review_tsv_sha256") != _sha256_file(glossary_path)
+        or termbase_state.get("termbase_sha256") != _sha256_file(termbase_path)
+    ):
+        termbase_status = "stale"
+        termbase_entries = termbase_state.get("entry_count")
+    else:
+        termbase_status = "current"
+        termbase_entries = termbase_state.get("entry_count")
+
+    translation_path = project_path / "segments/translation.jsonl"
+    translation_state = _read_optional_json(project_path / "state/translation.json")
+    translation_prompt_path = project_path / "translation_prompt.txt"
+    if translation_state is None:
+        translation_status = "not_run" if termbase_status == "current" else "not_ready"
+        translated_blocks = None
+    elif (
+        termbase_status != "current"
+        or translation_state.get("version") != TRANSLATION_RUN_VERSION
+        or translation_state.get("approved_source_sha256") != approved_sha256
+        or translation_state.get("termbase_sha256") != _sha256_file(termbase_path)
+        or translation_state.get("project_prompt_sha256")
+        != _sha256_file(translation_prompt_path)
+    ):
+        translation_status = "stale"
+        translated_blocks = translation_state.get("completed_blocks")
+    elif translation_state.get("status") == "partial":
+        translation_status = "partial"
+        translated_blocks = translation_state.get("completed_blocks")
+    elif (
+        translation_state.get("status") != "complete"
+        or not translation_path.is_file()
+        or translation_state.get("translation_output_sha256")
+        != _sha256_file(translation_path)
+    ):
+        translation_status = "stale"
+        translated_blocks = translation_state.get("completed_blocks")
+    else:
+        translation_status = "current"
+        translated_blocks = translation_state.get("completed_blocks")
+
+    translation_review_path = project_path / "review/translation.txt"
+    translation_draft_path = project_path / "draft/translation.txt"
+    translation_review_state = _read_optional_json(
+        project_path / "state/translation_review.json"
+    )
+    translation_qa_json_path = project_path / "qa/translation_qa.json"
+    translation_qa_markdown_path = project_path / "qa/translation_qa.md"
+    approved_translation_path = (
+        project_path / "segments/approved_translation.jsonl"
+    )
+    final_translation_path = project_path / "final/translation.txt"
+    if translation_status != "current":
+        translation_review_status = (
+            "stale"
+            if translation_review_path.is_file()
+            or translation_review_state is not None
+            else "not_ready"
+        )
+        translation_qa_issues = (
+            translation_review_state.get("error_count")
+            if translation_review_state
+            else None
+        )
+    elif (
+        translation_state is None
+        or translation_state.get("review_status") != "current"
+        or translation_state.get("review_base_draft_sha256")
+        != _sha256_file(translation_draft_path)
+    ):
+        translation_review_status = "stale"
+        translation_qa_issues = None
+    elif translation_review_state is None:
+        translation_review_status = "pending"
+        translation_qa_issues = None
+    elif (
+        translation_review_state.get("version") != TRANSLATION_REVIEW_VERSION
+        or translation_review_state.get("translation_output_sha256")
+        != _sha256_file(translation_path)
+        or translation_review_state.get("termbase_sha256")
+        != _sha256_file(termbase_path)
+        or translation_review_state.get("draft_sha256")
+        != _sha256_file(translation_draft_path)
+        or translation_review_state.get("review_sha256")
+        != _sha256_file(translation_review_path)
+        or translation_review_state.get("qa_json_sha256")
+        != _sha256_file(translation_qa_json_path)
+        or translation_review_state.get("qa_markdown_sha256")
+        != _sha256_file(translation_qa_markdown_path)
+    ):
+        translation_review_status = "stale"
+        translation_qa_issues = translation_review_state.get("error_count")
+    elif translation_review_state.get("status") == "qa_failed":
+        translation_review_status = "qa_failed"
+        translation_qa_issues = translation_review_state.get("error_count")
+    elif translation_review_state.get("status") == "qa_passed":
+        translation_review_status = "qa_passed"
+        translation_qa_issues = translation_review_state.get("error_count")
+    elif (
+        translation_review_state.get("status") == "approved"
+        and translation_review_state.get("approved_segments_sha256")
+        == _sha256_file(approved_translation_path)
+        and translation_review_state.get("final_sha256")
+        == _sha256_file(final_translation_path)
+    ):
+        translation_review_status = "approved"
+        translation_qa_issues = translation_review_state.get("error_count")
+    else:
+        translation_review_status = "stale"
+        translation_qa_issues = translation_review_state.get("error_count")
 
     return {
         "source_type": source_type,
@@ -244,4 +386,13 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
         "qa_issues": qa_issues,
         "human_review": human_review,
         "final_source_approved": human_review == "approved",
+        "glossary_status": glossary_status,
+        "glossary_candidates": glossary_candidates,
+        "termbase_status": termbase_status,
+        "termbase_entries": termbase_entries,
+        "translation_status": translation_status,
+        "translated_blocks": translated_blocks,
+        "translation_review": translation_review_status,
+        "translation_qa_issues": translation_qa_issues,
+        "final_translation_approved": translation_review_status == "approved",
     }

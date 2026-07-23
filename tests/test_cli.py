@@ -15,8 +15,14 @@ from PIL import Image
 
 from glk.cli import EXIT_NOT_IMPLEMENTED, main
 from glk.application.extraction_service import ExtractionResult, PageFailure
+from glk.application.glossary_service import GlossaryBuildResult, GlossaryImportResult
 from glk.application.segmentation_service import SegmentationResult
 from glk.application.source_qa_service import SourceQaResult
+from glk.application.translation_service import TranslationRunResult
+from glk.application.translation_review_service import (
+    TranslationFinalizeResult,
+    TranslationQaResult,
+)
 from glk.domain.source_block import SOURCE_BLOCK_SCHEMA_VERSION, SourceBlock
 
 
@@ -38,11 +44,11 @@ class CliTests(unittest.TestCase):
     def test_planned_command_fails_explicitly_as_json(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output), redirect_stderr(io.StringIO()):
-            exit_code = main(["translate", "--file", "sample.txt", "--json"])
+            exit_code = main(["retry", "--failed", "--json"])
         self.assertEqual(exit_code, EXIT_NOT_IMPLEMENTED)
         payload = json.loads(output.getvalue())
         self.assertFalse(payload["ok"])
-        self.assertEqual(payload["command"], "translate")
+        self.assertEqual(payload["command"], "retry")
         self.assertEqual(payload["code"], "NOT_IMPLEMENTED")
 
     def test_ocr_dry_run_reports_selected_images_as_json(self) -> None:
@@ -499,6 +505,212 @@ class CliTests(unittest.TestCase):
             payload = json.loads(finalize_output.getvalue())
             self.assertEqual(payload["changed_blocks"], 1)
             self.assertTrue((workspace_root / "cli_review/final/source.txt").is_file())
+
+    def test_glossary_build_command_outputs_single_json_result(self) -> None:
+        result = GlossaryBuildResult(
+            project_path="/tmp/workspaces/game",
+            approved_source_sha256="a" * 64,
+            candidate_count=17,
+            output_file="/tmp/workspaces/game/terminology/glossary_review.tsv",
+            status="current",
+            created=True,
+        )
+        output = io.StringIO()
+        with (
+            patch("glk.cli.build_project_glossary_candidates", return_value=result) as build,
+            redirect_stdout(output),
+            redirect_stderr(io.StringIO()),
+        ):
+            exit_code = main(
+                [
+                    "glossary",
+                    "build",
+                    "--project",
+                    "game",
+                    "--min-frequency",
+                    "3",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["candidate_count"], 17)
+        self.assertTrue(payload["created"])
+        self.assertEqual(build.call_args.kwargs["min_frequency"], 3)
+
+    def test_glossary_import_command_outputs_single_json_result(self) -> None:
+        result = GlossaryImportResult(
+            project_path="/tmp/workspaces/game",
+            approved_source_sha256="a" * 64,
+            review_tsv_sha256="b" * 64,
+            entry_count=18,
+            active_count=12,
+            rejected_count=6,
+            manual_count=2,
+            unverified_count=1,
+            review_file="/tmp/workspaces/game/terminology/glossary_review.tsv",
+            output_file="/tmp/workspaces/game/terminology/termbase.json",
+            warnings=("One manual term is unverified.",),
+        )
+        output = io.StringIO()
+        with (
+            patch("glk.cli.import_project_glossary", return_value=result) as glossary_import,
+            redirect_stdout(output),
+            redirect_stderr(io.StringIO()),
+        ):
+            exit_code = main(
+                [
+                    "glossary",
+                    "import",
+                    "--project",
+                    "game",
+                    "--file",
+                    "terminology/glossary_review.tsv",
+                    "--allow-missing-terms",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["entry_count"], 18)
+        self.assertEqual(payload["manual_count"], 2)
+        self.assertEqual(payload["unverified_count"], 1)
+        self.assertTrue(glossary_import.call_args.kwargs["allow_missing_terms"])
+
+    def test_translate_command_outputs_single_json_result(self) -> None:
+        result = TranslationRunResult(
+            project_path="/tmp/workspaces/game",
+            model="test-model",
+            approved_source_sha256="a" * 64,
+            termbase_sha256="b" * 64,
+            project_prompt_sha256="c" * 64,
+            input_sha256="d" * 64,
+            total_blocks=24,
+            total_chunks=3,
+            completed_blocks=24,
+            completed_chunks=3,
+            output_file="/tmp/workspaces/game/segments/translation.jsonl",
+            draft_file="/tmp/workspaces/game/draft/translation.txt",
+            review_file="/tmp/workspaces/game/review/translation.txt",
+            review_status="current",
+            prompt_file="/tmp/workspaces/game/translation_prompt.txt",
+            review_created=True,
+        )
+        output = io.StringIO()
+        with (
+            patch("glk.cli.translate_project", return_value=result) as translate,
+            redirect_stdout(output),
+            redirect_stderr(io.StringIO()),
+        ):
+            exit_code = main(
+                [
+                    "translate",
+                    "--project",
+                    "game",
+                    "--prompt",
+                    "project_prompt.txt",
+                    "--model",
+                    "test-model",
+                    "--max-characters",
+                    "8000",
+                    "--resume",
+                    "--json",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["completed_blocks"], 24)
+        self.assertEqual(payload["review_status"], "current")
+        self.assertEqual(translate.call_args.kwargs["max_characters"], 8000)
+        self.assertTrue(translate.call_args.kwargs["resume"])
+
+    def test_translation_qa_and_finalize_commands(self) -> None:
+        qa_result = TranslationQaResult(
+            project_path="/tmp/workspaces/game",
+            total_blocks=24,
+            error_count=0,
+            warning_count=1,
+            info_count=0,
+            issues=(),
+            json_report="/tmp/workspaces/game/qa/translation_qa.json",
+            markdown_report="/tmp/workspaces/game/qa/translation_qa.md",
+        )
+        qa_output = io.StringIO()
+        with (
+            patch("glk.cli.run_project_translation_qa", return_value=qa_result) as qa,
+            redirect_stdout(qa_output),
+            redirect_stderr(io.StringIO()),
+        ):
+            qa_exit = main(
+                [
+                    "translation",
+                    "qa",
+                    "--project",
+                    "game",
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        self.assertEqual(qa_exit, 0)
+        self.assertTrue(json.loads(qa_output.getvalue())["passed"])
+        self.assertTrue(qa.call_args.kwargs["dry_run"])
+
+        finalize_result = TranslationFinalizeResult(
+            project_path="/tmp/workspaces/game",
+            total_blocks=24,
+            changed_blocks=5,
+            error_count=0,
+            warning_count=1,
+            issues=(),
+            output_file="/tmp/workspaces/game/final/translation.txt",
+            approved_segments_file=(
+                "/tmp/workspaces/game/segments/approved_translation.jsonl"
+            ),
+            json_report="/tmp/workspaces/game/qa/translation_qa.json",
+            markdown_report="/tmp/workspaces/game/qa/translation_qa.md",
+            finalized=True,
+        )
+        finalize_output = io.StringIO()
+        with (
+            patch(
+                "glk.cli.finalize_project_translation_review",
+                return_value=finalize_result,
+            ) as finalize,
+            redirect_stdout(finalize_output),
+            redirect_stderr(io.StringIO()),
+        ):
+            finalize_exit = main(
+                [
+                    "translation",
+                    "finalize",
+                    "--project",
+                    "game",
+                    "--json",
+                ]
+            )
+        self.assertEqual(finalize_exit, 0)
+        payload = json.loads(finalize_output.getvalue())
+        self.assertTrue(payload["finalized"])
+        self.assertEqual(payload["changed_blocks"], 5)
+        self.assertEqual(finalize.call_args.kwargs["project"], "game")
+
+    def test_translation_review_command_starts_local_ui(self) -> None:
+        with patch("glk.cli.serve_translation_review") as serve:
+            exit_code = main(
+                [
+                    "translation",
+                    "review",
+                    "--project",
+                    "game",
+                    "--port",
+                    "8765",
+                    "--no-open",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(serve.call_args.kwargs["project"], "game")
+        self.assertEqual(serve.call_args.kwargs["port"], 8765)
+        self.assertFalse(serve.call_args.kwargs["open_browser"])
 
     def test_init_and_status_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

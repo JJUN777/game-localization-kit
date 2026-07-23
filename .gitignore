@@ -16,11 +16,19 @@ dist/
 *.tmp
 *.meta.json
 
+# Personal and legacy runtime configuration
+00_config.json
+legacy/00_config.json
+
+# Historical inputs/outputs are preserved locally, not in Git
+local-data/*
+!local-data/README.md
+
 97_layout_poc/
 97_image_ocr_poc/
 workspaces/
 
-samples/image_ocr/**/*.png
-samples/image_ocr/**/*.jpg
-samples/image_ocr/**/*.jpeg
-samples/image_ocr/**/*.webp
+legacy/samples/image_ocr/**/*.png
+legacy/samples/image_ocr/**/*.jpg
+legacy/samples/image_ocr/**/*.jpeg
+legacy/samples/image_ocr/**/*.webp

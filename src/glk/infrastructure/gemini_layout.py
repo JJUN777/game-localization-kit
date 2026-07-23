@@ -29,24 +29,13 @@ class GeminiConfigurationError(ValueError):
     """Raised when Gemini credentials or model settings are unavailable."""
 
 
-def _load_legacy_model_name(config_path: Path) -> str | None:
-    if not config_path.is_file():
-        return None
-    try:
-        value = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    model_name = value.get("translation", {}).get("model_name")
-    return model_name.strip() if isinstance(model_name, str) and model_name.strip() else None
-
-
 def resolve_model_name(model_name: str | None = None) -> str:
     if model_name and model_name.strip():
         return model_name.strip()
     environment_model = os.getenv("GEMINI_MODEL", "").strip()
     if environment_model:
         return environment_model
-    return _load_legacy_model_name(Path.cwd() / "00_config.json") or DEFAULT_MODEL
+    return DEFAULT_MODEL
 
 
 def _is_retryable_error(error: Exception) -> bool:
@@ -118,4 +107,3 @@ class GeminiLayoutProvider:
                 delay = self.base_delay * (2**attempt) + random.uniform(0, 0.5)
                 time.sleep(delay)
         raise RuntimeError("Gemini retry loop ended unexpectedly.")
-

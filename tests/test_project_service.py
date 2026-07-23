@@ -135,6 +135,60 @@ class ProjectServiceTests(unittest.TestCase):
             approved = inspect_project("pipeline_state", root)["pipeline"]
             self.assertEqual(approved["human_review"], "approved")
             self.assertTrue(approved["final_source_approved"])
+            self.assertEqual(approved["glossary_status"], "not_built")
+
+            glossary_path = location.path / "terminology/glossary_review.tsv"
+            glossary_path.write_text("status\tsource_term\n", encoding="utf-8")
+            (location.path / "state/glossary_build.json").write_text(
+                json.dumps(
+                    {
+                        "status": "complete",
+                        "version": "glossary-candidates-local-v1",
+                        "approved_source_sha256": hashlib.sha256(
+                            approved_path.read_bytes()
+                        ).hexdigest(),
+                        "candidate_count": 12,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            glossary_ready = inspect_project("pipeline_state", root)["pipeline"]
+            self.assertEqual(glossary_ready["glossary_status"], "current")
+            self.assertEqual(glossary_ready["glossary_candidates"], 12)
+            self.assertEqual(glossary_ready["termbase_status"], "not_built")
+
+            termbase_path = location.path / "terminology/termbase.json"
+            termbase_path.write_text('{"entries": []}\n', encoding="utf-8")
+            (location.path / "state/glossary_import.json").write_text(
+                json.dumps(
+                    {
+                        "status": "complete",
+                        "version": "termbase-import-v1",
+                        "approved_source_sha256": hashlib.sha256(
+                            approved_path.read_bytes()
+                        ).hexdigest(),
+                        "review_tsv_sha256": hashlib.sha256(
+                            glossary_path.read_bytes()
+                        ).hexdigest(),
+                        "termbase_sha256": hashlib.sha256(
+                            termbase_path.read_bytes()
+                        ).hexdigest(),
+                        "entry_count": 9,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            termbase_ready = inspect_project("pipeline_state", root)["pipeline"]
+            self.assertEqual(termbase_ready["termbase_status"], "current")
+            self.assertEqual(termbase_ready["termbase_entries"], 9)
+            self.assertEqual(termbase_ready["translation_status"], "not_run")
+
+            glossary_path.write_text(
+                "status\tsource_term\nrejected\tchanged\n", encoding="utf-8"
+            )
+            termbase_stale = inspect_project("pipeline_state", root)["pipeline"]
+            self.assertEqual(termbase_stale["termbase_status"], "stale")
+            self.assertEqual(termbase_stale["translation_status"], "not_ready")
 
             (location.path / "review/source.txt").write_text(
                 "edited after approval", encoding="utf-8"
@@ -148,6 +202,8 @@ class ProjectServiceTests(unittest.TestCase):
             self.assertEqual(stale["qa_status"], "stale")
             self.assertEqual(stale["human_review"], "stale")
             self.assertFalse(stale["final_source_approved"])
+            self.assertEqual(stale["glossary_status"], "stale")
+            self.assertEqual(stale["termbase_status"], "stale")
 
 
 if __name__ == "__main__":
