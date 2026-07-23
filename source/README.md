@@ -2,82 +2,59 @@
 
 Game Localization Kit(GLK)은 PDF 룰북이나 이미지 폴더에서 원문을 가져오고, 사람이 원문과 번역을 검수한 뒤 최종 한국어 TXT를 만드는 크로스 플랫폼 CLI입니다.
 
-Windows와 macOS에서 같은 `glk` 명령을 사용합니다. PDF의 다단 읽기 순서 복원, 이미지 OCR, 원문 QA, 용어집 생성, Gemini 초벌 번역, 브라우저 검수와 최종 승인까지 하나의 프로젝트 workspace 안에서 연결합니다.
+Windows와 macOS에서 같은 `glk` 명령을 사용합니다.
 
-현재 구현된 범위는 다음과 같습니다.
+쉽게 말하면 이 프로그램은 다음 일을 도와줍니다.
 
 ```text
-원문 획득
-→ 원문 정규화와 로컬 QA
-→ 사람 원문 검수·승인
-→ 용어 후보 검토와 termbase 생성
-→ Gemini 초벌 번역
-→ 사람 번역 검수와 로컬 QA
-→ 최종 번역 TXT 승인
+PDF 또는 이미지에서 글자를 읽음
+→ 잘못 읽었을 가능성이 있는 부분을 알려줌
+→ 사람이 원본을 보면서 글자를 바로잡음
+→ 자주 나오는 게임 용어의 번역을 정함
+→ AI가 초벌 번역을 만듦
+→ 사람이 화면에서 번역을 다듬음
+→ 최종 한국어 TXT를 만듦
 ```
 
-QA에 실패한 일부 segment만 선택적으로 재번역하는 `retry` 기능은 아직 구현 전입니다.
+AI가 읽은 원문과 초벌 번역을 그대로 최종 결과로 사용하지 않습니다. 원문을 한 번, 번역을 한 번 사람이 확인하도록 구성되어 있습니다.
 
-## 처음 사용하는 경우
-
-처음 사용하는 사람은 이 README를 위에서부터 순서대로 따라 하면 됩니다.
-
-1. Python과 Gemini API 키를 준비합니다.
-2. `source/`에서 GLK를 설치합니다.
-3. `glk init`으로 프로젝트를 만듭니다.
-4. `glk run`으로 PDF 또는 이미지에서 원문을 가져옵니다.
-5. 원문을 확인하고 승인합니다.
-6. 용어집을 검토합니다.
-7. 초벌 번역을 생성합니다.
-8. 브라우저에서 번역을 수정하고 최종 승인합니다.
-
-더 세밀한 파일 규칙이 필요할 때만 [전체 작업 흐름](docs/WORKFLOW.md)과 [용어집 검토 사양](docs/GLOSSARY.md)을 확인하면 됩니다.
-
-## 전체 작업 흐름
+## 한눈에 보는 전체 흐름
 
 ```mermaid
 flowchart TD
-    START([시작]) --> SETUP[Python 설치<br/>GEMINI_API_KEY 설정]
-    SETUP --> INIT[glk init<br/>프로젝트 workspace 생성]
-    INIT --> RUN[glk run<br/>원문 획득·정규화·QA]
-    RUN --> INPUT{입력 종류}
-
-    INPUT -->|PDF| PDF[텍스트 fragment와 좌표 추출<br/>Gemini로 읽기 순서 판정]
-    INPUT -->|이미지 폴더| IMAGE[이미지별 Gemini OCR<br/>하위 폴더 구조 보존]
-
-    PDF --> SOURCE[공통 SourceBlock 생성]
-    IMAGE --> SOURCE
-    SOURCE --> DRAFT[draft/source.txt<br/>자동 생성 기준본]
-    SOURCE --> REVIEW[review/source.txt<br/>사람이 수정할 작업본]
-    SOURCE --> SOURCE_QA[qa/source_qa.md<br/>로컬 원문 QA]
-
-    DRAFT -. 비교 .-> HUMAN_SOURCE[PDF·이미지와 대조<br/>review 본문만 수정]
-    REVIEW --> HUMAN_SOURCE
-    SOURCE_QA --> HUMAN_SOURCE
-    HUMAN_SOURCE --> SOURCE_CHECK[glk review finalize --dry-run]
-    SOURCE_CHECK -->|오류 있음| HUMAN_SOURCE
-    SOURCE_CHECK -->|통과| SOURCE_FINAL[glk review finalize]
-
-    SOURCE_FINAL --> APPROVED_SOURCE[final/source.txt<br/>approved_source.jsonl]
-    APPROVED_SOURCE --> GLOSSARY_BUILD[glk glossary build]
-    GLOSSARY_BUILD --> GLOSSARY_TSV[glossary_review.tsv<br/>사람이 상태·번역어 검토]
-    GLOSSARY_TSV --> GLOSSARY_IMPORT[glk glossary import]
-    GLOSSARY_IMPORT --> TERMBASE[termbase.json]
-
-    TERMBASE --> TRANSLATE[glk translate<br/>Gemini 초벌 번역]
-    TRANSLATE --> TRANS_DRAFT[draft/translation.txt]
-    TRANSLATE --> TRANS_REVIEW[review/translation.txt]
-    TRANS_DRAFT -. 비교 .-> BROWSER[glk translation review<br/>localhost 검수 화면]
-    TRANS_REVIEW --> BROWSER
-
-    BROWSER --> HUMAN_TRANS[원문·번역 비교<br/>번역 본문 수정·저장]
-    HUMAN_TRANS --> TRANS_QA[로컬 번역 QA]
-    TRANS_QA -->|오류 있음| HUMAN_TRANS
-    TRANS_QA -->|통과| TRANS_FINAL[최종 승인]
-    TRANS_FINAL --> RESULT[final/translation.txt<br/>최종 번역 완료]
+    START([1. 설치하고 프로젝트 만들기])
+    START --> SELECT{2. 원본 선택}
+    SELECT -->|룰북 PDF| PDF[프로그램이 PDF의 글과<br/>읽는 순서를 정리]
+    SELECT -->|이미지 폴더| IMAGE[프로그램이 이미지마다<br/>글자를 인식]
+    PDF --> SOURCE_REVIEW[3. 사람이 원본과 비교하며<br/>잘못 읽힌 글자를 수정]
+    IMAGE --> SOURCE_REVIEW
+    SOURCE_REVIEW --> WORDS[4. 자주 쓰는 게임 용어와<br/>번역어를 결정]
+    WORDS --> DRAFT[5. AI가 초벌 번역 생성]
+    DRAFT --> TRANS_REVIEW[6. 사람이 브라우저에서<br/>원문과 번역을 비교·수정]
+    TRANS_REVIEW --> CHECK{숫자·아이콘·용어에<br/>문제가 없는가?}
+    CHECK -->|문제 있음| TRANS_REVIEW
+    CHECK -->|문제 없음| RESULT([7. 최종 한국어 TXT 완성])
 ```
 
-각 단계에는 입력 hash와 상태가 저장됩니다. 입력이나 사람이 검토한 파일이 바뀌면 무조건 덮어쓰지 않고 `stale` 상태로 표시해 다시 확인할 수 있게 합니다.
+### 프로그램과 사용자가 나누어 하는 일
+
+| 단계 | 프로그램이 하는 일 | 사용자가 하는 일 |
+|---|---|---|
+| 프로젝트 준비 | 작업 파일을 보관할 전용 폴더 생성 | 프로젝트 이름 지정 |
+| 원문 읽기 | PDF 순서 정리 또는 이미지 글자 인식 | PDF 또는 이미지 폴더 선택 |
+| 원문 확인 | 의심되는 숫자·아이콘·글자 위치 표시 | 원본과 비교해 잘못 읽힌 문장 수정 |
+| 용어 정리 | 반복되는 이름과 게임 용어 후보 수집 | 사용할 한국어 번역어 결정 |
+| 초벌 번역 | 정해진 용어를 반영해 AI 번역 생성 | 번역 문체 지침이 필요하면 작성 |
+| 번역 확인 | 숫자·아이콘·용어가 유지됐는지 검사 | 브라우저에서 어색한 번역 수정 |
+| 완료 | 검사를 통과한 최종 TXT 생성 | 최종 승인 |
+
+사용자가 직접 판단해야 하는 핵심은 세 가지입니다.
+
+1. 프로그램이 원문을 제대로 읽었는지 확인합니다.
+2. 게임 용어를 어떤 한국어로 번역할지 정합니다.
+3. AI 초벌 번역을 읽고 자연스럽게 수정합니다.
+
+설치 후 실제로 입력할 명령은 아래 단계에서 순서대로 설명합니다. 더 세밀한 내부 파일 규칙이 필요할 때만 [상세 작업 흐름](docs/WORKFLOW.md)을 확인하면 됩니다.
 
 ## 준비물
 
@@ -804,4 +781,4 @@ Gemini를 사용하지 않는 단계:
 | [용어집 검토 사양](docs/GLOSSARY.md) | TSV 컬럼, status, 수동 용어와 import 검증 |
 | [아키텍처](docs/ARCHITECTURE.md) | 코드 계층, 데이터 모델, 캐시와 승인 구조 |
 
-이전 단일 스크립트, PoC와 과거 문서는 [legacy 안내](../legacy/README.md)에 분리되어 있습니다. 신규 사용자는 `legacy/`를 확인할 필요가 없습니다.
+신규 사용자는 `source/`의 README, 코드와 문서만 사용하면 됩니다.

@@ -16,16 +16,8 @@ dist/
 *.tmp
 *.meta.json
 
-# Personal and legacy runtime configuration
+# Personal runtime configuration and local archive
 00_config.json
-legacy/00_config.json
-
-# Historical inputs/outputs are preserved under the legacy bundle, not in Git
-legacy/data/
+legacy/
 
 workspaces/
-
-legacy/samples/image_ocr/**/*.png
-legacy/samples/image_ocr/**/*.jpg
-legacy/samples/image_ocr/**/*.jpeg
-legacy/samples/image_ocr/**/*.webp
