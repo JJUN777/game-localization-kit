@@ -109,7 +109,7 @@ thinking 제외 실측: 약 3원
 
 ## 실측 예시: PDF 읽기 순서 복원
 
-`primal_poc` PDF의 렌더 이미지(787×1187px)와 실제 prompt를 `count_tokens`로 측정하고, 저장된 JSON 출력을 같은 tokenizer로 계산한 결과입니다.
+PDF 룰북 측정 샘플의 렌더 이미지(787×1187px)와 실제 prompt를 `count_tokens`로 측정하고, 저장된 JSON 출력을 같은 tokenizer로 계산한 결과입니다.
 
 | 페이지 | fragment 수 | 입력 token | 출력 추정 token | thinking 제외 비용 |
 |---|---:|---:|---:|---:|
@@ -122,7 +122,7 @@ thinking 제외 실측: 약 3원
 
 ## 실측 예시: 이미지 OCR
 
-`dragon_poc`의 카드 이미지 5장(모두 932×1270px, 측정 샘플)과 아이콘 30종 상세 prompt를 `count_tokens`로 측정한 결과입니다.
+이미지 OCR 측정 샘플의 카드 이미지 5장(모두 932×1270px)과 아이콘 30종 상세 prompt를 `count_tokens`로 측정한 결과입니다.
 
 | 항목 | 값 |
 |---|---:|
@@ -151,7 +151,7 @@ thinking 제외 실측: 약 3원
 
 ## 실측 예시: 초벌 번역
 
-`primal_poc`의 확정 원문과 termbase로 실제 번역 prompt를 만들고 `count_tokens`를 호출한 결과입니다. 번역 생성 API는 호출하지 않았습니다.
+PDF 룰북 측정 샘플의 확정 원문과 termbase로 실제 번역 prompt를 만들고 `count_tokens`를 호출한 결과입니다. 번역 생성 API는 호출하지 않았습니다.
 
 | 항목 | 값 |
 |---|---:|

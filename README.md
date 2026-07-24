@@ -1,5 +1,7 @@
 # Game Localization Kit
 
+[![Cross-platform CI](https://github.com/JJUN777/game-localization-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/JJUN777/game-localization-kit/actions/workflows/ci.yml)
+
 보드게임 영어 룰북과 이미지를 한국어로 번역하는 CLI 도구입니다.
 
 PDF에서 원문을 읽고, AI가 초벌 번역을 만들고, 사람이 원문과 번역을 각각 확인한 뒤 최종 한국어 TXT를 완성합니다. Windows와 macOS에서 같은 `glk` 명령을 사용합니다.
@@ -148,7 +150,7 @@ glk --help
 glk version
 ```
 
-`glk 1.0.0`과 명령 목록이 표시되면 정상입니다.
+`glk 1.1.0`과 명령 목록이 표시되면 정상입니다.
 
 ### `glk: command not found`가 나오면
 
@@ -794,6 +796,6 @@ glk review translation --project primal --no-open --port 8765
 | [LLM 사용량과 비용](docs/COSTS.md) | 모든 사용자 | API 호출 단계, token 계산, 비용 예시 |
 | [용어집 검토 사양](docs/GLOSSARY.md) | 고급 사용자 | TSV 컬럼, status, import 검증 규칙 |
 | [아키텍처](docs/ARCHITECTURE.md) | 개발자 | 코드 계층, 데이터 모델, 승인 구조 |
-| [릴리즈 노트](docs/RELEASE_NOTES.md) | 모든 사용자 | v1.0.0 기능, 검증 결과, 알려진 제한 |
+| [릴리즈 노트](docs/RELEASE_NOTES.md) | 모든 사용자 | 버전별 변경사항, 검증 결과, 알려진 제한 |
 
 처음 사용할 때는 이 README만으로 충분합니다. 세부 규칙이 필요할 때만 `docs/` 문서를 확인합니다.
