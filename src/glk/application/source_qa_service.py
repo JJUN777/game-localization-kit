@@ -337,6 +337,7 @@ def _render_markdown_report(
     for number, issue in enumerate(issues, start=1):
         location = f"PDF {issue.page}페이지" if issue.page else issue.source_file
         evidence = " ".join(issue.evidence.split())
+        safe_evidence = evidence.replace("`", "'")
         lines.extend(
             (
                 f"## Q-{number:04d} · {issue.code}",
@@ -346,7 +347,7 @@ def _render_markdown_report(
                 f"- 원본: `{issue.source_file}`",
                 f"- 블록: `{issue.block_id}`",
                 f"- 사유: {issue.message}",
-                f"- 확인할 내용: `{evidence.replace('`', "'")}`",
+                f"- 확인할 내용: `{safe_evidence}`",
                 "",
             )
         )

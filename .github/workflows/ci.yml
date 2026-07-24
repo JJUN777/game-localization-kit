@@ -50,6 +50,9 @@ jobs:
       - name: Check installed dependencies
         run: python -m pip check
 
+      - name: Check Python syntax
+        run: python -m compileall -q src tests
+
       - name: Run test suite
         run: python -m unittest discover -s tests -v
 
