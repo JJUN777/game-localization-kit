@@ -159,7 +159,9 @@ class TranslationReviewServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 409)
-        self.assertIn("changed after", conflict["message"])
+        self.assertEqual(conflict["code"], "REVIEW_CONFLICT")
+        self.assertIn("새로고침", conflict["message"])
+        self.assertIn("changed after", conflict["detail"])
 
         status, qa_payload, _ = self._request(
             "/api/qa",
@@ -210,7 +212,9 @@ class TranslationReviewServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 400)
-        self.assertIn("unknown", payload["message"])
+        self.assertEqual(payload["code"], "INVALID_REQUEST")
+        self.assertIn("알 수 없는 블록", payload["message"])
+        self.assertIn("unknown", payload["detail"])
         self.assertEqual(
             (self.project_path / "04_translation/review.txt").read_bytes(),
             before,

@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import json
-import hashlib
 from importlib.resources import files
-import os
 import shutil
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from glk.application._hashing import sha256_file_if_exists as _sha256_file
+from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.domain.project import ProjectError, ProjectManifest
 from glk.domain.workspace import (
     IMAGE_SOURCE_ROOT,
@@ -98,16 +98,6 @@ def _resolve_path(path: str | Path) -> Path:
     if not candidate.is_absolute():
         candidate = Path.cwd() / candidate
     return candidate.resolve()
-
-
-def _write_json_atomic(path: Path, value: dict[str, Any]) -> None:
-    temporary_path = path.with_suffix(path.suffix + ".tmp")
-    with temporary_path.open("w", encoding="utf-8") as file:
-        json.dump(value, file, ensure_ascii=False, indent=2)
-        file.write("\n")
-        file.flush()
-        os.fsync(file.fileno())
-    os.replace(temporary_path, path)
 
 
 def _default_ocr_prompt_bytes() -> bytes:
@@ -329,15 +319,6 @@ def _read_optional_json(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
-
-
-def _sha256_file(path: Path) -> str | None:
-    if not path.is_file():
-        return None
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return None
 
 
 def _final_translation_files_current(

@@ -153,7 +153,9 @@ class GlossaryReviewServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 409)
-        self.assertIn("changed after", conflict["message"])
+        self.assertEqual(conflict["code"], "REVIEW_CONFLICT")
+        self.assertIn("새로고침", conflict["message"])
+        self.assertIn("changed after", conflict["detail"])
 
     def test_generated_rows_cannot_be_deleted_and_review_can_be_imported(self) -> None:
         _, document, _ = self._request("/api/review")
@@ -168,7 +170,9 @@ class GlossaryReviewServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 400)
-        self.assertIn("cannot be deleted", payload["message"])
+        self.assertEqual(payload["code"], "INVALID_REQUEST")
+        self.assertIn("삭제할 수 없습니다", payload["message"])
+        self.assertIn("cannot be deleted", payload["detail"])
 
         for row in rows:
             row["status"] = "rejected"
@@ -207,7 +211,9 @@ class GlossaryReviewServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertFalse(payload["ok"])
-        self.assertIn("still in review", payload["message"])
+        self.assertEqual(payload["code"], "GLOSSARY_IMPORT_FAILED")
+        self.assertIn("검토 중인 용어", payload["message"])
+        self.assertIn("still in review", payload["detail"])
         self.assertNotEqual(
             payload["document"]["review_sha256"],
             document["review_sha256"],

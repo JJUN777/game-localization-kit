@@ -4,16 +4,19 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-import hashlib
 import json
-import os
 from pathlib import Path
 import re
-import shutil
 from typing import Any, Callable, Protocol
 
 from PIL import Image, ImageOps
 
+from glk.application._hashing import sha256_bytes as _sha256_bytes
+from glk.application._hashing import sha256_file as _sha256_file
+from glk.application._io import copy_file_atomic as _copy_file_atomic
+from glk.application._io import write_bytes_atomic as _write_bytes_atomic
+from glk.application._io import write_json_atomic as _write_json_atomic
+from glk.application._io import write_text_atomic as _write_text_atomic
 from glk.application.project_service import (
     ProjectLocation,
     load_project,
@@ -132,49 +135,6 @@ def _validate_output_collisions(images: list[Path], root: Path) -> None:
                 f"both map to {output.as_posix()}"
             )
         outputs[output] = image_path
-
-
-def _sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _write_bytes_atomic(path: Path, value: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = path.with_suffix(path.suffix + ".tmp")
-    with temporary_path.open("wb") as file:
-        file.write(value)
-        file.flush()
-        os.fsync(file.fileno())
-    os.replace(temporary_path, path)
-
-
-def _write_text_atomic(path: Path, value: str) -> None:
-    text = value if not value or value.endswith("\n") else value + "\n"
-    _write_bytes_atomic(path, text.encode("utf-8"))
-
-
-def _write_json_atomic(path: Path, value: Any) -> None:
-    _write_bytes_atomic(
-        path,
-        (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
-    )
-
-
-def _copy_file_atomic(source: Path, destination: Path) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = destination.with_suffix(destination.suffix + ".tmp")
-    shutil.copyfile(source, temporary_path)
-    with temporary_path.open("rb+") as file:
-        os.fsync(file.fileno())
-    os.replace(temporary_path, destination)
 
 
 def _load_image(path: Path) -> Image.Image:

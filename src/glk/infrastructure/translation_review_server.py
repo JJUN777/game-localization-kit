@@ -22,7 +22,8 @@ from glk.application.translation_review_service import (
     save_project_translation_review,
 )
 from glk.application.translation_retry_service import retry_failed_translations
-from glk.application.translation_service import TranslationError
+from glk.application.translation_types import TranslationError
+from glk.error_response import make_http_error_response
 from glk.infrastructure.gemini_layout import GeminiConfigurationError
 
 
@@ -68,7 +69,8 @@ class TranslationReviewHttpServer(ThreadingHTTPServer):
     @property
     def origin(self) -> str:
         host, port = self.server_address[:2]
-        return f"http://{host}:{port}"
+        host_text = host.decode("ascii") if isinstance(host, bytes) else host
+        return f"http://{host_text}:{port}"
 
     @property
     def review_url(self) -> str:
@@ -117,7 +119,10 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
         self._send_bytes(status, data, "application/json; charset=utf-8")
 
     def _send_error_json(self, status: HTTPStatus, message: str) -> None:
-        self._send_json(status, {"ok": False, "message": message})
+        self._send_json(
+            status,
+            make_http_error_response(status, message).to_dict(),
+        )
 
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
@@ -199,40 +204,40 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
                 if path == "/api/save":
                     response: dict[str, Any] = {"ok": True, "document": document}
                 elif path == "/api/qa":
-                    result = run_project_translation_qa(
+                    qa_result = run_project_translation_qa(
                         project=self.server.project,
                         workspace_root=self.server.workspace_root,
                     )
                     response = {
-                        "ok": result.passed,
-                        "result": result.to_dict(),
+                        "ok": qa_result.passed,
+                        "result": qa_result.to_dict(),
                         "document": get_project_translation_review_document(
                             project=self.server.project,
                             workspace_root=self.server.workspace_root,
                         ),
                     }
                 elif path == "/api/retry":
-                    result = retry_failed_translations(
+                    retry_result = retry_failed_translations(
                         project=self.server.project,
                         workspace_root=self.server.workspace_root,
                         expected_review_sha256=document["review_sha256"],
                     )
                     response = {
-                        "ok": result.ok,
-                        "result": result.to_dict(),
+                        "ok": retry_result.ok,
+                        "result": retry_result.to_dict(),
                         "document": get_project_translation_review_document(
                             project=self.server.project,
                             workspace_root=self.server.workspace_root,
                         ),
                     }
                 else:
-                    result = finalize_project_translation_review(
+                    finalize_result = finalize_project_translation_review(
                         project=self.server.project,
                         workspace_root=self.server.workspace_root,
                     )
                     response = {
-                        "ok": result.valid,
-                        "result": result.to_dict(),
+                        "ok": finalize_result.valid,
+                        "result": finalize_result.to_dict(),
                         "document": get_project_translation_review_document(
                             project=self.server.project,
                             workspace_root=self.server.workspace_root,

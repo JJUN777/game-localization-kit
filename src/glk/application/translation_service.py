@@ -5,15 +5,29 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-import hashlib
 import json
-import os
 from pathlib import Path
 import re
-from typing import Any, Protocol
+from typing import Any
 
+from glk.application._hashing import sha256_bytes as _sha256_bytes
+from glk.application._io import (
+    write_bytes_atomic as _write_bytes_atomic,
+    write_json_atomic as _write_json_atomic,
+)
+from glk.application._translation_context import (
+    load_approved_blocks as _load_approved_blocks,
+    load_termbase as _load_termbase,
+    resolve_translation_prompt as _resolve_prompt,
+)
 from glk.application.project_service import inspect_project, load_project
-from glk.domain.source_block import SourceBlock, SourceBlockValidationError
+from glk.application.translation_types import (
+    DEFAULT_PROJECT_INSTRUCTIONS,
+    TranslationError,
+    TranslationProvider,
+    TranslationValidationError,
+)
+from glk.domain.source_block import SourceBlock
 from glk.domain.translation_segment import (
     TRANSLATION_SEGMENT_SCHEMA_VERSION,
     TranslationSegment,
@@ -27,26 +41,6 @@ from glk.infrastructure.gemini_translation import GeminiTranslationProvider
 
 TRANSLATION_RUN_VERSION = "translation-run-v1"
 TRANSLATION_HARD_RULES_VERSION = "translation-hard-rules-v1"
-DEFAULT_PROJECT_INSTRUCTIONS = """\
-Translate into natural Korean suitable for a board game rulebook.
-Use concise formal Korean for rules and instructions.
-Preserve the source meaning without adding, omitting, summarizing, or explaining.
-Keep headings concise and use terminology consistently."""
-
-
-class TranslationError(ValueError):
-    """Raised when source blocks cannot be translated safely."""
-
-
-class TranslationValidationError(TranslationError):
-    """Raised when a model response violates the translation contract."""
-
-
-class TranslationProvider(Protocol):
-    model_name: str
-    prompt_version: str
-
-    def translate(self, prompt: str) -> dict[str, Any]: ...
 
 
 ProgressCallback = Callable[[str], None]
@@ -99,27 +93,6 @@ def _utc_now() -> str:
     )
 
 
-def _sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
-def _write_bytes_atomic(path: Path, value: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = path.with_suffix(path.suffix + ".tmp")
-    with temporary_path.open("wb") as file:
-        file.write(value)
-        file.flush()
-        os.fsync(file.fileno())
-    os.replace(temporary_path, path)
-
-
-def _write_json_atomic(path: Path, value: Any) -> None:
-    _write_bytes_atomic(
-        path,
-        (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
-    )
-
-
 def _read_json(path: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
@@ -128,119 +101,6 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
-
-
-def _load_approved_blocks(project_path: Path) -> tuple[list[SourceBlock], bytes]:
-    path = WorkspacePaths(project_path).approved_source_segments
-    if not path.is_file():
-        raise TranslationError(
-            f"Final common source not found: {path}. Run glk review finalize first."
-        )
-    data = path.read_bytes()
-    blocks: list[SourceBlock] = []
-    line_number = 0
-    try:
-        for line_number, line in enumerate(data.decode("utf-8").splitlines(), start=1):
-            if not line.strip():
-                continue
-            block = SourceBlock.from_dict(json.loads(line))
-            if block.status != "approved":
-                raise TranslationError(
-                    f"Approved source contains non-approved block {block.id}."
-                )
-            blocks.append(block)
-    except TranslationError:
-        raise
-    except (
-        UnicodeDecodeError,
-        json.JSONDecodeError,
-        SourceBlockValidationError,
-        TypeError,
-    ) as error:
-        raise TranslationError(
-            f"Invalid approved source JSONL at line {line_number}: {error}"
-        ) from error
-    if not blocks:
-        raise TranslationError("Final common source is empty.")
-    if len({block.id for block in blocks}) != len(blocks):
-        raise TranslationError("Final common source contains duplicate block IDs.")
-    return sorted(blocks, key=lambda block: block.source_order), data
-
-
-def _load_termbase(project_path: Path) -> tuple[list[dict[str, Any]], bytes]:
-    path = WorkspacePaths(project_path).termbase
-    if not path.is_file():
-        raise TranslationError(
-            f"Current termbase not found: {path}. Run glk glossary import first."
-        )
-    data = path.read_bytes()
-    try:
-        value = json.loads(data.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise TranslationError(f"Invalid termbase JSON: {error}") from error
-    if not isinstance(value, dict) or not isinstance(value.get("entries"), list):
-        raise TranslationError("Termbase must contain an entries array.")
-    active: list[dict[str, Any]] = []
-    for index, entry in enumerate(value["entries"], start=1):
-        if not isinstance(entry, dict):
-            raise TranslationError(f"Termbase entry {index} is not an object.")
-        status = entry.get("status")
-        if status not in {"approved", "keep", "rejected"}:
-            raise TranslationError(
-                f"Termbase entry {index} has invalid status {status!r}."
-            )
-        if status == "rejected":
-            continue
-        source_term = entry.get("source_term")
-        translation = entry.get("translation")
-        variants = entry.get("variants")
-        if (
-            not isinstance(source_term, str)
-            or not source_term.strip()
-            or not isinstance(translation, str)
-            or not translation.strip()
-            or not isinstance(variants, list)
-            or not all(isinstance(item, str) and item for item in variants)
-        ):
-            raise TranslationError(f"Termbase entry {index} is incomplete.")
-        active.append(entry)
-    return active, data
-
-
-def _resolve_prompt(
-    prompt_file: str | Path | None, project_path: Path
-) -> tuple[str, Path | None, bool]:
-    canonical_path = WorkspacePaths(project_path).translation_prompt
-    if prompt_file is None:
-        if canonical_path.is_file():
-            try:
-                return canonical_path.read_text(encoding="utf-8"), canonical_path, False
-            except UnicodeDecodeError as error:
-                raise TranslationError(
-                    f"Translation prompt must be UTF-8: {canonical_path}"
-                ) from error
-        return DEFAULT_PROJECT_INSTRUCTIONS, canonical_path, True
-
-    requested = Path(prompt_file).expanduser()
-    candidates = (
-        (requested.resolve(),)
-        if requested.is_absolute()
-        else ((project_path / requested).resolve(), (Path.cwd() / requested).resolve())
-    )
-    selected = next((path for path in candidates if path.is_file()), None)
-    if selected is None:
-        raise TranslationError(
-            "Translation prompt not found. Checked "
-            + " and ".join(str(path) for path in candidates)
-            + "."
-        )
-    try:
-        text = selected.read_text(encoding="utf-8")
-    except UnicodeDecodeError as error:
-        raise TranslationError(f"Translation prompt must be UTF-8: {selected}") from error
-    if not text.strip():
-        raise TranslationError("Translation prompt cannot be empty.")
-    return text, canonical_path, selected.resolve() != canonical_path.resolve()
 
 
 def build_translation_chunks(

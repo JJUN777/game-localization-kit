@@ -5,15 +5,21 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
-import hashlib
 import json
-import os
 from pathlib import Path
 import re
 from typing import Any
 import uuid
 
+from glk.application._hashing import sha256_bytes as _sha256_bytes
+from glk.application._io import write_bytes_atomic as _write_bytes_atomic
+from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.application.project_service import load_project
+from glk.application.review_types import (
+    SourceReviewBlock,
+    SourceReviewDocument,
+    SourceReviewGroup,
+)
 from glk.domain.source_block import (
     SOURCE_BLOCK_SCHEMA_VERSION,
     SourceBlock,
@@ -81,35 +87,14 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def _sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
 def _source_hash(text: str) -> str:
     return "sha256:" + _sha256_bytes(text.encode("utf-8"))
-
-
-def _write_bytes_atomic(path: Path, value: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = path.with_suffix(path.suffix + ".tmp")
-    with temporary_path.open("wb") as file:
-        file.write(value)
-        file.flush()
-        os.fsync(file.fileno())
-    os.replace(temporary_path, path)
 
 
 def _write_if_changed(path: Path, value: bytes) -> None:
     if path.is_file() and path.read_bytes() == value:
         return
     _write_bytes_atomic(path, value)
-
-
-def _write_json_atomic(path: Path, value: Any) -> None:
-    _write_bytes_atomic(
-        path,
-        (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
-    )
 
 
 def _read_state(path: Path) -> dict[str, Any]:
@@ -475,7 +460,7 @@ def save_project_source_review(
     blocks: list[dict[str, Any]],
     expected_review_sha256: str,
     workspace_root: str | Path = "workspaces",
-) -> dict[str, Any]:
+) -> SourceReviewDocument:
     """Save browser edits with optimistic locking and explicit layout decisions."""
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
@@ -678,7 +663,7 @@ def get_project_source_review_document(
     *,
     project: str | Path,
     workspace_root: str | Path = "workspaces",
-) -> dict[str, Any]:
+) -> SourceReviewDocument:
     """Return the browser-facing source review document."""
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
@@ -688,9 +673,9 @@ def get_project_source_review_document(
     all_blocks = {block.id: block for block in originals}
     all_blocks.update(manual)
     issues = _qa_issues(location.path)
-    groups: list[dict[str, Any]] = []
+    groups: list[SourceReviewGroup] = []
     group_ids: dict[tuple[str, str | int], str] = {}
-    document_blocks: list[dict[str, Any]] = []
+    document_blocks: list[SourceReviewBlock] = []
     for block_id in ordered:
         block = all_blocks[block_id]
         key = _locator_key(block)

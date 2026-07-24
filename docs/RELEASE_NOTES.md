@@ -1,5 +1,78 @@
 # 릴리즈 노트
 
+## v1.1.0 — 2026-07-24
+
+v1.0 번역 흐름을 그대로 유지하면서 설치 호환성, 파일 저장 안정성, 오류 안내와 개발 검증 체계를 강화한 유지보수 릴리즈입니다.
+
+기존 workspace 구조와 `glk` 명령은 변경되지 않으므로 별도 마이그레이션 없이 기존 프로젝트를 계속 사용할 수 있습니다.
+
+### 주요 변경사항
+
+#### 파일 처리 안정성
+
+- application service에 반복되던 atomic write, JSON write와 파일 복사 로직을 공통 `_io.py`로 통합
+- 대상 파일과 같은 폴더에 고유 임시 파일을 생성해 동시 실행 시 `.tmp` 이름 충돌 방지
+- 기록 실패 시 임시 파일을 정리하고, 파일 교체 전 `flush`와 `fsync` 수행
+- byte와 파일 SHA-256 계산을 공통 `_hashing.py`로 통합
+
+#### 번역 모듈 구조
+
+- 번역과 선택 재번역이 공유하는 승인 원문, termbase, 번역 prompt 로딩을 `_translation_context.py`로 분리
+- 선택 재번역 service가 번역 service의 private 함수를 직접 import하던 결합 제거
+- 공통 번역 예외와 provider 계약을 `translation_types.py`로 분리
+
+#### 사용자 오류 안내
+
+- CLI와 원문·용어·번역 검수 서버의 실패 응답을 `code`, 한글 `message`, 기술 진단용 `detail` 구조로 통일
+- 검수 충돌, 세션 만료, API 키 누락, 용어 미확정과 입력 경로 오류에 해결 방법 안내
+- 일반 CLI는 한글 오류를 표시하고 `--verbose`에서 상세 진단 출력
+
+#### 설치 및 호환성
+
+- `google-genai`, Pillow, PyPDF2, PyMuPDF, python-dotenv의 지원 버전 범위 명시
+- Python 3.10에서 해석할 수 없던 최신 f-string 문법 제거
+- Windows와 macOS에서 Python 3.10·3.14를 자동 검증하는 GitHub Actions 추가
+- push, pull request와 수동 실행에서 설치, 의존성, 구문, 전체 테스트와 CLI entry point 검사
+
+#### 타입 안정성
+
+- 원문·용어·번역 검수 API document와 오류 payload에 `TypedDict` 계약 적용
+- 검증 전 외부 JSON과 검증이 끝난 browser document의 타입 경계 분리
+- Python 3.10을 기준으로 주요 review API 경계 8개 파일을 `mypy`로 검사
+- 정적 검사에서 발견한 nullable PDF 페이지, server host, 분기별 결과 타입 문제 정리
+
+### 검증 결과
+
+- 전체 111개 unittest 통과
+- Windows Python 3.10 / 3.14 통과
+- macOS Python 3.10 / 3.14 통과
+- review API `mypy` 검사 통과
+- `pip check`, Python 구문 검사, `glk --version`, `glk --help` 통과
+- 실제 Gemini API 호출과 API 키 없이 모든 CI 검사 수행
+
+### 호환성
+
+| 항목 | v1.1.0 |
+|---|---|
+| Python | 3.10 이상 |
+| 운영체제 | Windows, macOS |
+| 기존 workspace | 그대로 사용 가능 |
+| CLI 명령 | v1.0과 호환 |
+| 설정 마이그레이션 | 필요 없음 |
+
+### 알려진 제한사항
+
+| 제한 | 대안 |
+|---|---|
+| 설치형 실행 파일과 데스크톱 GUI 없음 | CLI + 브라우저 검수 화면 사용 |
+| 한국어 번역 전용 | 다른 언어 지원은 향후 검토 |
+| Gemini API만 지원 | 다른 LLM provider 미지원 |
+| 프로젝트당 PDF 1개 | 여러 PDF는 프로젝트를 나눠서 처리 |
+| 스캔 PDF 직접 처리 불가 | 페이지를 이미지로 변환 후 이미지 OCR 흐름 사용 |
+| 표·자유 배치의 읽기 순서 자동 복원 한계 | 원문 검수 단계에서 사람이 순서 조정 |
+
+---
+
 ## v1.0.0 — 2026-07-23
 
 Game Localization Kit의 첫 정식 릴리즈입니다.
@@ -118,8 +191,8 @@ glk version   # → glk 1.0.0
 
 | 프로젝트 | 입력 | 결과 |
 |---|---|---|
-| `primal_poc` | PDF 룰북 2페이지 (61 block, 2,742자) | 원문 추출 → QA → 검수 승인 → 용어 3개 확정 → 초벌 번역 → QA 통과 → 최종 TXT 생성 완료 |
-| `dragon_poc` | 카드 이미지 5장 (932×1270px, 아이콘 30종) | OCR → 검수 승인 → 용어 확정 → 번역 → 최종 TXT 생성 완료 |
+| PDF 룰북 샘플 | PDF 룰북 2페이지 (61 block, 2,742자) | 원문 추출 → QA → 검수 승인 → 용어 3개 확정 → 초벌 번역 → QA 통과 → 최종 TXT 생성 완료 |
+| 이미지 OCR 샘플 | 카드 이미지 5장 (932×1270px, 아이콘 30종) | OCR → 검수 승인 → 용어 확정 → 번역 → 최종 TXT 생성 완료 |
 
 두 프로젝트 모두 `glk init` → `glk run` → 검수 → 용어 → 번역 → 최종 승인의 전체 흐름을 사람 개입 포함해서 완주했습니다.
 

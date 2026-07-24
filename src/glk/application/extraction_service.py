@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-import hashlib
 import json
-import os
 from pathlib import Path
-import shutil
 from typing import Any, Callable
 
 import pymupdf
 
+from glk.application._hashing import sha256_bytes as _sha256_bytes
+from glk.application._hashing import sha256_file as _sha256_file
+from glk.application._io import copy_file_atomic as _copy_source_atomic
+from glk.application._io import write_bytes_atomic as _write_bytes_atomic
+from glk.application._io import write_json_atomic as _write_json_atomic
+from glk.application._io import write_text_atomic as _write_text_atomic
 from glk.application.project_service import (
     ProjectLocation,
     load_project,
@@ -88,46 +91,11 @@ def _resolve_file(path: str | Path) -> Path:
     return candidate
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _sha256_json(value: Any) -> str:
     payload = json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _write_bytes_atomic(path: Path, value: bytes) -> None:
-    temporary_path = path.with_suffix(path.suffix + ".tmp")
-    with temporary_path.open("wb") as file:
-        file.write(value)
-        file.flush()
-        os.fsync(file.fileno())
-    os.replace(temporary_path, path)
-
-
-def _write_text_atomic(path: Path, value: str) -> None:
-    data = value if not value or value.endswith("\n") else value + "\n"
-    _write_bytes_atomic(path, data.encode("utf-8"))
-
-
-def _write_json_atomic(path: Path, value: Any) -> None:
-    data = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
-    _write_bytes_atomic(path, data.encode("utf-8"))
-
-
-def _copy_source_atomic(source_path: Path, destination_path: Path) -> None:
-    temporary_path = destination_path.with_suffix(destination_path.suffix + ".tmp")
-    shutil.copyfile(source_path, temporary_path)
-    with temporary_path.open("rb+") as file:
-        os.fsync(file.fileno())
-    os.replace(temporary_path, destination_path)
+    return _sha256_bytes(payload)
 
 
 def _resolve_project_source(

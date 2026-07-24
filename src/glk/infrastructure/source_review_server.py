@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
 from glk.application.project_service import load_project
+from glk.application.review_types import SourceReviewDocument
 from glk.application.source_review_service import (
     SourceReviewError,
     finalize_project_source_review,
@@ -23,6 +24,7 @@ from glk.application.source_review_service import (
     save_project_source_review,
 )
 from glk.domain.workspace import WorkspacePaths, is_pdf_source_file
+from glk.error_response import make_http_error_response
 
 
 _MAX_REQUEST_BYTES = 16 * 1024 * 1024
@@ -64,7 +66,8 @@ class SourceReviewHttpServer(ThreadingHTTPServer):
     @property
     def origin(self) -> str:
         host, port = self.server_address[:2]
-        return f"http://{host}:{port}"
+        host_text = host.decode("ascii") if isinstance(host, bytes) else host
+        return f"http://{host_text}:{port}"
 
     @property
     def review_url(self) -> str:
@@ -124,7 +127,10 @@ class _SourceReviewHandler(BaseHTTPRequestHandler):
         )
 
     def _send_error_json(self, status: HTTPStatus, message: str) -> None:
-        self._send_json(status, {"ok": False, "message": message})
+        self._send_json(
+            status,
+            make_http_error_response(status, message).to_dict(),
+        )
 
     def _send_file(self, path: Path, content_type: str | None = None) -> None:
         if not path.is_file():
@@ -166,7 +172,7 @@ class _SourceReviewHandler(BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
                 remaining -= len(chunk)
 
-    def _document(self) -> dict[str, Any]:
+    def _document(self) -> SourceReviewDocument:
         return get_project_source_review_document(
             project=self.server.project,
             workspace_root=self.server.workspace_root,
@@ -183,7 +189,10 @@ class _SourceReviewHandler(BaseHTTPRequestHandler):
         location = load_project(self.server.project, self.server.workspace_root)
         paths = WorkspacePaths(location.path)
         if group["source_type"] == "pdf":
-            return paths.pdf_pages / f"page_{int(group['page']):03d}.png"
+            page = group["page"]
+            if page is None:
+                raise SourceReviewError("PDF review group has no page number.")
+            return paths.pdf_pages / f"page_{page:03d}.png"
         candidate = (location.path / group["source_file"]).resolve()
         try:
             candidate.relative_to(location.path.resolve())

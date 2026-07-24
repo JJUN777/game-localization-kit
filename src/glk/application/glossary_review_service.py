@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
-import os
 from pathlib import Path
 from typing import Any
 
+from glk.application._hashing import sha256_bytes as _sha256_bytes
+from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application.glossary_service import GLOSSARY_REVIEW_COLUMNS
 from glk.application.project_service import inspect_project, load_project
+from glk.application.review_types import (
+    GlossaryReviewDocument,
+    GlossaryReviewRow,
+    GlossaryReviewSummary,
+)
 from glk.domain.workspace import WorkspacePaths
 
 
@@ -27,20 +32,6 @@ GLOSSARY_REVIEW_CATEGORIES = (
 
 class GlossaryReviewError(ValueError):
     """Raised when the browser glossary review cannot be processed safely."""
-
-
-def _sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
-def _write_bytes_atomic(path: Path, value: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = path.with_suffix(path.suffix + ".tmp")
-    with temporary_path.open("wb") as file:
-        file.write(value)
-        file.flush()
-        os.fsync(file.fileno())
-    os.replace(temporary_path, path)
 
 
 def _parse_tsv(data: bytes) -> list[dict[str, str]]:
@@ -101,8 +92,8 @@ def _clean_text(value: Any, field: str) -> str:
     return value.strip()
 
 
-def _summarize(rows: list[dict[str, str]]) -> dict[str, int]:
-    summary = {
+def _summarize(rows: list[dict[str, str]]) -> GlossaryReviewSummary:
+    summary: GlossaryReviewSummary = {
         "rows": len(rows),
         "review": 0,
         "approved": 0,
@@ -113,8 +104,14 @@ def _summarize(rows: list[dict[str, str]]) -> dict[str, int]:
     }
     for row in rows:
         status = row["status"].strip()
-        if status in GLOSSARY_REVIEW_STATUSES:
-            summary[status] += 1
+        if status == "review":
+            summary["review"] += 1
+        elif status == "approved":
+            summary["approved"] += 1
+        elif status == "keep":
+            summary["keep"] += 1
+        elif status == "rejected":
+            summary["rejected"] += 1
         if not row["candidate_id"].strip() or row["candidate_id"].startswith("manual-"):
             summary["manual"] += 1
         if status == "approved" and not row["translation"].strip():
@@ -126,7 +123,7 @@ def get_project_glossary_review_document(
     *,
     project: str | Path,
     workspace_root: str | Path = "workspaces",
-) -> dict[str, Any]:
+) -> GlossaryReviewDocument:
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
     pipeline = inspect_project(location.path)["pipeline"]
@@ -140,14 +137,27 @@ def get_project_glossary_review_document(
         )
     data = paths.glossary_review.read_bytes()
     rows = _parse_tsv(data)
-    document_rows = []
+    document_rows: list[GlossaryReviewRow] = []
     for index, row in enumerate(rows):
-        value = dict(row)
-        value["row_key"] = row["candidate_id"] or f"manual-new-{index}"
-        value["manual"] = (
-            not row["candidate_id"] or row["candidate_id"].startswith("manual-")
+        document_rows.append(
+            {
+                "status": row["status"],
+                "source_term": row["source_term"],
+                "translation": row["translation"],
+                "category": row["category"],
+                "note": row["note"],
+                "variants": row["variants"],
+                "occurrences": row["occurrences"],
+                "locations": row["locations"],
+                "example": row["example"],
+                "candidate_id": row["candidate_id"],
+                "row_key": row["candidate_id"] or f"manual-new-{index}",
+                "manual": (
+                    not row["candidate_id"]
+                    or row["candidate_id"].startswith("manual-")
+                ),
+            }
         )
-        document_rows.append(value)
     return {
         "schema_version": 1,
         "project": {
@@ -172,7 +182,7 @@ def save_project_glossary_review(
     rows: list[dict[str, Any]],
     expected_review_sha256: str,
     workspace_root: str | Path = "workspaces",
-) -> dict[str, Any]:
+) -> GlossaryReviewDocument:
     if not isinstance(rows, list):
         raise GlossaryReviewError("rows must be a list.")
     if not isinstance(expected_review_sha256, str) or not expected_review_sha256:
@@ -231,9 +241,9 @@ def save_project_glossary_review(
                     f"Row {index} duplicates generated candidate_id {candidate_id!r}."
                 )
             seen_automatic_ids.add(candidate_id)
-            original = automatic_by_id[candidate_id]
+            generated_original = automatic_by_id[candidate_id]
             normalized = {
-                **original,
+                **generated_original,
                 "status": status,
                 "translation": translation,
                 "category": category,
@@ -249,30 +259,29 @@ def save_project_glossary_review(
             )
             if not source_term:
                 raise GlossaryReviewError(f"Row {index} has an empty source term.")
-            original = next(
-                (
-                    row
-                    for row in current_rows
-                    if candidate_id
-                    and row["candidate_id"] == candidate_id
-                ),
-                None,
-            )
-            if original and source_term != _clean_single_line(
-                original["source_term"], "source_term"
+            manual_original: dict[str, str] | None = None
+            if candidate_id:
+                for current_row in current_rows:
+                    if current_row["candidate_id"] == candidate_id:
+                        manual_original = current_row
+                        break
+            if manual_original and source_term != _clean_single_line(
+                manual_original["source_term"], "source_term"
             ):
                 candidate_id = ""
-                original = None
+                manual_original = None
             normalized = {
                 "status": status,
                 "source_term": source_term,
                 "translation": translation,
                 "category": category,
                 "note": note,
-                "variants": original["variants"] if original else "",
-                "occurrences": original["occurrences"] if original else "",
-                "locations": original["locations"] if original else "",
-                "example": original["example"] if original else "",
+                "variants": manual_original["variants"] if manual_original else "",
+                "occurrences": (
+                    manual_original["occurrences"] if manual_original else ""
+                ),
+                "locations": manual_original["locations"] if manual_original else "",
+                "example": manual_original["example"] if manual_original else "",
                 "candidate_id": candidate_id,
             }
         if normalized["status"] == "keep":

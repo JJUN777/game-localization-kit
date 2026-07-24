@@ -504,6 +504,8 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 1)
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["code"], "RUN_INPUT_FAILED")
+            self.assertIn("원문 입력", payload["message"])
+            self.assertIsInstance(payload["detail"], str)
 
     def test_segment_reports_missing_source_as_json(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -532,6 +534,8 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 1)
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["code"], "SEGMENTATION_FAILED")
+            self.assertIn("검수 블록", payload["message"])
+            self.assertIsInstance(payload["detail"], str)
 
     def test_qa_reports_missing_common_blocks_as_json(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -560,6 +564,8 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 1)
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["code"], "SOURCE_QA_FAILED")
+            self.assertIn("원문 자동 QA", payload["message"])
+            self.assertIsInstance(payload["detail"], str)
 
     def test_review_prepare_and_finalize_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
