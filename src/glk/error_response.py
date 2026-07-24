@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
+from typing import TypedDict
 
 
 _CODE_MESSAGES = {
@@ -38,14 +39,26 @@ _CODE_MESSAGES = {
 }
 
 
+class ErrorResponsePayload(TypedDict):
+    ok: bool
+    code: str
+    message: str
+    detail: str | None
+
+
 @dataclass(frozen=True, slots=True)
 class ErrorResponse:
     code: str
     message: str
     detail: str | None
 
-    def to_dict(self) -> dict[str, str | None | bool]:
-        return {"ok": False, **asdict(self)}
+    def to_dict(self) -> ErrorResponsePayload:
+        return {
+            "ok": False,
+            "code": self.code,
+            "message": self.message,
+            "detail": self.detail,
+        }
 
 
 def _message_for_detail(detail: str) -> str | None:

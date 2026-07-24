@@ -13,6 +13,11 @@ from glk.application._hashing import sha256_bytes as _sha256_bytes
 from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.application.project_service import inspect_project, load_project
+from glk.application.review_types import (
+    TranslationReviewBlock,
+    TranslationReviewDocument,
+    TranslationReviewIssuePayload,
+)
 from glk.domain.approved_translation import (
     APPROVED_TRANSLATION_SCHEMA_VERSION,
     ApprovedTranslationSegment,
@@ -55,8 +60,13 @@ class TranslationReviewIssue:
     block_id: str | None
     message: str
 
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+    def to_dict(self) -> TranslationReviewIssuePayload:
+        return {
+            "severity": self.severity,
+            "code": self.code,
+            "block_id": self.block_id,
+            "message": self.message,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -597,7 +607,7 @@ def get_project_translation_review_document(
     *,
     project: str | Path,
     workspace_root: str | Path = "workspaces",
-) -> dict[str, Any]:
+) -> TranslationReviewDocument:
     """Build the safe view model consumed by the local review UI."""
     context = _load_review_context(project, workspace_root)
     translations, issues = _analyze_review(context)
@@ -608,8 +618,8 @@ def get_project_translation_review_document(
             f"{detail} Reset it only after comparison with "
             "glk translation prepare --force."
         )
-    issue_map: dict[str, list[dict[str, Any]]] = {}
-    general_issues: list[dict[str, Any]] = []
+    issue_map: dict[str, list[TranslationReviewIssuePayload]] = {}
+    general_issues: list[TranslationReviewIssuePayload] = []
     for issue in issues:
         value = issue.to_dict()
         if issue.block_id is None:
@@ -619,7 +629,7 @@ def get_project_translation_review_document(
     errors, warnings, information = _issue_counts(issues)
     location = load_project(project, workspace_root)
     pipeline = inspect_project(location.path)["pipeline"]
-    blocks = []
+    blocks: list[TranslationReviewBlock] = []
     for segment in context.segments:
         translation = translations[segment.source_block_id]
         blocks.append(
@@ -666,7 +676,7 @@ def save_project_translation_review(
     translations: dict[str, Any],
     expected_review_sha256: str,
     workspace_root: str | Path = "workspaces",
-) -> dict[str, Any]:
+) -> TranslationReviewDocument:
     """Safely rebuild review TXT from block translations with optimistic locking."""
     context = _load_review_context(project, workspace_root)
     if expected_review_sha256 != context.review_sha256:

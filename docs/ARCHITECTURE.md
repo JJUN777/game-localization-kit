@@ -45,7 +45,9 @@ CLI의 통합 명령(`glk run`)과 개별 명령은 application service를 공�
 
 CLI와 localhost 검수 서버에서 사용자에게 반환하는 실패 응답은 `error_response.py`를 공유합니다. 응답은 자동 처리와 검색에 쓰는 안정적인 `code`, 사용자에게 표시하는 한글 `message`, 내부 예외와 경로 같은 진단 정보인 `detail`로 구성합니다. 브라우저는 `message`를 표시하고 `detail`은 문제 진단용으로 보존합니다.
 
-`.github/workflows/ci.yml`은 push, pull request, 수동 실행 때 Windows와 macOS에서 Python 3.10·3.14 조합을 검사합니다. 각 작업은 패키지 설치, 의존성 무결성, 전체 unittest, `glk` entry point를 확인하며 Gemini API 키나 실제 모델 호출은 사용하지 않습니다.
+원문·용어·번역 검수 화면에 전달하는 document 구조는 `application/review_types.py`의 `TypedDict` 계약으로 정의합니다. 검증 전 외부 JSON은 계속 `Any`로 받고 service에서 검증한 뒤 typed document로 반환합니다. 이 타입은 IDE와 정적 분석을 위한 것이며 런타임 데이터 검증은 기존 service 규칙이 담당합니다.
+
+`.github/workflows/ci.yml`은 push, pull request, 수동 실행 때 Windows와 macOS에서 Python 3.10·3.14 조합을 검사합니다. 각 작업은 패키지 설치, 의존성 무결성, Python 구문, 전체 unittest, `glk` entry point를 확인하며 Gemini API 키나 실제 모델 호출은 사용하지 않습니다. 별도 typecheck 작업은 Python 3.10을 기준으로 review API 경계 파일을 `mypy`로 검사하며, 적용 범위는 payload가 복잡해지는 service부터 점진적으로 넓힙니다.
 
 ---
 

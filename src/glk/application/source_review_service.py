@@ -15,6 +15,11 @@ from glk.application._hashing import sha256_bytes as _sha256_bytes
 from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.application.project_service import load_project
+from glk.application.review_types import (
+    SourceReviewBlock,
+    SourceReviewDocument,
+    SourceReviewGroup,
+)
 from glk.domain.source_block import (
     SOURCE_BLOCK_SCHEMA_VERSION,
     SourceBlock,
@@ -455,7 +460,7 @@ def save_project_source_review(
     blocks: list[dict[str, Any]],
     expected_review_sha256: str,
     workspace_root: str | Path = "workspaces",
-) -> dict[str, Any]:
+) -> SourceReviewDocument:
     """Save browser edits with optimistic locking and explicit layout decisions."""
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
@@ -658,7 +663,7 @@ def get_project_source_review_document(
     *,
     project: str | Path,
     workspace_root: str | Path = "workspaces",
-) -> dict[str, Any]:
+) -> SourceReviewDocument:
     """Return the browser-facing source review document."""
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
@@ -668,9 +673,9 @@ def get_project_source_review_document(
     all_blocks = {block.id: block for block in originals}
     all_blocks.update(manual)
     issues = _qa_issues(location.path)
-    groups: list[dict[str, Any]] = []
+    groups: list[SourceReviewGroup] = []
     group_ids: dict[tuple[str, str | int], str] = {}
-    document_blocks: list[dict[str, Any]] = []
+    document_blocks: list[SourceReviewBlock] = []
     for block_id in ordered:
         block = all_blocks[block_id]
         key = _locator_key(block)

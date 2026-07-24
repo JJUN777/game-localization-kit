@@ -65,7 +65,8 @@ class GlossaryReviewHttpServer(ThreadingHTTPServer):
     @property
     def origin(self) -> str:
         host, port = self.server_address[:2]
-        return f"http://{host}:{port}"
+        host_text = host.decode("ascii") if isinstance(host, bytes) else host
+        return f"http://{host_text}:{port}"
 
     @property
     def review_url(self) -> str:
@@ -211,10 +212,12 @@ class _GlossaryReviewHandler(BaseHTTPRequestHandler):
                             ),
                         )
                     except GlossaryImportError as error:
-                        response = make_error_response(
-                            "GLOSSARY_IMPORT_FAILED",
-                            error,
-                        ).to_dict()
+                        response = dict(
+                            make_error_response(
+                                "GLOSSARY_IMPORT_FAILED",
+                                error,
+                            ).to_dict()
+                        )
                         response["document"] = document
                     else:
                         response = {
