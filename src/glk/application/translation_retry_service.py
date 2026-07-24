@@ -9,6 +9,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from glk.application._io import write_json_atomic as _write_json_atomic
+from glk.application._translation_context import (
+    load_approved_blocks as _load_approved_blocks,
+    load_termbase as _load_termbase,
+    resolve_translation_prompt as _resolve_prompt,
+)
 from glk.application.project_service import load_project
 from glk.application.translation_review_service import (
     TranslationReviewError,
@@ -17,15 +23,13 @@ from glk.application.translation_review_service import (
     save_project_translation_review,
 )
 from glk.application.translation_service import (
+    compile_translation_prompt,
+    validate_translation_response,
+)
+from glk.application.translation_types import (
     TranslationError,
     TranslationProvider,
     TranslationValidationError,
-    _load_approved_blocks,
-    _load_termbase,
-    _resolve_prompt,
-    _write_json_atomic,
-    compile_translation_prompt,
-    validate_translation_response,
 )
 from glk.infrastructure.gemini_translation import GeminiTranslationProvider
 from glk.domain.workspace import WorkspacePaths

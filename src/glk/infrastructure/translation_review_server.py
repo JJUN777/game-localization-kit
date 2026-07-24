@@ -22,7 +22,7 @@ from glk.application.translation_review_service import (
     save_project_translation_review,
 )
 from glk.application.translation_retry_service import retry_failed_translations
-from glk.application.translation_service import TranslationError
+from glk.application.translation_types import TranslationError
 from glk.infrastructure.gemini_layout import GeminiConfigurationError
 
 

@@ -9,11 +9,11 @@ description = "Cross-platform CLI toolkit for game localization workflows"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "google-genai",
-  "Pillow",
-  "PyPDF2",
-  "PyMuPDF",
-  "python-dotenv",
+  "google-genai>=1.60,<2",
+  "Pillow>=12.1,<13",
+  "PyPDF2>=3.0,<4",
+  "PyMuPDF>=1.28,<2",
+  "python-dotenv>=1.2,<2",
 ]
 
 [project.scripts]

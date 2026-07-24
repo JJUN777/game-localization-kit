@@ -6,11 +6,13 @@ from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
-import os
 from pathlib import Path, PurePosixPath
 import re
 from typing import Any, Iterable
 
+from glk.application._hashing import sha256_bytes as _sha256_bytes
+from glk.application._io import write_bytes_atomic as _write_bytes_atomic
+from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.application.project_service import load_project
 from glk.application.source_review_service import prepare_project_source_review
 from glk.domain.source_block import SOURCE_BLOCK_SCHEMA_VERSION, SourceBlock
@@ -66,10 +68,6 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
 def _source_hash(text: str) -> str:
     return f"sha256:{_sha256_bytes(text.encode('utf-8'))}"
 
@@ -109,23 +107,6 @@ def _fingerprint_files(project_path: Path, paths: Iterable[Path]) -> str:
         digest.update(data)
     digest.update(SEGMENTATION_VERSION.encode("utf-8"))
     return digest.hexdigest()
-
-
-def _write_bytes_atomic(path: Path, value: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = path.with_suffix(path.suffix + ".tmp")
-    with temporary_path.open("wb") as file:
-        file.write(value)
-        file.flush()
-        os.fsync(file.fileno())
-    os.replace(temporary_path, path)
-
-
-def _write_json_atomic(path: Path, value: Any) -> None:
-    _write_bytes_atomic(
-        path,
-        (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
-    )
 
 
 def _serialize_jsonl(blocks: list[SourceBlock]) -> bytes:

@@ -34,7 +34,8 @@ from glk.application.source_review_service import (
     prepare_project_source_review,
 )
 from glk.application.source_qa_service import SourceQaError, run_project_source_qa
-from glk.application.translation_service import TranslationError, translate_project
+from glk.application.translation_service import translate_project
+from glk.application.translation_types import TranslationError
 from glk.application.translation_retry_service import retry_failed_translations
 from glk.application.translation_review_service import (
     TranslationReviewError,

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
-import os
 from pathlib import Path
 from typing import Any
 
+from glk.application._hashing import sha256_bytes as _sha256_bytes
+from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application.glossary_service import GLOSSARY_REVIEW_COLUMNS
 from glk.application.project_service import inspect_project, load_project
 from glk.domain.workspace import WorkspacePaths
@@ -27,20 +27,6 @@ GLOSSARY_REVIEW_CATEGORIES = (
 
 class GlossaryReviewError(ValueError):
     """Raised when the browser glossary review cannot be processed safely."""
-
-
-def _sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
-def _write_bytes_atomic(path: Path, value: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = path.with_suffix(path.suffix + ".tmp")
-    with temporary_path.open("wb") as file:
-        file.write(value)
-        file.flush()
-        os.fsync(file.fileno())
-    os.replace(temporary_path, path)
 
 
 def _parse_tsv(data: bytes) -> list[dict[str, str]]:

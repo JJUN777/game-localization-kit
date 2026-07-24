@@ -35,7 +35,7 @@ flowchart LR
 | 계층 | 책임 | 주요 모듈 |
 |---|---|---|
 | CLI | 인자, 대화형 입력, 사람이 읽는 출력, 종료 코드 | `cli.py` |
-| Application | 프로젝트 단위 use case, 캐시, 원자적 출력, 단계 연결 | `extraction_service`, `image_ocr_service`, `segmentation_service`, `source_qa_service`, `source_review_service`, `glossary_service`, `glossary_review_service`, `translation_service`, `translation_review_service`, `translation_retry_service` |
+| Application | 프로젝트 단위 use case, 캐시, 원자적 출력, 단계 연결 | 각 `*_service`, 공통 `_io`, `_hashing`, `_translation_context`, `translation_types` |
 | Domain | 외부 SDK와 파일 포맷에 독립적인 모델·검증 | `project.py`, `source_block.py`, `source_qa.py`, `translation_segment.py`, `translation_qa.py`, `approved_translation.py` |
 | Extraction | PDF layout과 이미지 OCR 결과 처리 계약 | `layout.py`, `image_ocr.py` |
 | Infrastructure | 외부 모델 adapter와 로컬 검수 서버 | `gemini_layout.py`, `gemini_ocr.py`, `gemini_translation.py`, `source_review_server.py`, `glossary_review_server.py`, `translation_review_server.py` |
@@ -147,7 +147,7 @@ review TXT는 `[PAGE]` 또는 `[SOURCE]`, `[BLOCK]`, `[[GLK_END ...]]` marker로
 - 자동 생성 결과가 stale이면 재생성합니다.
 - 사람이 편집한 review와 glossary TSV는 덮어쓰지 않고 stale 표시만 합니다.
 
-**파일 확정:** 가능한 단계에서 임시 파일 기록 → `flush`/`fsync` → `os.replace` 방식의 원자적 교체를 사용합니다.
+**파일 확정:** application service는 `_io.py`의 공통 writer를 사용합니다. 대상과 같은 폴더에 충돌하지 않는 고유 임시 파일을 만든 뒤 `flush`/`fsync` → `os.replace`로 교체하고, 실패하면 임시 파일을 정리합니다. 내용 hash는 `_hashing.py`, 번역과 선택 재번역이 공유하는 원문·termbase·prompt 로딩은 `_translation_context.py`가 담당합니다.
 
 ---
 
