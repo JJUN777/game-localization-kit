@@ -200,6 +200,10 @@ class WorkspacePaths:
         return self.state_dir / "image_ocr.json"
 
     @property
+    def dashboard_source_job_state(self) -> Path:
+        return self.state_dir / "dashboard_source_job.json"
+
+    @property
     def segmentation_state(self) -> Path:
         return self.state_dir / "segmentation.json"
 

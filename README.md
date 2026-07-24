@@ -42,6 +42,10 @@ GEMINI_API_KEY=발급받은_API_키
 GEMINI_MODEL=gemini-2.5-flash
 ```
 
+`glk ui`를 실행했다면 대시보드 오른쪽 위 `AI 설정`에서도 같은 값을 저장할
+수 있습니다. API 키는 저장 여부만 표시하고 저장된 값은 브라우저로 다시
+보내지 않습니다.
+
 ### 2. 프로젝트 생성
 
 ```bash
@@ -63,6 +67,10 @@ workspaces/primal/01_input/images/   # OCR할 이미지
 ```bash
 glk run --project primal
 ```
+
+대시보드에서는 원본 등록 후 카드의 `PDF 원문 준비 시작` 또는
+`이미지 OCR 및 원문 준비 시작`으로 같은 흐름을 background job으로 실행합니다.
+동시에 하나만 실행하며 실패하면 완료된 cache를 유지한 채 재시도할 수 있습니다.
 
 ### 5. 원문 확인과 승인
 
@@ -234,6 +242,10 @@ GEMINI_MODEL=gemini-2.5-flash
 ```
 
 `GEMINI_MODEL`을 생략하면 프로그램 기본값인 `gemini-2.5-flash`를 사용합니다. 셸이나 CI에 이미 설정한 환경변수가 `.env`보다 우선합니다.
+대시보드의 `AI 설정`에서는 Flash·Pro 프리셋 또는 직접 입력한 모델을 선택할
+수 있습니다. 키 입력칸을 비우고 저장하면 기존 키를 유지합니다. 드롭다운
+목록과 갱신 방법은 [Gemini 모델 목록 관리](docs/GEMINI_MODELS.md)에 정리되어
+있습니다.
 
 API 키를 넣으면 안 되는 곳:
 
@@ -818,6 +830,7 @@ glk review translation --project primal --no-open --port 8765
 | 문서 | 대상 | 용도 |
 |---|---|---|
 | [전체 작업 흐름](docs/WORKFLOW.md) | 고급 사용자 | 파일 형식, 단계별 세부 규칙, 재실행 정책 |
+| [Gemini 모델 목록](docs/GEMINI_MODELS.md) | 개발자 | 드롭다운 모델 ID와 업데이트 절차 |
 | [LLM 사용량과 비용](docs/COSTS.md) | 모든 사용자 | API 호출 단계, token 계산, 비용 예시 |
 | [용어집 검토 사양](docs/GLOSSARY.md) | 고급 사용자 | TSV 컬럼, status, import 검증 규칙 |
 | [아키텍처](docs/ARCHITECTURE.md) | 개발자 | 코드 계층, 데이터 모델, 승인 구조 |

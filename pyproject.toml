@@ -35,12 +35,16 @@ where = ["src"]
 [tool.setuptools.package-data]
 "glk.web" = ["*.html"]
 "glk.templates" = ["*.txt"]
+"glk.data" = ["*.json"]
 
 [tool.mypy]
 python_version = "3.10"
 follow_imports = "skip"
 files = [
   "src/glk/error_response.py",
+  "src/glk/application/ai_model_catalog.py",
+  "src/glk/application/ai_settings_service.py",
+  "src/glk/application/dashboard_job_service.py",
   "src/glk/application/review_types.py",
   "src/glk/application/dashboard_service.py",
   "src/glk/application/source_registration_service.py",

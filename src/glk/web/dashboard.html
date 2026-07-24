@@ -106,6 +106,26 @@
       text-align: right;
     }
 
+    .ai-settings-summary {
+      display: grid;
+      gap: 2px;
+      text-align: right;
+    }
+
+    #aiKeySummary {
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    #aiKeySummary.missing { color: var(--accent-dark); }
+
+    #aiModelSummary {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+    }
+
     .header-button {
       padding: 11px 16px;
       border-radius: 999px;
@@ -118,6 +138,17 @@
       border: 1px solid var(--line);
       color: var(--ink);
       background: var(--surface);
+    }
+
+    .ai-settings-button {
+      border: 1px solid var(--green);
+      color: #fff;
+      background: var(--green);
+      box-shadow: 0 8px 22px rgb(40 115 90 / 18%);
+    }
+
+    .ai-settings-button:hover {
+      box-shadow: 0 10px 26px rgb(40 115 90 / 26%);
     }
 
     .header-button:hover { transform: translateY(-1px); }
@@ -380,6 +411,17 @@
       background: rgb(207 75 47 / 6%);
     }
 
+    .delete-project-button:disabled {
+      cursor: not-allowed;
+      opacity: .45;
+    }
+
+    .delete-project-button:disabled:hover {
+      border-color: var(--line);
+      color: var(--muted);
+      background: #fff;
+    }
+
     .stage-row {
       display: flex;
       align-items: baseline;
@@ -513,6 +555,103 @@
       transform: translateY(-1px);
     }
 
+    .source-job-button {
+      grid-column: 1 / -1;
+      padding: 12px;
+      border: 1px solid var(--accent);
+      border-radius: 10px;
+      color: #fff;
+      background: var(--accent);
+      font-size: 12px;
+      font-weight: 850;
+      transition: transform .15s ease, opacity .15s ease;
+    }
+
+    .source-job-button:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+
+    .source-job-button:disabled {
+      cursor: not-allowed;
+      border-color: var(--line);
+      color: #999d99;
+      background: #f2f0ea;
+    }
+
+    .job-status {
+      grid-column: 1 / -1;
+      display: grid;
+      gap: 8px;
+      padding: 12px 13px;
+      border: 1px solid rgb(40 115 90 / 24%);
+      border-radius: 11px;
+      color: #225d4a;
+      background: rgb(40 115 90 / 7%);
+    }
+
+    .job-status.failed {
+      border-color: rgb(207 75 47 / 25%);
+      color: #8a3526;
+      background: rgb(207 75 47 / 7%);
+    }
+
+    .job-status-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .job-status-message {
+      margin: 0;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .job-progress {
+      width: 100%;
+      height: 6px;
+      accent-color: var(--green);
+    }
+
+    .job-error {
+      margin: 0;
+      color: var(--accent-dark);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .job-summary {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .job-summary div {
+      padding: 12px 13px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: #faf8f2;
+    }
+
+    .job-summary span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .job-summary strong {
+      display: block;
+      margin-top: 5px;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
     .path {
       overflow: hidden;
       margin-top: 14px;
@@ -632,6 +771,7 @@
     }
 
     .field input,
+    .field select,
     .field textarea {
       width: 100%;
       padding: 12px 13px;
@@ -651,6 +791,7 @@
     }
 
     .field input:focus,
+    .field select:focus,
     .field textarea:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 3px rgb(207 75 47 / 12%);
@@ -693,6 +834,82 @@
       color: var(--accent-dark);
       font-weight: 800;
     }
+
+    .ai-settings-status {
+      display: grid;
+      gap: 9px;
+      margin: 0;
+      padding: 14px 15px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--soft);
+    }
+
+    .ai-settings-status div {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      font-size: 12px;
+    }
+
+    .ai-settings-status dt { color: var(--muted); }
+    .ai-settings-status dd {
+      display: grid;
+      gap: 3px;
+      margin: 0;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+
+    .settings-primary { font-weight: 800; }
+
+    .settings-secondary {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 500;
+    }
+
+    #aiModelStatus {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .model-description {
+      min-height: 17px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .password-input {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 7px;
+    }
+
+    .password-toggle {
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      color: var(--ink);
+      background: #fff;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .environment-note {
+      display: none;
+      margin: 16px 0 0;
+      padding: 12px 14px;
+      border: 1px solid rgb(207 75 47 / 24%);
+      border-radius: 11px;
+      color: #8a3526;
+      background: rgb(207 75 47 / 7%);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .environment-note.visible { display: block; }
 
     .modal-actions {
       display: flex;
@@ -902,6 +1119,7 @@
       .header-actions { width: auto; }
       .header-button { flex: none; }
       #lastUpdated { text-align: left; }
+      .ai-settings-summary { text-align: left; }
       .summary-grid { grid-template-columns: repeat(2, 1fr); }
       .toolbar { align-items: stretch; flex-direction: column; }
       .search { width: 100%; }
@@ -929,7 +1147,14 @@
       </div>
       <div class="header-side">
         <span id="lastUpdated">불러오는 중…</span>
+        <div class="ai-settings-summary" aria-live="polite">
+          <span id="aiKeySummary">API 키 확인 중…</span>
+          <span id="aiModelSummary">모델 확인 중…</span>
+        </div>
         <div class="header-actions">
+          <button class="header-button ai-settings-button"
+            id="aiSettingsButton"
+            type="button">AI 설정</button>
           <button class="header-button refresh" id="refreshButton"
             type="button">새로고침</button>
         </div>
@@ -1159,6 +1384,121 @@
     </div>
   </dialog>
 
+  <dialog id="aiSettingsDialog" aria-labelledby="aiSettingsDialogTitle">
+    <form class="modal-form" id="aiSettingsForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Gemini configuration</p>
+          <h2 id="aiSettingsDialogTitle">AI 설정</h2>
+        </div>
+        <button class="modal-close" id="aiSettingsDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <dl class="ai-settings-status">
+        <div>
+          <dt>API 키</dt>
+          <dd>
+            <span class="settings-primary" id="aiApiKeyStatus">확인 중…</span>
+            <span class="settings-secondary"
+              id="aiApiKeySource"></span>
+          </dd>
+        </div>
+        <div>
+          <dt>현재 모델</dt>
+          <dd>
+            <span class="settings-primary" id="aiModelStatus">확인 중…</span>
+            <span class="settings-secondary"
+              id="aiModelSource"></span>
+          </dd>
+        </div>
+      </dl>
+
+      <p class="environment-note" id="aiEnvironmentNote">
+        셸 환경변수가 설정되어 있어 이 화면에서 저장한 값보다 우선 적용됩니다.
+        환경변수를 제거하고 대시보드를 다시 실행하면 .env 값이 적용됩니다.
+      </p>
+
+      <div class="field">
+        <label for="aiApiKey">Gemini API 키</label>
+        <div class="password-input">
+          <input id="aiApiKey" type="password" autocomplete="new-password"
+            maxlength="512"
+            placeholder="새 키를 입력하지 않으면 기존 키를 유지합니다">
+          <button class="password-toggle" id="aiApiKeyToggle"
+            type="button">보기</button>
+        </div>
+        <p class="field-help">
+          키 값은 저장 후 다시 표시하지 않으며 저장소 최상위 .env에만 보관합니다.
+        </p>
+      </div>
+
+      <div class="field">
+        <label for="aiModelPreset">Gemini 모델</label>
+        <select id="aiModelPreset">
+          <option value="">모델 목록 불러오는 중…</option>
+        </select>
+        <p class="model-description" id="aiModelDescription"></p>
+      </div>
+
+      <div class="field" id="aiCustomModelField" hidden>
+        <label for="aiCustomModel">모델 이름</label>
+        <input id="aiCustomModel" type="text" maxlength="200"
+          placeholder="예: gemini-2.5-flash">
+      </div>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel" id="aiSettingsDialogCancel"
+          type="button">취소</button>
+        <button class="modal-button modal-submit" id="aiSettingsSubmit"
+          type="submit">저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="sourceJobDialog" aria-labelledby="sourceJobDialogTitle">
+    <form class="modal-form" id="sourceJobForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Background source job</p>
+          <h2 id="sourceJobDialogTitle">원문 준비 시작</h2>
+        </div>
+        <button class="modal-close" id="sourceJobDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <p class="source-note">
+        Gemini API를 사용해 원문을 추출한 뒤 검수 블록 생성과 로컬 QA까지
+        백그라운드에서 실행합니다. API 사용량에 따라 비용이 발생할 수 있습니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="sourceJobProjectName"></strong>
+        <code id="sourceJobProjectId"></code>
+      </div>
+      <div class="job-summary">
+        <div>
+          <span>원본 형식</span>
+          <strong id="sourceJobType"></strong>
+        </div>
+        <div>
+          <span>사용 모델</span>
+          <strong id="sourceJobModel"></strong>
+        </div>
+      </div>
+      <p class="field-help" style="margin-top:14px">
+        동시에 하나의 원문 준비 작업만 실행합니다. 실행 중에는 원본 교체,
+        OCR 프롬프트 수정과 프로젝트 삭제가 잠깁니다.
+      </p>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel" id="sourceJobDialogCancel"
+          type="button">취소</button>
+        <button class="modal-button modal-submit" id="sourceJobSubmit"
+          type="submit">원문 준비 시작</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="deleteDialog" aria-labelledby="deleteDialogTitle">
     <form class="modal-form" id="deleteForm">
       <div class="modal-head">
@@ -1203,6 +1543,11 @@
     let dashboard = null;
     let activeFilter = "all";
     let toastTimer = null;
+    let aiSettings = null;
+    let aiModelCatalog = null;
+    let sourceJobs = new Map();
+    let sourceJobPollTimer = null;
+    let pendingSourceJobProject = null;
     let pendingSourceProject = null;
     let pendingSourceFilesProject = null;
     let pendingOcrPromptProject = null;
@@ -1245,6 +1590,350 @@
       toastTimer = window.setTimeout(() => {
         toast.className = "toast";
       }, 3500);
+    }
+
+    function aiSettingSourceLabel(source) {
+      return {
+        environment: "셸 환경변수",
+        env_file: ".env",
+        default: "프로그램 기본값",
+        missing: "미설정",
+      }[source] || source;
+    }
+
+    function aiSettingSourceDescription(source) {
+      return source === "default"
+        ? "프로그램 기본값 사용 중"
+        : `${aiSettingSourceLabel(source)}에서 적용 중`;
+    }
+
+    function renderAiSettings() {
+      if (!aiSettings) return;
+      const keyLabel = aiSettings.api_key_configured
+        ? "API 키 설정 완료"
+        : "API 키 미설정";
+      byId("aiKeySummary").textContent = keyLabel;
+      byId("aiKeySummary").classList.toggle(
+        "missing",
+        !aiSettings.api_key_configured,
+      );
+      byId("aiModelSummary").textContent = aiSettings.model;
+      byId("aiApiKeyStatus").textContent = keyLabel;
+      byId("aiApiKeySource").textContent = aiSettings.api_key_configured
+        ? aiSettingSourceDescription(aiSettings.api_key_source)
+        : "Gemini 작업 전에 키를 입력하세요";
+      byId("aiModelStatus").textContent = aiSettings.model;
+      byId("aiModelSource").textContent =
+        aiSettingSourceDescription(aiSettings.model_source);
+      const overridden = Object.values(
+        aiSettings.environment_override || {},
+      ).some(Boolean);
+      byId("aiEnvironmentNote").classList.toggle("visible", overridden);
+      render();
+    }
+
+    function renderAiModelOptions() {
+      const select = byId("aiModelPreset");
+      select.replaceChildren();
+      for (const model of aiModelCatalog?.models || []) {
+        const option = document.createElement("option");
+        option.value = model.id;
+        option.textContent = model.id;
+        select.append(option);
+      }
+      const custom = document.createElement("option");
+      custom.value = "custom";
+      custom.textContent = "직접 입력";
+      select.append(custom);
+    }
+
+    async function loadAiSettings(silent = false) {
+      try {
+        const result = await api("/api/settings/ai");
+        aiSettings = result.settings;
+        aiModelCatalog = result.model_catalog;
+        renderAiModelOptions();
+        renderAiSettings();
+        return aiSettings;
+      } catch (error) {
+        byId("aiKeySummary").textContent = "AI 설정 확인 실패";
+        byId("aiKeySummary").classList.add("missing");
+        byId("aiModelSummary").textContent = "서버 연결을 확인하세요";
+        if (!silent) showToast(error.message, true);
+        throw error;
+      }
+    }
+
+    function updateAiModelInput() {
+      const custom = byId("aiModelPreset").value === "custom";
+      byId("aiCustomModelField").hidden = !custom;
+      byId("aiCustomModel").required = custom;
+      const selected = aiModelCatalog?.models?.find(
+        (model) => model.id === byId("aiModelPreset").value,
+      );
+      byId("aiModelDescription").textContent = custom
+        ? "목록에 없는 실제 Gemini API 모델 ID를 입력합니다."
+        : selected?.description_ko || "";
+    }
+
+    async function openAiSettingsDialog() {
+      const button = byId("aiSettingsButton");
+      button.disabled = true;
+      try {
+        await loadAiSettings();
+        const presets = (aiModelCatalog?.models || []).map(
+          (model) => model.id,
+        );
+        const isPreset = presets.includes(aiSettings.model);
+        byId("aiModelPreset").value =
+          isPreset ? aiSettings.model : "custom";
+        byId("aiCustomModel").value = isPreset ? "" : aiSettings.model;
+        byId("aiApiKey").value = "";
+        byId("aiApiKey").type = "password";
+        byId("aiApiKeyToggle").textContent = "보기";
+        updateAiModelInput();
+        byId("aiSettingsDialog").showModal();
+        byId("aiApiKey").focus();
+      } catch {
+        // loadAiSettings already displays a localized error.
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function closeAiSettingsDialog() {
+      byId("aiSettingsDialog").close();
+    }
+
+    function selectedAiModel() {
+      return byId("aiModelPreset").value === "custom"
+        ? byId("aiCustomModel").value.trim()
+        : byId("aiModelPreset").value;
+    }
+
+    async function saveAiSettings(event) {
+      event.preventDefault();
+      const model = selectedAiModel();
+      if (!model) {
+        showToast("사용할 Gemini 모델 이름을 입력하세요.", true);
+        byId("aiCustomModel").focus();
+        return;
+      }
+      const submit = byId("aiSettingsSubmit");
+      submit.disabled = true;
+      try {
+        const result = await api("/api/settings/ai", {
+          method: "PUT",
+          body: JSON.stringify({
+            api_key: byId("aiApiKey").value,
+            model,
+          }),
+        });
+        aiSettings = result.settings;
+        renderAiSettings();
+        closeAiSettingsDialog();
+        showToast("AI 설정을 저장했습니다.");
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    function sourceJobFor(projectId) {
+      return sourceJobs.get(projectId) || null;
+    }
+
+    function activeSourceJob() {
+      return [...sourceJobs.values()].find(
+        (job) => ["queued", "running"].includes(job.status),
+      ) || null;
+    }
+
+    function sourceJobIsActive(projectId) {
+      const job = sourceJobFor(projectId);
+      return Boolean(
+        job && ["queued", "running"].includes(job.status),
+      );
+    }
+
+    function sourceJobStatusLabel(status) {
+      return {
+        queued: "실행 대기",
+        running: "원문 준비 중",
+        succeeded: "원문 준비 완료",
+        partial: "일부 처리 실패",
+        failed: "실행 실패",
+        interrupted: "실행 중단",
+      }[status] || status;
+    }
+
+    function sourceJobStatus(project) {
+      const job = sourceJobFor(project.project_id);
+      if (!job || job.status === "succeeded") return "";
+      const active = ["queued", "running"].includes(job.status);
+      const failed = ["partial", "failed", "interrupted"].includes(
+        job.status,
+      );
+      if (!active && !failed) return "";
+      const progress = (
+        Number.isInteger(job.progress_current)
+        && Number.isInteger(job.progress_total)
+        && job.progress_total > 0
+      )
+        ? `<progress class="job-progress"
+            value="${Math.min(job.progress_current, job.progress_total)}"
+            max="${job.progress_total}"></progress>`
+        : "";
+      const error = job.error
+        ? `<p class="job-error">${escapeHtml(job.error)}</p>`
+        : "";
+      return `<div class="job-status${failed ? " failed" : ""}">
+        <div class="job-status-head">
+          <span>${sourceJobStatusLabel(job.status)}</span>
+          <span>${escapeHtml(job.model)}</span>
+        </div>
+        ${progress}
+        <p class="job-status-message">
+          ${escapeHtml(job.progress_message || "")}
+        </p>
+        ${error}
+      </div>`;
+    }
+
+    function sourceJobButton(project) {
+      if (
+        !["pdf", "images"].includes(project.source_type)
+        || project.reviews.source.enabled
+      ) {
+        return "";
+      }
+      const active = activeSourceJob();
+      if (sourceJobIsActive(project.project_id)) return "";
+      if (active) {
+        return `<button class="source-job-button" type="button" disabled
+          title="${escapeHtml(active.project_id)} 원문 준비 작업이 실행 중입니다.">
+          다른 원문 준비 작업 실행 중
+        </button>`;
+      }
+      if (!aiSettings?.api_key_configured) {
+        return `<button class="source-job-button" type="button"
+          data-require-ai-settings>
+          AI 설정 후 원문 준비
+        </button>`;
+      }
+      const previous = sourceJobFor(project.project_id);
+      const retry = (
+        project.pipeline.source_processing_started
+        || ["partial", "failed", "interrupted"].includes(previous?.status)
+      );
+      const action = project.source_type === "pdf"
+        ? "PDF 원문 준비"
+        : "이미지 OCR 및 원문 준비";
+      return `<button class="source-job-button" type="button"
+        data-start-source-job="${escapeHtml(project.project_id)}">
+        ${action}${retry ? " 다시 실행" : " 시작"}
+      </button>`;
+    }
+
+    function setSourceJobs(jobs) {
+      sourceJobs = new Map(
+        jobs.map((job) => [job.project_id, job]),
+      );
+    }
+
+    function scheduleSourceJobPoll() {
+      window.clearTimeout(sourceJobPollTimer);
+      sourceJobPollTimer = null;
+      if (activeSourceJob()) {
+        sourceJobPollTimer = window.setTimeout(pollSourceJobs, 1000);
+      }
+    }
+
+    async function pollSourceJobs() {
+      const previous = new Map(sourceJobs);
+      try {
+        const result = await api("/api/jobs");
+        setSourceJobs(result.jobs || []);
+        const completed = [...sourceJobs.values()].find((job) => {
+          const before = previous.get(job.project_id);
+          return (
+            before
+            && ["queued", "running"].includes(before.status)
+            && !["queued", "running"].includes(job.status)
+          );
+        });
+        if (completed) {
+          dashboard = await api("/api/dashboard");
+          const message = completed.status === "succeeded"
+            ? "원문 검수 준비가 완료되었습니다."
+            : completed.progress_message;
+          showToast(
+            message,
+            completed.status !== "succeeded",
+          );
+        }
+        render();
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        scheduleSourceJobPoll();
+      }
+    }
+
+    function openSourceJobDialog(projectId) {
+      if (!aiSettings?.api_key_configured) {
+        showToast("먼저 Gemini API 키를 설정하세요.", true);
+        openAiSettingsDialog();
+        return;
+      }
+      const project = dashboard?.projects.find(
+        (value) => value.project_id === projectId,
+      );
+      if (!project) {
+        showToast("프로젝트 정보를 찾지 못했습니다.", true);
+        return;
+      }
+      pendingSourceJobProject = project;
+      byId("sourceJobProjectName").textContent = project.name;
+      byId("sourceJobProjectId").textContent = project.project_id;
+      byId("sourceJobType").textContent =
+        project.source_type === "pdf" ? "PDF" : "이미지 OCR";
+      byId("sourceJobModel").textContent = aiSettings.model;
+      byId("sourceJobSubmit").textContent =
+        project.source_type === "pdf"
+          ? "PDF 원문 준비 시작"
+          : "이미지 OCR 시작";
+      byId("sourceJobDialog").showModal();
+      byId("sourceJobDialogCancel").focus();
+    }
+
+    function closeSourceJobDialog() {
+      byId("sourceJobDialog").close();
+    }
+
+    async function startSourceJob(event) {
+      event.preventDefault();
+      if (!pendingSourceJobProject) return;
+      const submit = byId("sourceJobSubmit");
+      submit.disabled = true;
+      try {
+        const result = await api("/api/jobs/source", {
+          method: "POST",
+          body: JSON.stringify({
+            project_id: pendingSourceJobProject.project_id,
+          }),
+        });
+        sourceJobs.set(result.job.project_id, result.job);
+        closeSourceJobDialog();
+        render();
+        scheduleSourceJobPoll();
+        showToast("원문 준비 작업을 시작했습니다.");
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
     }
 
     function sourceTypeLabel(project) {
@@ -1303,6 +1992,7 @@
     }
 
     function sourceRegistrationButton(project) {
+      if (sourceJobIsActive(project.project_id)) return "";
       if (project.source_type) {
         if (!project.source_replacement?.allowed) return "";
         return `<button class="source-register-button" type="button"
@@ -1326,6 +2016,7 @@
       if (
         project.source_type !== "images"
         || !project.ocr_prompt_edit?.allowed
+        || sourceJobIsActive(project.project_id)
       ) {
         return "";
       }
@@ -1361,6 +2052,7 @@
 
     function projectCard(project) {
       const pathTitle = escapeHtml(project.path);
+      const jobLocked = sourceJobIsActive(project.project_id);
       return `<article class="project-card">
         <div class="project-head">
           <div>
@@ -1373,7 +2065,9 @@
               data-delete-project="${escapeHtml(project.project_id)}"
               data-project-name="${escapeHtml(project.name)}"
               aria-label="${escapeHtml(project.name)} 프로젝트 삭제"
-              title="프로젝트 삭제">×</button>
+              title="${jobLocked
+                ? "원문 준비 중에는 삭제할 수 없습니다."
+                : "프로젝트 삭제"}"${jobLocked ? " disabled" : ""}>×</button>
           </div>
         </div>
         ${sourceFileSummary(project)}
@@ -1391,6 +2085,8 @@
           <span class="pipeline-step ${stepState(project, "translation")}">번역 검수</span>
         </div>
         <div class="actions">
+          ${sourceJobStatus(project)}
+          ${sourceJobButton(project)}
           ${sourceRegistrationButton(project)}
           ${ocrPromptEditButton(project)}
           ${reviewButton(project, "source")}
@@ -1457,8 +2153,14 @@
       const button = byId("refreshButton");
       button.disabled = true;
       try {
-        dashboard = await api("/api/dashboard");
+        const [dashboardDocument, jobsDocument] = await Promise.all([
+          api("/api/dashboard"),
+          api("/api/jobs"),
+        ]);
+        dashboard = dashboardDocument;
+        setSourceJobs(jobsDocument.jobs || []);
         render();
+        scheduleSourceJobPoll();
         const time = new Intl.DateTimeFormat("ko-KR", {
           hour: "2-digit",
           minute: "2-digit",
@@ -1835,6 +2537,47 @@
     }
 
     byId("refreshButton").addEventListener("click", () => refresh(false));
+    byId("aiSettingsButton").addEventListener(
+      "click",
+      openAiSettingsDialog,
+    );
+    byId("aiSettingsDialogClose").addEventListener(
+      "click",
+      closeAiSettingsDialog,
+    );
+    byId("aiSettingsDialogCancel").addEventListener(
+      "click",
+      closeAiSettingsDialog,
+    );
+    byId("aiSettingsForm").addEventListener("submit", saveAiSettings);
+    byId("aiModelPreset").addEventListener("change", updateAiModelInput);
+    byId("aiApiKeyToggle").addEventListener("click", () => {
+      const input = byId("aiApiKey");
+      const showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      byId("aiApiKeyToggle").textContent = showing ? "보기" : "숨기기";
+      input.focus();
+    });
+    byId("aiSettingsDialog").addEventListener("close", () => {
+      byId("aiSettingsForm").reset();
+      byId("aiApiKey").type = "password";
+      byId("aiApiKeyToggle").textContent = "보기";
+      byId("aiSettingsSubmit").disabled = false;
+      updateAiModelInput();
+    });
+    byId("sourceJobDialogClose").addEventListener(
+      "click",
+      closeSourceJobDialog,
+    );
+    byId("sourceJobDialogCancel").addEventListener(
+      "click",
+      closeSourceJobDialog,
+    );
+    byId("sourceJobForm").addEventListener("submit", startSourceJob);
+    byId("sourceJobDialog").addEventListener("close", () => {
+      pendingSourceJobProject = null;
+      byId("sourceJobSubmit").disabled = false;
+    });
     byId("emptyCreateButton").addEventListener("click", openProjectDialog);
     byId("projectDialogClose").addEventListener("click", closeProjectDialog);
     byId("projectDialogCancel").addEventListener("click", closeProjectDialog);
@@ -1921,6 +2664,18 @@
       render();
     });
     byId("projectGrid").addEventListener("click", (event) => {
+      const settingsButton = event.target.closest(
+        "[data-require-ai-settings]",
+      );
+      if (settingsButton) {
+        openAiSettingsDialog();
+        return;
+      }
+      const jobButton = event.target.closest("[data-start-source-job]");
+      if (jobButton) {
+        openSourceJobDialog(jobButton.dataset.startSourceJob);
+        return;
+      }
       const promptButton = event.target.closest("[data-edit-ocr-prompt]");
       if (promptButton) {
         openOcrPromptDialog(promptButton.dataset.editOcrPrompt);
@@ -1960,6 +2715,7 @@
     });
 
     refresh(true);
+    loadAiSettings(true).catch(() => {});
   </script>
 </body>
 </html>

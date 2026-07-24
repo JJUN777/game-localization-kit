@@ -20,6 +20,20 @@ from urllib.parse import unquote, urlsplit
 import webbrowser
 
 from glk.application._io import write_bytes_atomic
+from glk.application.ai_model_catalog import (
+    GeminiModelCatalogError,
+    load_gemini_model_catalog,
+)
+from glk.application.ai_settings_service import (
+    AiSettingsError,
+    AiSettingsService,
+)
+from glk.application.dashboard_job_service import (
+    DashboardJobConflict,
+    DashboardJobError,
+    DashboardJobManager,
+    SourceJobRunner,
+)
 from glk.application.dashboard_service import get_dashboard_document
 from glk.application.project_service import (
     ProjectNotFoundError,
@@ -92,9 +106,20 @@ class DashboardHttpServer(ThreadingHTTPServer):
         handler_class: type[BaseHTTPRequestHandler],
         *,
         workspace_root: str | Path,
+        settings_root: str | Path,
+        source_job_runner: SourceJobRunner | None = None,
     ) -> None:
         super().__init__(server_address, handler_class)
         self.workspace_root = str(workspace_root)
+        self.ai_settings = AiSettingsService(settings_root)
+        self.job_manager = DashboardJobManager(
+            workspace_root,
+            **(
+                {"runner": source_job_runner}
+                if source_job_runner is not None
+                else {}
+            ),
+        )
         self.auth_token = secrets.token_urlsafe(32)
         self.mutation_lock = threading.Lock()
         self._review_lock = threading.Lock()
@@ -157,6 +182,7 @@ class DashboardHttpServer(ThreadingHTTPServer):
             review_thread.join(timeout=2)
 
     def server_close(self) -> None:
+        self.job_manager.close()
         self.close_review_servers()
         super().server_close()
 
@@ -486,6 +512,13 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 code=error_code,
             )
             return
+        if self.server.job_manager.is_project_active(upload_project_id):
+            self._send_error_json(
+                HTTPStatus.CONFLICT,
+                "Source replacement is unavailable while a source job is running.",
+                code="SOURCE_JOB_CONFLICT",
+            )
+            return
         try:
             source_type, uploads, ocr_prompt = self._read_source_upload()
             with self.server.mutation_lock:
@@ -572,13 +605,61 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(HTTPStatus.OK, document)
             return
+        if path == "/api/jobs":
+            if not self._api_authorized():
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                )
+                return
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "jobs": self.server.job_manager.list_jobs(),
+                },
+            )
+            return
+        if path == "/api/settings/ai":
+            if not self._api_authorized():
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                )
+                return
+            try:
+                settings = self.server.ai_settings.status()
+                model_catalog = load_gemini_model_catalog()
+            except (
+                AiSettingsError,
+                GeminiModelCatalogError,
+            ) as error:
+                self._send_error_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    error,
+                    code="AI_SETTINGS_LOAD_FAILED",
+                )
+                return
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "settings": settings.to_dict(),
+                    "model_catalog": model_catalog,
+                },
+            )
+            return
         self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
         is_source_upload = self._source_upload_project_id(path) is not None
         if (
-            path not in {"/api/projects", "/api/review/open"}
+            path not in {
+                "/api/projects",
+                "/api/review/open",
+                "/api/jobs/source",
+            }
             and not is_source_upload
         ):
             self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
@@ -594,6 +675,29 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
         try:
             request = self._read_request_json()
+            if path == "/api/jobs/source":
+                project_id = request.get("project_id")
+                if not isinstance(project_id, str) or not project_id.strip():
+                    raise DashboardJobError("project_id is required.")
+                if "/" in project_id or "\\" in project_id:
+                    raise DashboardJobError(
+                        "Project ID must not contain path separators."
+                    )
+                settings = self.server.ai_settings.status()
+                if not settings.api_key_configured:
+                    raise DashboardJobError(
+                        "GEMINI_API_KEY is not configured."
+                    )
+                with self.server.mutation_lock:
+                    job = self.server.job_manager.start_source_job(
+                        project_id=project_id.strip(),
+                        model=settings.model,
+                    )
+                self._send_json(
+                    HTTPStatus.ACCEPTED,
+                    {"ok": True, "job": job},
+                )
+                return
             if path == "/api/projects":
                 name = request.get("name")
                 project_id = request.get("project_id")
@@ -627,10 +731,26 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                     "project_id and review_type must be strings."
                 )
             url = self.server.open_review(project_id, review_type)
-        except (DashboardError, OSError, TypeError, ValueError) as error:
+        except DashboardJobConflict as error:
+            self._send_error_json(
+                HTTPStatus.CONFLICT,
+                error,
+                code="SOURCE_JOB_CONFLICT",
+            )
+            return
+        except (
+            AiSettingsError,
+            DashboardError,
+            DashboardJobError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as error:
             code = (
                 "PROJECT_INIT_FAILED"
                 if path == "/api/projects"
+                else "SOURCE_JOB_START_FAILED"
+                if path == "/api/jobs/source"
                 else "INVALID_REQUEST"
             )
             self._send_error_json(HTTPStatus.BAD_REQUEST, error, code=code)
@@ -639,6 +759,52 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         path = urlsplit(self.path).path
+        if path == "/api/settings/ai":
+            if not self._api_authorized():
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                )
+                return
+            try:
+                request = self._read_request_json()
+                api_key = request.get("api_key")
+                model = request.get("model")
+                if api_key is not None and not isinstance(api_key, str):
+                    raise DashboardError(
+                        "api_key must be a string or null."
+                    )
+                if not isinstance(model, str):
+                    raise DashboardError("model must be a string.")
+                with self.server.mutation_lock:
+                    settings = self.server.ai_settings.save(
+                        api_key=api_key,
+                        model=model,
+                    )
+            except (
+                AiSettingsError,
+                DashboardError,
+                TypeError,
+                ValueError,
+            ) as error:
+                self._send_error_json(
+                    HTTPStatus.BAD_REQUEST,
+                    error,
+                    code="AI_SETTINGS_UPDATE_FAILED",
+                )
+                return
+            except (OSError, RuntimeError) as error:
+                self._send_error_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    error,
+                    code="AI_SETTINGS_UPDATE_FAILED",
+                )
+                return
+            self._send_json(
+                HTTPStatus.OK,
+                {"ok": True, "settings": settings.to_dict()},
+            )
+            return
         self._handle_source_upload(path, replace=True)
 
     def do_PATCH(self) -> None:
@@ -658,6 +824,13 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST,
                 "Project ID must not contain path separators.",
                 code="OCR_PROMPT_UPDATE_FAILED",
+            )
+            return
+        if self.server.job_manager.is_project_active(project_id):
+            self._send_error_json(
+                HTTPStatus.CONFLICT,
+                "OCR prompt editing is unavailable while a source job is running.",
+                code="SOURCE_JOB_CONFLICT",
             )
             return
         try:
@@ -734,6 +907,13 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 code="PROJECT_DELETE_FAILED",
             )
             return
+        if self.server.job_manager.is_project_active(project_id):
+            self._send_error_json(
+                HTTPStatus.CONFLICT,
+                "Project deletion is unavailable while a source job is running.",
+                code="SOURCE_JOB_CONFLICT",
+            )
+            return
         try:
             with self.server.mutation_lock:
                 location = load_workspace_project_id(
@@ -778,6 +958,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 def create_dashboard_server(
     *,
     workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
+    source_job_runner: SourceJobRunner | None = None,
     port: int = 0,
 ) -> DashboardHttpServer:
     if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
@@ -787,17 +969,21 @@ def create_dashboard_server(
         ("127.0.0.1", port),
         _DashboardHandler,
         workspace_root=workspace_root,
+        settings_root=Path.cwd() if settings_root is None else settings_root,
+        source_job_runner=source_job_runner,
     )
 
 
 def serve_dashboard(
     *,
     workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
     port: int = 0,
     open_browser: bool = True,
 ) -> None:
     server = create_dashboard_server(
         workspace_root=workspace_root,
+        settings_root=settings_root,
         port=port,
     )
     print(f"GLK dashboard: {server.dashboard_url}")

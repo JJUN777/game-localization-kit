@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from io import BytesIO
 import json
+import os
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -13,6 +15,7 @@ from urllib.request import Request, urlopen
 from PIL import Image
 
 from glk.application.project_service import create_project
+from glk.application.source_registration_service import register_project_pdf
 from glk.application.source_review_service import prepare_project_source_review
 from glk.infrastructure.dashboard_server import (
     DashboardHttpServer,
@@ -25,6 +28,13 @@ class DashboardServerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.workspace_root = Path(self.temporary_directory.name) / "workspaces"
+        self.settings_root = Path(self.temporary_directory.name) / "settings"
+        self.environment_patch = patch.dict(
+            os.environ,
+            {"GEMINI_API_KEY": "", "GEMINI_MODEL": ""},
+        )
+        self.environment_patch.start()
+        self.source_job_calls: list[tuple[str, Path, str]] = []
         location = create_project(
             name="Dashboard Review",
             workspace_root=self.workspace_root,
@@ -39,6 +49,8 @@ class DashboardServerTests(unittest.TestCase):
         )
         self.server: DashboardHttpServer = create_dashboard_server(
             workspace_root=self.workspace_root,
+            settings_root=self.settings_root,
+            source_job_runner=self._run_source_job,
         )
         self.thread = threading.Thread(
             target=self.server.serve_forever,
@@ -50,7 +62,25 @@ class DashboardServerTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)
+        self.environment_patch.stop()
         self.temporary_directory.cleanup()
+
+    def _run_source_job(
+        self,
+        project_id: str,
+        workspace_root: str | Path,
+        model: str,
+        progress: object,
+    ) -> dict[str, object]:
+        self.source_job_calls.append(
+            (project_id, Path(workspace_root), model)
+        )
+        progress("Page 1: requesting LLM layout reconstruction", 0, 1)  # type: ignore[operator]
+        return {
+            "ok": True,
+            "status": "succeeded",
+            "source_type": "pdf",
+        }
 
     def _request(
         self,
@@ -151,6 +181,8 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("OCR 프롬프트", html)
         self.assertIn("OCR 프롬프트 수정", html)
         self.assertIn("편집 전 내용으로 되돌리기", html)
+        self.assertIn("AI 설정", html)
+        self.assertIn("원문 준비 시작", html)
         self.assertIn("휴지통으로 이동", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
 
@@ -174,6 +206,157 @@ class DashboardServerTests(unittest.TestCase):
         project = dashboard["projects"][0]
         self.assertEqual(project["project_id"], "dashboard_review")
         self.assertTrue(project["reviews"]["source"]["enabled"])
+
+    def test_reads_and_updates_ai_settings_without_returning_the_key(
+        self,
+    ) -> None:
+        status, unauthorized = self._request(
+            "/api/settings/ai",
+            authorized=False,
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(unauthorized["code"], "REVIEW_SESSION_INVALID")
+
+        status, initial = self._request("/api/settings/ai")
+        self.assertEqual(status, 200)
+        self.assertFalse(initial["settings"]["api_key_configured"])
+        self.assertEqual(initial["settings"]["model"], "gemini-2.5-flash")
+        self.assertNotIn("api_key", initial["settings"])
+        self.assertEqual(
+            [
+                model["id"]
+                for model in initial["model_catalog"]["models"]
+            ],
+            [
+                "gemini-3.5-flash",
+                "gemini-3.1-flash-lite",
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+                "gemini-2.5-flash-lite",
+            ],
+        )
+        self.assertEqual(
+            initial["model_catalog"]["source_url"],
+            "https://ai.google.dev/gemini-api/docs/models",
+        )
+
+        status, saved = self._request(
+            "/api/settings/ai",
+            method="PUT",
+            payload={
+                "api_key": "dashboard-secret-key",
+                "model": "gemini-2.5-pro",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(saved["settings"]["api_key_configured"])
+        self.assertEqual(saved["settings"]["model"], "gemini-2.5-pro")
+        self.assertNotIn("dashboard-secret-key", json.dumps(saved))
+
+        env_path = self.settings_root / ".env"
+        env_text = env_path.read_text(encoding="utf-8")
+        self.assertIn('GEMINI_API_KEY="dashboard-secret-key"', env_text)
+        self.assertIn('GEMINI_MODEL="gemini-2.5-pro"', env_text)
+
+        status, changed_model = self._request(
+            "/api/settings/ai",
+            method="PUT",
+            payload={"api_key": "", "model": "custom-model-v2"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            changed_model["settings"]["model"],
+            "custom-model-v2",
+        )
+        self.assertIn(
+            'GEMINI_API_KEY="dashboard-secret-key"',
+            env_path.read_text(encoding="utf-8"),
+        )
+
+        status, invalid = self._request(
+            "/api/settings/ai",
+            method="PUT",
+            payload={"api_key": "", "model": "invalid model"},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(invalid["code"], "AI_SETTINGS_UPDATE_FAILED")
+
+    def test_starts_and_reports_a_background_source_job(self) -> None:
+        source_pdf = Path(self.temporary_directory.name) / "job.pdf"
+        source_pdf.write_bytes(b"%PDF-1.4\njob source\n")
+        create_project(
+            name="Job Project",
+            project_id="job_project",
+            workspace_root=self.workspace_root,
+        )
+        register_project_pdf(
+            project="job_project",
+            file=source_pdf,
+            workspace_root=self.workspace_root,
+        )
+
+        status, unauthorized = self._request(
+            "/api/jobs",
+            authorized=False,
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(unauthorized["code"], "REVIEW_SESSION_INVALID")
+
+        status, missing_key = self._request(
+            "/api/jobs/source",
+            method="POST",
+            payload={"project_id": "job_project"},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            missing_key["code"],
+            "SOURCE_JOB_START_FAILED",
+        )
+
+        status, _ = self._request(
+            "/api/settings/ai",
+            method="PUT",
+            payload={
+                "api_key": "dashboard-job-key",
+                "model": "gemini-3.5-flash",
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, started = self._request(
+            "/api/jobs/source",
+            method="POST",
+            payload={"project_id": "job_project"},
+        )
+        self.assertEqual(status, 202)
+        self.assertEqual(started["job"]["project_id"], "job_project")
+        self.assertEqual(started["job"]["model"], "gemini-3.5-flash")
+
+        job: dict[str, object] | None = None
+        for _ in range(100):
+            status, jobs = self._request("/api/jobs")
+            self.assertEqual(status, 200)
+            matching = [
+                value
+                for value in jobs["jobs"]
+                if value["project_id"] == "job_project"
+            ]
+            if matching and matching[0]["status"] == "succeeded":
+                job = matching[0]
+                break
+            time.sleep(0.01)
+        self.assertIsNotNone(job)
+        self.assertEqual(job["progress_total"], 1)
+        self.assertEqual(
+            self.source_job_calls,
+            [
+                (
+                    "job_project",
+                    self.workspace_root.resolve(),
+                    "gemini-3.5-flash",
+                )
+            ],
+        )
 
     def test_opens_ready_review_and_rejects_unknown_type(self) -> None:
         status, opened = self._request(

@@ -2,7 +2,7 @@
 
 이 문서는 `feature/local-dashboard` 브랜치의 임시 설계 기준, 구현 상태와 작업 재개 방법을 함께 기록합니다. 다른 컴퓨터에서 이어서 개발할 때 이 문서를 먼저 확인하고, 브랜치를 `main`에 머지하기 직전에 삭제합니다.
 
-**현재 범위**: GUI 2.2단계 완료 — 다음 작업은 background job 설계
+**현재 범위**: GUI 3.1 원문 준비 background job 완료 — 다음 작업은 용어 후보 생성 UI
 
 ---
 
@@ -15,8 +15,10 @@ flowchart LR
     CLI[glk ui] --> DASH[localhost 대시보드]
     DASH --> CREATE[새 프로젝트 생성]
     DASH --> REGISTER[PDF·이미지 원본 등록]
+    DASH --> JOB[원문 준비 background job]
     DASH --> DELETE[프로젝트를 휴지통으로 이동]
     DASH --> SNAPSHOT[프로젝트 상태 조회]
+    JOB --> SNAPSHOT
     SNAPSHOT --> CARDS[목록·단계·진행률 표시]
     CARDS --> SOURCE[원문 검수]
     CARDS --> GLOSSARY[용어 검수]
@@ -66,6 +68,16 @@ flowchart LR
 - 이미지 원본 교체 때 프로젝트 공통 `ocr_prompt.txt`는 유지합니다.
 - 카드에 PDF 파일명 또는 첫 이미지 파일명과 전체 개수를 표시하고, 이미지가 여러 장이면 전체 파일 목록 모달을 제공합니다.
 
+### 3.1단계에서 추가한 일
+
+- 등록된 PDF 또는 이미지 원본의 준비 작업을 HTTP 요청 thread 밖에서 실행합니다.
+- PDF 추출 또는 이미지 OCR 성공 후 검수 block 생성과 로컬 원문 QA까지 이어서 실행합니다.
+- 동시에 하나의 원문 준비 작업만 허용해 중복 API 호출과 비용 증가를 막습니다.
+- 실행 중에는 해당 프로젝트의 원본 교체, OCR 프롬프트 수정과 삭제를 차단합니다.
+- 작업 상태, 모델, 진행 메시지와 실패 결과를 프로젝트 `.glk/state`에 보존합니다.
+- 실패·일부 실패·대시보드 중단 뒤에는 같은 버튼으로 재시도하며 검증된 acquisition cache를 재사용합니다.
+- provider 호출 중 안전한 중단 계약이 없으므로 실행 중 취소는 이번 범위에서 제공하지 않습니다.
+
 ---
 
 ## 사용자 실행 방법
@@ -92,11 +104,18 @@ glk ui --workspace-root 다른/workspaces
 | 파일 | 책임 |
 |---|---|
 | `src/glk/application/dashboard_service.py` | 프로젝트 목록과 상태를 UI용 read model로 조합 |
+| `src/glk/application/ai_model_catalog.py` | 패키지 모델 목록 검증과 API용 document 제공 |
+| `src/glk/application/ai_settings_service.py` | 저장소 공통 Gemini 키·모델의 안전한 조회와 `.env` 저장 |
+| `src/glk/application/dashboard_job_service.py` | 원문 준비 pipeline과 background job 상태·중복 실행·영속화 |
 | `src/glk/application/source_registration_service.py` | PDF·이미지 원본 검증, 정렬, 복사와 manifest 등록 |
+| `src/glk/data/gemini_models.json` | 드롭다운 Gemini API 모델 ID, 설명과 공식 문서 확인일 |
 | `src/glk/infrastructure/dashboard_server.py` | localhost HTTP API, 보안 검사, 검수 서버 수명주기 |
 | `src/glk/web/dashboard.html` | 외부 의존성 없는 반응형 HTML/CSS/JavaScript 화면 |
 | `src/glk/cli.py` | `glk ui` 인자와 서버 진입점 |
+| `tests/test_ai_model_catalog.py` | 모델 ID 중복, 기본 모델과 공식 출처 검증 |
 | `tests/test_dashboard_service.py` | 빈 workspace와 프로젝트 상태 view model 검증 |
+| `tests/test_dashboard_job_service.py` | job 성공·경합·중단 복구와 원문 준비 단계 연결 검증 |
+| `tests/test_ai_settings_service.py` | 키 비노출, `.env` 보존, 모델과 환경변수 우선순위 검증 |
 | `tests/test_dashboard_server.py` | 페이지·API 보호와 검수 화면 실행 검증 |
 
 대시보드는 workspace 파일을 직접 해석하거나 수정하지 않습니다. 프로젝트 조회·생성·선택 검증은 `project_service`를 거치고, 원본 등록은 `source_registration_service`, 삭제는 검증된 프로젝트 경로와 `send2trash`를 사용합니다. 검수 화면을 열 때도 기존 `create_*_review_server()`를 재사용합니다.
@@ -143,6 +162,43 @@ glk ui --workspace-root 다른/workspaces
 ```
 
 `pipeline`에는 `glk status`와 같은 내부 단계 상태가 들어갑니다. `reviews`의 `enabled`와 `reason`은 버튼 활성화와 사용자 설명에 사용합니다.
+
+### `GET|PUT /api/settings/ai`
+
+`GET`은 API 키 설정 여부와 적용 출처, 현재 모델 및 `model_catalog`를
+반환합니다. 카탈로그에는 실제 API 모델 ID, 설명, 공식 문서 URL과 확인일이
+들어갑니다. API 키 값은 어떤 응답에도 포함하지 않습니다. `PUT`은 다음 JSON을
+저장소 최상위 `.env`에 원자적으로 저장합니다.
+
+```json
+{
+  "api_key": "새 Gemini API 키 또는 빈 문자열",
+  "model": "gemini-2.5-flash"
+}
+```
+
+빈 `api_key`는 기존 `.env` 키를 유지합니다. 기존 `.env`의 주석과 무관한
+설정은 보존하고 대상 키의 중복 선언만 정리합니다. 셸 환경변수가 있으면 저장된
+`.env`보다 계속 우선하며 응답의 `environment_override`로 UI에 알립니다.
+
+### `GET /api/jobs`
+
+현재 실행 중인 작업과 프로젝트별 최신 원문 준비 작업을 반환합니다. 응답에는
+`queued`, `running`, `succeeded`, `partial`, `failed`, `interrupted` 상태와
+모델, 진행 메시지, 처리 개수, 시작·종료 시각이 포함됩니다.
+
+### `POST /api/jobs/source`
+
+```json
+{
+  "project_id": "primal"
+}
+```
+
+등록 원본 형식을 서버에서 확인하고 현재 공통 AI 모델로 PDF 추출 또는 이미지
+OCR을 시작합니다. acquisition 성공 후 segmentation과 로컬 source QA를 이어서
+실행하므로 성공하면 원문 검수 화면을 바로 열 수 있습니다. API 키가 없거나 다른
+원문 작업이 실행 중이면 시작을 거부합니다.
 
 ### `POST /api/review/open`
 
@@ -276,18 +332,19 @@ workspace 바로 아래의 프로젝트인지, `project.json`의 ID와 일치하
 - JSON 요청과 multipart 업로드의 크기·형식·파일 개수·확장자를 제한합니다.
 - 브라우저에 표시하는 오류는 공통 `code/message/detail` 구조를 사용합니다.
 - 대시보드 서버 종료 시 대시보드가 시작한 하위 검수 서버에 `shutdown()`과 `server_close()`를 호출합니다.
+- 원문 준비 job은 daemon worker에서 실행하며 동시에 하나만 허용합니다.
+- job 실행 중 같은 프로젝트의 원본·프롬프트·삭제 mutation을 차단합니다.
 
 ---
 
 ## 다음 단계
 
-### 다음 작업: background job
+### 다음 작업: 용어 후보 생성 UI
 
-추출·OCR·번역 같은 장시간 작업을 background job으로
-실행하고 진행률과 로그를 표시합니다. 브라우저 요청 thread에서 LLM 작업을
-직접 실행하지 않으며, 취소·재시도·중복 실행 방지 정책을 먼저 정해야 합니다.
-첫 구현 범위는 등록된 원본의 PDF 추출 또는 이미지 OCR을 시작하고, 실행 중
-상태와 완료·실패 결과를 대시보드에서 확인하는 흐름입니다.
+GUI 3.1에서 원문 준비 background job과 원문 검수 진입까지 연결했습니다.
+다음에는 승인된 원문에서 용어 후보를 생성하고 용어 검수 화면으로 이어지는
+버튼과 상태 전환을 추가합니다. 장시간 번역 job과 cooperative cancellation은
+후속 범위로 유지합니다.
 
 ### 프로젝트 삭제에서 유지할 제한
 
@@ -407,20 +464,45 @@ workspace 바로 아래의 프로젝트인지, `project.json`의 ID와 일치하
 - 테스트에서 프롬프트 저장 전후의 등록 이미지 bytes와 manifest가 바뀌지 않는 것을 확인합니다.
 - Orca 내장 브라우저에서 실제 이미지 프로젝트의 전용 버튼, 저장값·복원·byte 표시와 파일 입력이 없는 모달을 확인했으며 사용자 프롬프트는 제출하지 않았습니다.
 
+### 2026-07-24 — 공통 AI 키와 모델 설정
+
+- 대시보드 헤더에 프로젝트와 무관한 공통 `AI 설정` 버튼을 추가했습니다.
+- Gemini API 키는 비밀번호 입력으로 새 값만 받고, 빈 입력은 기존 `.env` 키를 유지합니다.
+- API는 키 값을 반환하지 않고 설정 여부와 `.env`·셸 환경변수 중 적용 출처만 반환합니다.
+- `AI 설정` 버튼은 녹색 강조색을 사용하고, 키 상태와 모델 ID를 두 줄로 분리했습니다.
+- 키 상태는 `API 키 설정 완료` 또는 `API 키 미설정` 문구로 명확하게 표시합니다.
+- 드롭다운은 호환되는 3.x 안정 모델 `gemini-3.5-flash`, `gemini-3.1-flash-lite`와 2.5 안정 모델 및 직접 입력을 지원합니다.
+- 모델 목록은 `src/glk/data/gemini_models.json` 한 파일에서 관리하고 공식 문서 URL과 확인일을 함께 기록합니다.
+- 기존 `.env` 주석과 다른 변수를 보존하고 POSIX에서는 저장 권한을 `0600`으로 제한합니다.
+- 셸 환경변수가 있으면 `.env`보다 우선한다는 안내를 설정 모달에 표시합니다.
+- Orca 내장 브라우저에서 녹색 강조 버튼, 키·모델 두 줄 상태, 비밀번호 입력과 실제 API 모델 ID 세 개 및 설명을 확인했으며 실제 키나 설정은 저장하지 않았습니다.
+
+### 2026-07-24 — 원문 준비 background job
+
+- `dashboard_job_service`에 단일 active job, 프로젝트별 최신 상태와 daemon worker를 추가했습니다.
+- 등록된 PDF 추출 또는 이미지 OCR 뒤 segmentation과 로컬 source QA를 자동으로 연결합니다.
+- `GET /api/jobs`, `POST /api/jobs/source`를 추가하고 API 키·프로젝트·중복 실행을 검증합니다.
+- 카드에 키 설정 안내, 실행 확인 모달, 진행 상태·모델·실패 메시지와 재시도 버튼을 추가했습니다.
+- 실행 중에는 원본 교체, OCR 프롬프트 수정과 프로젝트 삭제를 UI와 API에서 차단합니다.
+- 최신 상태를 `.glk/state/dashboard_source_job.json`에 저장하고 이전 실행 중 상태는 재시작 때 `interrupted`로 복구합니다.
+- 취소는 provider cooperative cancellation 지원 뒤 추가하기로 하고 이번 범위에서는 제외했습니다.
+- Orca 내장 브라우저에서 시작 버튼, 비용 안내 모달, 실행 진행 상태와 원본 교체 숨김·삭제 잠금을 브라우저 전용 fixture로 확인했으며 API 호출이나 사용자 파일 변경은 하지 않았습니다.
+- 저장된 API 키와 `gemini-3.1-flash-lite`를 사용해 임시 이미지 1장의 실제 OCR smoke test를 완료했습니다. 원문 6개 block을 정확히 추출했고 segmentation과 source QA까지 성공했으며 QA issue는 0건이었습니다. 임시 프로젝트는 테스트 후 workspace에서 제거했습니다.
+
 검증 결과:
 
 ```text
 python -m unittest discover -s tests
-→ 141 tests OK
+→ 153 tests OK
 
 python -m compileall -q src tests
 → OK
 
 Python 3.10 feature grammar parse
-→ src/tests 63 files OK
+→ src/tests 70 files OK
 
 python -m mypy
-→ dashboard·원본 등록 포함 11 files, no issues
+→ dashboard·background job·AI 설정·모델 카탈로그 포함 14 files, no issues
 
 python -m pip check
 → no broken requirements
@@ -478,6 +560,9 @@ glk ui --no-open
 - [x] 프로젝트 삭제 UI·API 구현
 - [x] GUI 2.2 PDF·이미지 등록 범위 확정
 - [x] GUI 2.2 PDF·이미지 등록 UI·API 구현
-- [ ] GUI 3 background job 범위와 상태 모델 확정
+- [x] GUI 2.3 공통 AI 키·모델 설정 UI·API 구현
+- [x] GUI 3 background job 범위와 상태 모델 확정
+- [x] GUI 3.1 원문 준비 background job UI·API 구현
+- [ ] 승인 원문 기반 용어 후보 생성 UI 구현
 
 다음 작업자는 이 체크리스트와 `git status`, 최신 커밋을 함께 확인하고 이어서 작업합니다. 구현 범위나 API가 바뀌면 코드와 같은 커밋에서 이 문서의 설계·이력·체크리스트도 갱신합니다.
