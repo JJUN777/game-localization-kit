@@ -340,7 +340,7 @@ glk glossary build --project primal --force
 glk review glossary --project primal
 ```
 
-HTML 표에서 모든 자동 후보를 `approved`, `keep`, `rejected` 중 하나로 확정합니다. 검색·필터, 여러 행 선택 후 상태 일괄 변경, 실제 문맥 펼쳐보기와 수동 용어 추가를 지원합니다. 저장은 기존 `glossary_review.tsv`를 갱신합니다. 정확한 컬럼과 상태값은 [용어집 검토 사양](GLOSSARY.md)을 따릅니다.
+HTML 표에서 모든 자동 후보를 `approved`, `keep`, `rejected` 중 하나로 확정합니다. 검색·필터, 첫 등장 위치·출현 횟수·원문 용어·상태 정렬, 여러 행 선택 후 상태 일괄 변경, 실제 문맥 펼쳐보기와 수동 용어 추가를 지원합니다. 저장은 기존 `glossary_review.tsv`를 갱신합니다. 정확한 컬럼과 상태값은 [용어집 검토 사양](GLOSSARY.md)을 따릅니다.
 
 ### Termbase 생성
 

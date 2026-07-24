@@ -317,6 +317,14 @@
       <select class="control" id="category-filter" aria-label="분류 필터">
         <option value="all">모든 분류</option>
       </select>
+      <select class="control" id="sort-order" aria-label="정렬 기준">
+        <option value="default">추천 순서</option>
+        <option value="context">첫 등장 위치 순</option>
+        <option value="occurrences-desc">출현 많은 순</option>
+        <option value="occurrences-asc">출현 적은 순</option>
+        <option value="source">원문 용어 순</option>
+        <option value="status">상태 순</option>
+      </select>
       <button class="button-table" id="add-button" type="button">+ 수동 용어</button>
       <div class="spacer"></div>
       <span class="selection-count" id="selection-count">0개 선택</span>
@@ -376,6 +384,7 @@
       search: "",
       statusFilter: "all",
       categoryFilter: "all",
+      sortOrder: "default",
       selected: new Set(),
       manualSequence: 0
     };
@@ -472,6 +481,77 @@
       return !query || rowSearchText(row).includes(query);
     }
 
+    const textCollator = new Intl.Collator(["ko", "en"], {
+      numeric: true,
+      sensitivity: "base"
+    });
+
+    function compareText(left, right) {
+      return textCollator.compare(String(left || ""), String(right || ""));
+    }
+
+    function firstLocation(row) {
+      return String(row.locations || "").split(",")[0].trim();
+    }
+
+    function compareOptionalText(left, right) {
+      if (!left && !right) return 0;
+      if (!left) return 1;
+      if (!right) return -1;
+      return compareText(left, right);
+    }
+
+    function occurrenceCount(row) {
+      const value = Number(row.occurrences);
+      return Number.isFinite(value) && value >= 0 ? value : null;
+    }
+
+    function compareOptionalNumber(left, right, direction) {
+      if (left === null && right === null) return 0;
+      if (left === null) return 1;
+      if (right === null) return -1;
+      return (left - right) * direction;
+    }
+
+    function compareRows(left, right) {
+      let compared = 0;
+      if (state.sortOrder === "context") {
+        compared = compareOptionalText(
+          firstLocation(left.row),
+          firstLocation(right.row)
+        );
+      } else if (state.sortOrder === "occurrences-desc") {
+        compared = compareOptionalNumber(
+          occurrenceCount(left.row),
+          occurrenceCount(right.row),
+          -1
+        );
+      } else if (state.sortOrder === "occurrences-asc") {
+        compared = compareOptionalNumber(
+          occurrenceCount(left.row),
+          occurrenceCount(right.row),
+          1
+        );
+      } else if (state.sortOrder === "source") {
+        compared = compareText(left.row.source_term, right.row.source_term);
+      } else if (state.sortOrder === "status") {
+        compared = (
+          state.document.statuses.indexOf(left.row.status)
+          - state.document.statuses.indexOf(right.row.status)
+        );
+      }
+      if (compared) return compared;
+      return left.index - right.index;
+    }
+
+    function visibleRows() {
+      return state.document.rows
+        .map((row, index) => ({ row, index }))
+        .filter((item) => visible(item.row))
+        .sort(compareRows)
+        .map((item) => item.row);
+    }
+
     function markDirty() {
       state.dirty = true;
       refreshSummary();
@@ -493,7 +573,7 @@
     function renderRows() {
       const tbody = $("#rows");
       tbody.replaceChildren();
-      const shown = state.document.rows.filter(visible);
+      const shown = visibleRows();
       if (!shown.length) {
         const row = make("tr");
         const cell = make("td", "empty", "조건에 맞는 용어가 없습니다.");
@@ -713,8 +793,12 @@
       state.categoryFilter = event.target.value;
       renderRows();
     });
+    $("#sort-order").addEventListener("change", (event) => {
+      state.sortOrder = event.target.value;
+      renderRows();
+    });
     $("#select-visible").addEventListener("change", (event) => {
-      state.document.rows.filter(visible).forEach((row) => {
+      visibleRows().forEach((row) => {
         if (event.target.checked) state.selected.add(row.row_key);
         else state.selected.delete(row.row_key);
       });
