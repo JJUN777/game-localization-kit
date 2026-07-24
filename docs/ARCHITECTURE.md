@@ -270,6 +270,8 @@ ID·순서·숫자·token·HTML·용어 검증
 - `.env`를 Git에서 제외하고 POSIX 저장 권한을 `0600`으로 제한
 - 원문 준비 job을 단일 daemon worker에서 실행하고 active job 중복 시작 차단
 - job 실행 중 같은 프로젝트의 원본·OCR prompt·삭제 mutation 차단
+- 일부 원본 실패와 전체 원본 실패를 구분하고 provider 오류는 모델·인증·권한·
+  사용량·네트워크 유형별 안전한 사용자 안내로 변환
 - 원본 multipart 요청의 전체 크기·파일 개수·파일명·확장자와 이미지 OCR
   프롬프트의 UTF-8·빈 값·64 KiB 제한 검증
 - 현재 파일 SHA-256을 요구해 동시 저장 충돌 차단

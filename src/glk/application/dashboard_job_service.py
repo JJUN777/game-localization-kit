@@ -75,6 +75,124 @@ def _utc_now() -> str:
     )
 
 
+def _safe_provider_error(errors: list[str], model: str) -> str:
+    """Translate provider details into a safe, actionable user message."""
+    combined = "\n".join(errors).casefold()
+    if any(
+        marker in combined
+        for marker in (
+            "api key not valid",
+            "api_key_invalid",
+            "invalid api key",
+            "unauthenticated",
+            "401 unauthorized",
+        )
+    ):
+        return "Gemini API 키가 올바르지 않습니다. AI 설정에서 키를 확인하세요."
+    if any(
+        marker in combined
+        for marker in (
+            "resource_exhausted",
+            "resource exhausted",
+            "quota",
+            "rate limit",
+            "too many requests",
+            "429",
+        )
+    ):
+        return (
+            "Gemini API 사용량 한도를 초과했습니다. "
+            "사용량 또는 결제 설정을 확인한 뒤 다시 시도하세요."
+        )
+    if any(
+        marker in combined
+        for marker in (
+            "permission_denied",
+            "permission denied",
+            "403 forbidden",
+            "403 permission",
+        )
+    ):
+        return (
+            "Gemini API 호출 권한이 없습니다. "
+            "API 키 권한과 Google AI 프로젝트 설정을 확인하세요."
+        )
+    if any(
+        marker in combined
+        for marker in (
+            "not_found",
+            "not found for api version",
+            "not supported for generatecontent",
+            "model was not found",
+            "404 not found",
+        )
+    ):
+        return (
+            f"선택한 Gemini 모델 '{model}'을 사용할 수 없습니다. "
+            "AI 설정에서 모델을 확인하세요."
+        )
+    if any(
+        marker in combined
+        for marker in (
+            "timed out",
+            "timeout",
+            "connection error",
+            "connection refused",
+            "name resolution",
+            "network",
+        )
+    ):
+        return (
+            "Gemini API에 연결하지 못했습니다. "
+            "네트워크 연결을 확인한 뒤 다시 시도하세요."
+        )
+    if any(
+        marker in combined
+        for marker in (
+            "empty ocr response",
+            "empty layout response",
+            "empty response",
+        )
+    ):
+        return "Gemini가 빈 응답을 반환했습니다. 다시 시도하세요."
+    if any(
+        marker in combined
+        for marker in (
+            "json",
+            "schema",
+            "fragment validation",
+            "non-object",
+        )
+    ):
+        return "Gemini 응답 형식을 검증하지 못했습니다. 다시 시도하세요."
+    return "원본을 처리하지 못했습니다. 원본 파일을 확인한 뒤 다시 시도하세요."
+
+
+def _acquisition_failure_message(
+    acquisition: dict[str, Any],
+    *,
+    model: str,
+    total: int,
+    all_failed: bool,
+) -> str:
+    failures = acquisition.get("failures")
+    failure_items = (
+        list(failures) if isinstance(failures, (list, tuple)) else []
+    )
+    errors = [
+        str(item.get("error"))
+        for item in failure_items
+        if isinstance(item, dict) and item.get("error")
+    ]
+    detail = _safe_provider_error(errors, model)
+    if all_failed:
+        return detail
+    failed_count = len(failure_items)
+    if total > 0 and failed_count > 0:
+        return f"전체 {total}개 중 {failed_count}개 처리에 실패했습니다. {detail}"
+    return f"일부 원본 처리에 실패했습니다. {detail}"
+
+
 def _registered_source_type(project_id: str, workspace_root: str | Path) -> str:
     location = load_workspace_project_id(project_id, workspace_root)
     if is_pdf_source_file(location.manifest.source_file):
@@ -147,12 +265,30 @@ def run_registered_source_pipeline(
         )
 
     progress("원문 획득 결과를 확인하고 있습니다.", total, total)
+    acquisition_data = acquisition.to_dict()
     if not acquisition.ok:
+        successful_values = acquisition_data.get(
+            "successful_pages"
+            if source_type == "pdf"
+            else "successful_images"
+        )
+        successful_count = (
+            len(successful_values)
+            if isinstance(successful_values, (list, tuple))
+            else 0
+        )
+        all_failed = total > 0 and successful_count == 0
         return {
             "ok": False,
-            "status": "partial",
+            "status": "failed" if all_failed else "partial",
+            "error": _acquisition_failure_message(
+                acquisition_data,
+                model=model,
+                total=total,
+                all_failed=all_failed,
+            ),
             "source_type": source_type,
-            "acquisition": acquisition.to_dict(),
+            "acquisition": acquisition_data,
             "segmentation": None,
             "qa": None,
         }
@@ -172,7 +308,7 @@ def run_registered_source_pipeline(
         "ok": True,
         "status": "succeeded",
         "source_type": source_type,
-        "acquisition": acquisition.to_dict(),
+        "acquisition": acquisition_data,
         "segmentation": segmentation.to_dict(),
         "qa": qa.to_dict(),
     }
@@ -204,6 +340,60 @@ class DashboardJobManager:
     def _persist(self, job: DashboardSourceJob) -> None:
         write_json_atomic(self._state_path(job.project_id), job.to_dict())
 
+    def _upgrade_acquisition_failure(
+        self,
+        job: DashboardSourceJob,
+    ) -> bool:
+        if job.status not in {"partial", "failed"} or not job.result:
+            return False
+        acquisition = job.result.get("acquisition")
+        if not isinstance(acquisition, dict):
+            return False
+        failures = acquisition.get("failures")
+        if not isinstance(failures, list) or not failures:
+            return False
+        selected_key = (
+            "selected_pages" if job.source_type == "pdf" else "selected_images"
+        )
+        successful_key = (
+            "successful_pages"
+            if job.source_type == "pdf"
+            else "successful_images"
+        )
+        selected = acquisition.get(selected_key)
+        successful = acquisition.get(successful_key)
+        if not isinstance(selected, (list, tuple)) or not selected:
+            return False
+        successful_count = (
+            len(successful) if isinstance(successful, (list, tuple)) else 0
+        )
+        all_failed = successful_count == 0
+        status = "failed" if all_failed else "partial"
+        error = _acquisition_failure_message(
+            acquisition,
+            model=job.model,
+            total=len(selected),
+            all_failed=all_failed,
+        )
+        progress_message = (
+            "원문 준비 작업에 실패했습니다."
+            if all_failed
+            else "일부 원본 처리에 실패했습니다."
+        )
+        if (
+            job.status == status
+            and job.error == error
+            and job.progress_message == progress_message
+        ):
+            return False
+        job.status = status
+        job.result["status"] = status
+        job.result["error"] = error
+        job.error = error
+        job.progress_message = progress_message
+        job.updated_at = _utc_now()
+        return True
+
     def _load_records(self) -> None:
         if not self.workspace_root.is_dir():
             return
@@ -213,6 +403,7 @@ class DashboardJobManager:
             try:
                 value = json.loads(state_path.read_text(encoding="utf-8"))
                 job = DashboardSourceJob(**value)
+                changed = False
                 if job.status in ACTIVE_JOB_STATUSES:
                     now = _utc_now()
                     job.status = "interrupted"
@@ -222,6 +413,10 @@ class DashboardJobManager:
                     job.error = "Dashboard process stopped before job completion."
                     job.finished_at = now
                     job.updated_at = now
+                    changed = True
+                if self._upgrade_acquisition_failure(job):
+                    changed = True
+                if changed:
                     write_json_atomic(state_path, job.to_dict())
                 if job.status not in TERMINAL_JOB_STATUSES:
                     continue
@@ -346,14 +541,23 @@ class DashboardJobManager:
                 report,
             )
             status = str(result.get("status") or "")
-            if status not in {"succeeded", "partial"}:
+            if status not in {"succeeded", "partial", "failed"}:
                 raise DashboardJobError(
                     "Source job runner returned an invalid terminal status."
                 )
+            error_value = result.get("error")
             error = (
-                "일부 원본 처리에 실패했습니다. 결과를 확인한 뒤 다시 시도하세요."
-                if status == "partial"
-                else None
+                str(error_value)
+                if status in {"partial", "failed"} and error_value
+                else (
+                    "일부 원본 처리에 실패했습니다. 다시 시도하세요."
+                    if status == "partial"
+                    else (
+                        "원문 준비 작업에 실패했습니다. 다시 시도하세요."
+                        if status == "failed"
+                        else None
+                    )
+                )
             )
         except Exception as caught:
             result = None

@@ -145,6 +145,66 @@ class DashboardJobManagerTests(unittest.TestCase):
         self.assertIn("종료", job["progress_message"])
         manager.close()
 
+    def test_upgrades_a_saved_generic_partial_record(self) -> None:
+        state_path = WorkspacePaths(
+            self.location.path
+        ).dashboard_source_job_state
+        state_path.write_text(
+            json.dumps(
+                {
+                    "job_id": "old-partial-job",
+                    "project_id": "background_job",
+                    "source_type": "pdf",
+                    "model": "missing-model",
+                    "status": "partial",
+                    "progress_message": "일부 원본 처리에 실패했습니다.",
+                    "progress_current": 1,
+                    "progress_total": 1,
+                    "result": {
+                        "ok": False,
+                        "status": "partial",
+                        "source_type": "pdf",
+                        "error": None,
+                        "acquisition": {
+                            "selected_pages": [1],
+                            "successful_pages": [],
+                            "failures": [
+                                {
+                                    "page": 1,
+                                    "error": (
+                                        "404 NOT_FOUND: missing-model is not "
+                                        "found for API version v1beta"
+                                    ),
+                                }
+                            ],
+                        },
+                        "segmentation": None,
+                        "qa": None,
+                    },
+                    "error": (
+                        "일부 원본 처리에 실패했습니다. "
+                        "결과를 확인한 뒤 다시 시도하세요."
+                    ),
+                    "created_at": "2026-07-24T00:00:00Z",
+                    "started_at": "2026-07-24T00:00:01Z",
+                    "finished_at": "2026-07-24T00:00:02Z",
+                    "updated_at": "2026-07-24T00:00:02Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        manager = DashboardJobManager(self.workspace_root)
+
+        job = manager.list_jobs()[0]
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("'missing-model'", job["error"])
+        self.assertIn("모델을 확인", job["error"])
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["status"], "failed")
+        self.assertEqual(persisted["result"]["status"], "failed")
+        manager.close()
+
     def test_registered_pipeline_prepares_review_after_pdf_acquisition(
         self,
     ) -> None:
@@ -192,6 +252,140 @@ class DashboardJobManagerTests(unittest.TestCase):
         segment.assert_called_once()
         source_qa.assert_called_once()
         self.assertIn("원문 검수 준비가 완료되었습니다.", messages)
+
+    def test_registered_pipeline_marks_all_provider_failures_as_failed(
+        self,
+    ) -> None:
+        planned = SimpleNamespace(selected_pages=(1, 2))
+        acquisition_data = {
+            "ok": False,
+            "selected_pages": [1, 2],
+            "successful_pages": [],
+            "failures": (
+                {
+                    "page": 1,
+                    "error": (
+                        "404 NOT_FOUND: models/missing-model is not found "
+                        "for API version v1beta"
+                    ),
+                },
+                {
+                    "page": 2,
+                    "error": (
+                        "404 NOT_FOUND: model is not supported for "
+                        "generateContent"
+                    ),
+                },
+            ),
+        }
+        acquisition = SimpleNamespace(
+            ok=False,
+            to_dict=lambda: acquisition_data,
+        )
+        with (
+            patch(
+                "glk.application.dashboard_job_service.extract_project_pdf",
+                side_effect=[planned, acquisition],
+            ),
+            patch(
+                "glk.application.dashboard_job_service.segment_project_source"
+            ) as segment,
+            patch(
+                "glk.application.dashboard_job_service.run_project_source_qa"
+            ) as source_qa,
+        ):
+            result = run_registered_source_pipeline(
+                "background_job",
+                self.workspace_root,
+                "missing-model",
+                lambda message, current, total: None,
+            )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("'missing-model'", result["error"])
+        self.assertIn("모델을 확인", result["error"])
+        self.assertNotIn("v1beta", result["error"])
+        segment.assert_not_called()
+        source_qa.assert_not_called()
+
+    def test_registered_pipeline_keeps_mixed_results_partial(
+        self,
+    ) -> None:
+        planned = SimpleNamespace(selected_pages=(1, 2))
+        acquisition_data = {
+            "ok": False,
+            "selected_pages": [1, 2],
+            "successful_pages": [1],
+            "failures": (
+                {
+                    "page": 2,
+                    "error": "429 RESOURCE_EXHAUSTED: quota exceeded",
+                },
+            ),
+        }
+        acquisition = SimpleNamespace(
+            ok=False,
+            to_dict=lambda: acquisition_data,
+        )
+        with patch(
+            "glk.application.dashboard_job_service.extract_project_pdf",
+            side_effect=[planned, acquisition],
+        ):
+            result = run_registered_source_pipeline(
+                "background_job",
+                self.workspace_root,
+                "gemini-test",
+                lambda message, current, total: None,
+            )
+
+        self.assertEqual(result["status"], "partial")
+        self.assertIn("전체 2개 중 1개", result["error"])
+        self.assertIn("사용량", result["error"])
+
+    def test_manager_preserves_safe_error_for_failed_runner(self) -> None:
+        completed = threading.Event()
+
+        def runner(
+            project_id: str,
+            workspace_root: str | Path,
+            model: str,
+            progress: object,
+        ) -> dict[str, object]:
+            completed.set()
+            return {
+                "ok": False,
+                "status": "failed",
+                "error": "선택한 Gemini 모델을 사용할 수 없습니다.",
+            }
+
+        manager = DashboardJobManager(
+            self.workspace_root,
+            runner=runner,
+        )
+        manager.start_source_job(
+            project_id="background_job",
+            model="missing-model",
+        )
+        self.assertTrue(completed.wait(timeout=2))
+        state_path = WorkspacePaths(
+            self.location.path
+        ).dashboard_source_job_state
+        for _ in range(100):
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            if state["status"] == "failed":
+                break
+            threading.Event().wait(0.01)
+
+        self.assertEqual(state["status"], "failed")
+        self.assertEqual(
+            state["error"],
+            "선택한 Gemini 모델을 사용할 수 없습니다.",
+        )
+        self.assertEqual(
+            state["progress_message"],
+            "원문 준비 작업에 실패했습니다.",
+        )
+        manager.close()
 
 
 if __name__ == "__main__":

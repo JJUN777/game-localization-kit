@@ -1867,7 +1867,7 @@
           dashboard = await api("/api/dashboard");
           const message = completed.status === "succeeded"
             ? "원문 검수 준비가 완료되었습니다."
-            : completed.progress_message;
+            : (completed.error || completed.progress_message);
           showToast(
             message,
             completed.status !== "succeeded",
