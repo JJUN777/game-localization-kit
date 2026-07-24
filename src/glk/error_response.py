@@ -10,6 +10,10 @@ _CODE_MESSAGES = {
     "PROJECT_INIT_FAILED": "프로젝트를 생성하지 못했습니다.",
     "PROJECT_STATUS_FAILED": "프로젝트 상태를 확인하지 못했습니다.",
     "PROJECT_LIST_FAILED": "프로젝트 목록을 불러오지 못했습니다.",
+    "PROJECT_DELETE_FAILED": "프로젝트를 휴지통으로 이동하지 못했습니다.",
+    "SOURCE_REGISTER_FAILED": "프로젝트 원본을 등록하지 못했습니다.",
+    "SOURCE_REPLACE_FAILED": "프로젝트 원본을 교체하지 못했습니다.",
+    "OCR_PROMPT_UPDATE_FAILED": "이미지 OCR 프롬프트를 저장하지 못했습니다.",
     "DASHBOARD_SERVER_FAILED": "통합 대시보드를 열지 못했습니다.",
     "EXTRACTION_FAILED": "PDF 원문 추출에 실패했습니다.",
     "IMAGE_OCR_FAILED": "이미지 OCR에 실패했습니다.",
@@ -96,6 +100,18 @@ def _message_for_detail(detail: str) -> str | None:
         return "PDF 파일을 찾을 수 없습니다. 입력 경로를 확인하세요."
     if "image folder not found" in normalized:
         return "이미지 폴더를 찾을 수 없습니다. 입력 경로를 확인하세요."
+    if "ocr prompt must not be empty" in normalized:
+        return "이미지 OCR 프롬프트를 입력하세요."
+    if "ocr prompt must be 64 kib or smaller" in normalized:
+        return "이미지 OCR 프롬프트는 64 KiB 이하여야 합니다."
+    if "ocr prompt must not contain null bytes" in normalized:
+        return "이미지 OCR 프롬프트에 사용할 수 없는 문자가 포함되어 있습니다."
+    if "ocr prompt is available only for image sources" in normalized:
+        return "OCR 프롬프트는 이미지 원본을 선택했을 때만 사용할 수 있습니다."
+    if "ocr prompt editing requires a registered image source" in normalized:
+        return "이미지 원본이 등록된 프로젝트에서만 OCR 프롬프트를 수정할 수 있습니다."
+    if "ocr prompt editing is unavailable after ocr has started" in normalized:
+        return "OCR이 시작된 뒤에는 프롬프트를 수정할 수 없습니다."
     if "project workspace already exists" in normalized:
         return "같은 프로젝트 ID가 이미 존재합니다. 다른 프로젝트 ID를 입력하세요."
     if "project id is required" in normalized:

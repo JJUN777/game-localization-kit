@@ -2,20 +2,41 @@
 
 from __future__ import annotations
 
+from email import policy
+from email.parser import BytesParser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 import json
 from pathlib import Path
+import re
 import secrets
+from send2trash import send2trash
 from socketserver import TCPServer
+import tempfile
 import threading
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 import webbrowser
 
+from glk.application._io import write_bytes_atomic
 from glk.application.dashboard_service import get_dashboard_document
-from glk.application.project_service import create_project as create_project_workspace
+from glk.application.project_service import (
+    ProjectNotFoundError,
+    create_project as create_project_workspace,
+    load_workspace_project_id,
+)
+from glk.application.source_registration_service import (
+    MAX_OCR_PROMPT_BYTES,
+    SUPPORTED_IMAGE_EXTENSIONS,
+    SourceRegistrationError,
+    project_has_source_files,
+    register_image_sources,
+    register_pdf_source,
+    replace_image_sources,
+    replace_pdf_source,
+    save_project_ocr_prompt,
+)
 from glk.error_response import make_http_error_response
 from glk.infrastructure.glossary_review_server import (
     create_glossary_review_server,
@@ -27,7 +48,19 @@ from glk.infrastructure.translation_review_server import (
 
 
 _MAX_REQUEST_BYTES = 64 * 1024
+_MAX_OCR_PROMPT_REQUEST_BYTES = MAX_OCR_PROMPT_BYTES * 6 + 1024
+_MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+_MAX_UPLOAD_FILES = 200
 _REVIEW_TYPES = {"source", "glossary", "translation"}
+_UNSAFE_UPLOAD_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+}
 _SECURITY_HEADERS = {
     "Cache-Control": "no-store",
     "Content-Security-Policy": (
@@ -84,6 +117,7 @@ class DashboardHttpServer(ThreadingHTTPServer):
             raise DashboardError("Unknown review type.")
         if not project_id.strip():
             raise DashboardError("project_id is required.")
+        location = load_workspace_project_id(project_id, self.workspace_root)
 
         key = (project_id, review_type)
         with self._review_lock:
@@ -100,7 +134,7 @@ class DashboardHttpServer(ThreadingHTTPServer):
                 "translation": create_translation_review_server,
             }
             review_server = factories[review_type](
-                project=project_id,
+                project=location.path,
                 workspace_root=self.workspace_root,
                 port=0,
             )
@@ -181,7 +215,11 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             make_http_error_response(status, detail, code=code).to_dict(),
         )
 
-    def _read_request_json(self) -> dict[str, Any]:
+    def _read_request_json(
+        self,
+        *,
+        max_bytes: int = _MAX_REQUEST_BYTES,
+    ) -> dict[str, Any]:
         content_type = self.headers.get("Content-Type", "")
         if not content_type.casefold().startswith("application/json"):
             raise DashboardError("Content-Type must be application/json.")
@@ -189,7 +227,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError as error:
             raise DashboardError("Invalid Content-Length.") from error
-        if length <= 0 or length > _MAX_REQUEST_BYTES:
+        if length <= 0 or length > max_bytes:
             raise DashboardError("Request body size is invalid.")
         try:
             value = json.loads(self.rfile.read(length).decode("utf-8"))
@@ -200,6 +238,294 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         if not isinstance(value, dict):
             raise DashboardError("Request body must be a JSON object.")
         return value
+
+    def _read_source_upload(
+        self,
+    ) -> tuple[str, list[tuple[str, bytes]], str | None]:
+        content_type = self.headers.get("Content-Type", "")
+        if (
+            "\r" in content_type
+            or "\n" in content_type
+            or not content_type.casefold().startswith("multipart/form-data")
+        ):
+            raise DashboardError(
+                "Content-Type must be multipart/form-data."
+            )
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as error:
+            raise DashboardError("Invalid Content-Length.") from error
+        if length <= 0 or length > _MAX_UPLOAD_BYTES:
+            raise DashboardError(
+                "Upload body size must be between 1 byte and 256 MiB."
+            )
+
+        envelope = (
+            f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n"
+        ).encode("ascii") + self.rfile.read(length)
+        message = BytesParser(policy=policy.default).parsebytes(envelope)
+        if not message.is_multipart():
+            raise DashboardError("Upload body must be valid multipart data.")
+
+        source_types: list[str] = []
+        ocr_prompts: list[str] = []
+        files: list[tuple[str, bytes]] = []
+        seen_names: set[str] = set()
+        for part in message.walk():
+            if part.is_multipart():
+                continue
+            if part.get_content_disposition() != "form-data":
+                raise DashboardError("Upload part must use form-data.")
+            field_name = part.get_param(
+                "name",
+                header="content-disposition",
+            )
+            payload = part.get_payload(decode=True)
+            if not isinstance(payload, bytes):
+                raise DashboardError("Upload part has invalid content.")
+            filename = part.get_filename()
+            if field_name in {"source_type", "ocr_prompt"} and filename is None:
+                try:
+                    text = payload.decode(
+                        part.get_content_charset() or "utf-8"
+                    )
+                except (LookupError, UnicodeDecodeError) as error:
+                    raise DashboardError(
+                        f"{field_name} must be UTF-8 text."
+                    ) from error
+                if field_name == "source_type":
+                    source_types.append(text.strip())
+                else:
+                    ocr_prompts.append(text)
+                continue
+            if field_name != "files" or filename is None:
+                raise DashboardError("Upload contains an unknown form field.")
+
+            safe_name = filename.strip()
+            stem = Path(safe_name).stem.upper()
+            if (
+                not safe_name
+                or len(safe_name) > 240
+                or safe_name in {".", ".."}
+                or safe_name.endswith((".", " "))
+                or _UNSAFE_UPLOAD_NAME.search(safe_name)
+                or stem in _WINDOWS_RESERVED_NAMES
+            ):
+                raise DashboardError(
+                    f"Upload filename is not portable: {filename}"
+                )
+            name_key = safe_name.casefold()
+            if name_key in seen_names:
+                raise DashboardError(
+                    f"Upload contains a duplicate filename: {safe_name}"
+                )
+            if not payload:
+                raise DashboardError(
+                    f"Uploaded file is empty: {safe_name}"
+                )
+            seen_names.add(name_key)
+            files.append((safe_name, payload))
+            if len(files) > _MAX_UPLOAD_FILES:
+                raise DashboardError(
+                    f"Upload supports at most {_MAX_UPLOAD_FILES} files."
+                )
+
+        if len(source_types) != 1 or source_types[0] not in {"pdf", "images"}:
+            raise DashboardError("source_type must be pdf or images.")
+        if not files:
+            raise DashboardError("Select at least one source file.")
+        source_type = source_types[0]
+        if source_type == "pdf":
+            if ocr_prompts:
+                raise DashboardError(
+                    "OCR prompt is available only for image sources."
+                )
+            if len(files) != 1 or Path(files[0][0]).suffix.casefold() != ".pdf":
+                raise DashboardError("Select exactly one PDF file.")
+            if b"%PDF-" not in files[0][1][:1024]:
+                raise DashboardError("The selected file is not a valid PDF.")
+        else:
+            unsupported = [
+                name
+                for name, _ in files
+                if Path(name).suffix.casefold()
+                not in SUPPORTED_IMAGE_EXTENSIONS
+            ]
+            if unsupported:
+                raise DashboardError(
+                    "Unsupported image file: " + ", ".join(unsupported[:3])
+                )
+        if len(ocr_prompts) > 1:
+            raise DashboardError("Upload must contain at most one OCR prompt.")
+        return source_type, files, ocr_prompts[0] if ocr_prompts else None
+
+    def _register_uploaded_source(
+        self,
+        project_id: str,
+        source_type: str,
+        uploads: list[tuple[str, bytes]],
+        ocr_prompt: str | None,
+        *,
+        replace: bool = False,
+    ) -> dict[str, Any]:
+        location = load_workspace_project_id(
+            project_id,
+            self.server.workspace_root,
+        )
+        if not replace and (
+            location.manifest.source_file is not None
+            or project_has_source_files(location)
+        ):
+            raise SourceRegistrationError(
+                "Project already has source files. Use source replacement "
+                "before extraction or OCR starts."
+            )
+
+        with tempfile.TemporaryDirectory(prefix="glk-upload-") as temporary:
+            upload_root = Path(temporary)
+            upload_paths: list[Path] = []
+            registered_files: tuple[Path, ...]
+            for filename, content in uploads:
+                upload_path = upload_root / filename
+                write_bytes_atomic(upload_path, content)
+                upload_paths.append(upload_path)
+
+            if source_type == "pdf":
+                registered_pdf = (
+                    replace_pdf_source(location, upload_paths[0])
+                    if replace
+                    else register_pdf_source(location, upload_paths[0])
+                )
+                registered_location = registered_pdf.location
+                registered_files = (registered_pdf.path,)
+            else:
+                registered_images = (
+                    replace_image_sources(
+                        location,
+                        upload_root,
+                        upload_paths,
+                        ocr_prompt=ocr_prompt,
+                    )
+                    if replace
+                    else register_image_sources(
+                        location,
+                        upload_root,
+                        upload_paths,
+                        ocr_prompt=ocr_prompt,
+                    )
+                )
+                registered_location = registered_images.location
+                registered_files = registered_images.files
+
+        return {
+            "replaced": replace,
+            "source_type": source_type,
+            "source_file": registered_location.manifest.source_file,
+            "ocr_prompt_updated": (
+                source_type == "images" and ocr_prompt is not None
+            ),
+            "files": [
+                path.relative_to(registered_location.path).as_posix()
+                for path in registered_files
+            ],
+        }
+
+    @staticmethod
+    def _source_upload_project_id(path: str) -> str | None:
+        prefix = "/api/projects/"
+        suffix = "/source"
+        if (
+            not path.startswith(prefix)
+            or not path.endswith(suffix)
+            or path == prefix + suffix.lstrip("/")
+        ):
+            return None
+        return unquote(path[len(prefix) : -len(suffix)])
+
+    @staticmethod
+    def _ocr_prompt_project_id(path: str) -> str | None:
+        prefix = "/api/projects/"
+        suffix = "/ocr-prompt"
+        if (
+            not path.startswith(prefix)
+            or not path.endswith(suffix)
+            or path == prefix + suffix.lstrip("/")
+        ):
+            return None
+        return unquote(path[len(prefix) : -len(suffix)])
+
+    def _handle_source_upload(
+        self,
+        path: str,
+        *,
+        replace: bool,
+    ) -> None:
+        upload_project_id = self._source_upload_project_id(path)
+        error_code = (
+            "SOURCE_REPLACE_FAILED"
+            if replace
+            else "SOURCE_REGISTER_FAILED"
+        )
+        if upload_project_id is None:
+            self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
+            return
+        if not self._api_authorized():
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Invalid review session.",
+            )
+            return
+        if (
+            not upload_project_id
+            or "/" in upload_project_id
+            or "\\" in upload_project_id
+        ):
+            self._send_error_json(
+                HTTPStatus.BAD_REQUEST,
+                "Project ID must not contain path separators.",
+                code=error_code,
+            )
+            return
+        try:
+            source_type, uploads, ocr_prompt = self._read_source_upload()
+            with self.server.mutation_lock:
+                source = self._register_uploaded_source(
+                    upload_project_id,
+                    source_type,
+                    uploads,
+                    ocr_prompt,
+                    replace=replace,
+                )
+        except ProjectNotFoundError as error:
+            self._send_error_json(
+                HTTPStatus.NOT_FOUND,
+                error,
+                code="RESOURCE_NOT_FOUND",
+            )
+            return
+        except (
+            DashboardError,
+            SourceRegistrationError,
+            TypeError,
+            ValueError,
+        ) as error:
+            self._send_error_json(
+                HTTPStatus.BAD_REQUEST,
+                error,
+                code=error_code,
+            )
+            return
+        except (OSError, RuntimeError) as error:
+            self._send_error_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                error,
+                code=error_code,
+            )
+            return
+        self._send_json(
+            HTTPStatus.OK if replace else HTTPStatus.CREATED,
+            {"ok": True, "source": source},
+        )
 
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
@@ -250,7 +576,11 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
-        if path not in {"/api/projects", "/api/review/open"}:
+        is_source_upload = self._source_upload_project_id(path) is not None
+        if (
+            path not in {"/api/projects", "/api/review/open"}
+            and not is_source_upload
+        ):
             self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
             return
         if not self._api_authorized():
@@ -258,6 +588,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 HTTPStatus.FORBIDDEN,
                 "Invalid review session.",
             )
+            return
+        if is_source_upload:
+            self._handle_source_upload(path, replace=False)
             return
         try:
             request = self._read_request_json()
@@ -303,6 +636,143 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_error_json(HTTPStatus.BAD_REQUEST, error, code=code)
             return
         self._send_json(HTTPStatus.OK, {"ok": True, "url": url})
+
+    def do_PUT(self) -> None:
+        path = urlsplit(self.path).path
+        self._handle_source_upload(path, replace=True)
+
+    def do_PATCH(self) -> None:
+        path = urlsplit(self.path).path
+        project_id = self._ocr_prompt_project_id(path)
+        if project_id is None:
+            self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
+            return
+        if not self._api_authorized():
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Invalid review session.",
+            )
+            return
+        if not project_id or "/" in project_id or "\\" in project_id:
+            self._send_error_json(
+                HTTPStatus.BAD_REQUEST,
+                "Project ID must not contain path separators.",
+                code="OCR_PROMPT_UPDATE_FAILED",
+            )
+            return
+        try:
+            request = self._read_request_json(
+                max_bytes=_MAX_OCR_PROMPT_REQUEST_BYTES,
+            )
+            ocr_prompt = request.get("ocr_prompt")
+            if not isinstance(ocr_prompt, str):
+                raise DashboardError("ocr_prompt must be a string.")
+            with self.server.mutation_lock:
+                location = load_workspace_project_id(
+                    project_id,
+                    self.server.workspace_root,
+                )
+                prompt_path = save_project_ocr_prompt(
+                    location,
+                    ocr_prompt,
+                )
+        except ProjectNotFoundError as error:
+            self._send_error_json(
+                HTTPStatus.NOT_FOUND,
+                error,
+                code="RESOURCE_NOT_FOUND",
+            )
+            return
+        except (
+            DashboardError,
+            SourceRegistrationError,
+            TypeError,
+            ValueError,
+        ) as error:
+            self._send_error_json(
+                HTTPStatus.BAD_REQUEST,
+                error,
+                code="OCR_PROMPT_UPDATE_FAILED",
+            )
+            return
+        except (OSError, RuntimeError) as error:
+            self._send_error_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                error,
+                code="OCR_PROMPT_UPDATE_FAILED",
+            )
+            return
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "ocr_prompt": {
+                    "updated": True,
+                    "path": prompt_path.relative_to(location.path).as_posix(),
+                },
+            },
+        )
+
+    def do_DELETE(self) -> None:
+        path = urlsplit(self.path).path
+        prefix = "/api/projects/"
+        if not path.startswith(prefix) or path == prefix:
+            self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
+            return
+        if not self._api_authorized():
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Invalid review session.",
+            )
+            return
+
+        project_id = unquote(path[len(prefix) :])
+        if "/" in project_id or "\\" in project_id:
+            self._send_error_json(
+                HTTPStatus.BAD_REQUEST,
+                "Project ID must not contain path separators.",
+                code="PROJECT_DELETE_FAILED",
+            )
+            return
+        try:
+            with self.server.mutation_lock:
+                location = load_workspace_project_id(
+                    project_id,
+                    self.server.workspace_root,
+                )
+                send2trash(str(location.path))
+        except ProjectNotFoundError as error:
+            self._send_error_json(
+                HTTPStatus.NOT_FOUND,
+                error,
+                code="RESOURCE_NOT_FOUND",
+            )
+            return
+        except (DashboardError, TypeError, ValueError) as error:
+            self._send_error_json(
+                HTTPStatus.BAD_REQUEST,
+                error,
+                code="PROJECT_DELETE_FAILED",
+            )
+            return
+        except (OSError, RuntimeError) as error:
+            self._send_error_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                error,
+                code="PROJECT_DELETE_FAILED",
+            )
+            return
+
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "project": {
+                    "project_id": location.manifest.project_id,
+                    "name": location.manifest.name,
+                },
+            },
+        )
 
 
 def create_dashboard_server(

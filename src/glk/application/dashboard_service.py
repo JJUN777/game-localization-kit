@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from glk.application.project_service import inspect_project, list_projects
+from glk.application.source_registration_service import discover_source_images
+from glk.domain.workspace import WorkspacePaths, is_pdf_source_file
 
 
 DASHBOARD_SCHEMA_VERSION = 1
@@ -87,20 +89,86 @@ def _review_availability(pipeline: dict[str, Any]) -> dict[str, ReviewAvailabili
     }
 
 
+def _project_source_files(summary: Any, status: dict[str, Any]) -> list[str]:
+    paths = WorkspacePaths(Path(summary.path))
+    source_type = summary.source_type
+    files: list[str] = []
+    if source_type in {"pdf", "mixed"}:
+        source_file = status["manifest"].get("source_file")
+        if (
+            isinstance(source_file, str)
+            and is_pdf_source_file(source_file)
+            and (paths.root / Path(source_file)).is_file()
+        ):
+            files.append(Path(source_file).name)
+        else:
+            files.extend(
+                path.name
+                for path in sorted(
+                    paths.input_pdf_dir.glob("*.pdf"),
+                    key=lambda value: value.name.casefold(),
+                )
+                if path.is_file()
+            )
+    if source_type in {"images", "mixed"}:
+        files.extend(
+            path.relative_to(paths.input_images_dir).as_posix()
+            for path in discover_source_images(paths.input_images_dir)
+        )
+    return files
+
+
+def _project_ocr_prompt(summary: Any) -> str:
+    prompt_path = WorkspacePaths(Path(summary.path)).input_ocr_prompt
+    if not prompt_path.is_file():
+        return ""
+    return prompt_path.read_text(encoding="utf-8")
+
+
 def _project_document(summary: Any, status: dict[str, Any]) -> dict[str, Any]:
     pipeline = status["pipeline"]
     reviews = _review_availability(pipeline)
+    replacement_allowed = bool(
+        summary.source_type
+        and not pipeline["source_processing_started"]
+    )
+    if replacement_allowed:
+        replacement_reason = "원문 추출·OCR 시작 전까지 원본을 교체할 수 있습니다."
+    elif summary.source_type:
+        replacement_reason = "원문 추출·OCR이 시작되어 원본을 교체할 수 없습니다."
+    else:
+        replacement_reason = "먼저 PDF 또는 이미지 원본을 등록하세요."
+    prompt_edit_allowed = bool(
+        summary.source_type == "images"
+        and not pipeline["source_processing_started"]
+    )
+    if prompt_edit_allowed:
+        prompt_edit_reason = "OCR 시작 전까지 공통 프롬프트를 수정할 수 있습니다."
+    elif summary.source_type == "images":
+        prompt_edit_reason = "OCR이 시작되어 공통 프롬프트를 수정할 수 없습니다."
+    else:
+        prompt_edit_reason = "이미지 원본 프로젝트에서만 사용할 수 있습니다."
     return {
         "project_id": summary.project_id,
         "name": summary.name,
         "path": summary.path,
         "source_type": summary.source_type,
+        "source_files": _project_source_files(summary, status),
+        "ocr_prompt": _project_ocr_prompt(summary),
         "stage": summary.stage,
         "stage_label": _STAGE_LABELS.get(summary.stage, summary.stage),
         "progress": _STAGE_PROGRESS.get(summary.stage, 0),
         "workspace_ready": bool(status["ok"]),
         "missing_paths": list(status["missing_paths"]),
         "pipeline": dict(pipeline),
+        "source_replacement": {
+            "allowed": replacement_allowed,
+            "reason": replacement_reason,
+        },
+        "ocr_prompt_edit": {
+            "allowed": prompt_edit_allowed,
+            "reason": prompt_edit_reason,
+        },
         "reviews": {
             name: availability.to_dict()
             for name, availability in reviews.items()

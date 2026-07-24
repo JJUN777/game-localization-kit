@@ -2,7 +2,7 @@
 
 이 문서는 `feature/local-dashboard` 브랜치의 임시 설계 기준, 구현 상태와 작업 재개 방법을 함께 기록합니다. 다른 컴퓨터에서 이어서 개발할 때 이 문서를 먼저 확인하고, 브랜치를 `main`에 머지하기 직전에 삭제합니다.
 
-**현재 범위**: GUI 2.1단계 완료 — 다음 작업은 프로젝트 삭제
+**현재 범위**: GUI 2.2단계 완료 — 다음 작업은 background job 설계
 
 ---
 
@@ -14,6 +14,8 @@
 flowchart LR
     CLI[glk ui] --> DASH[localhost 대시보드]
     DASH --> CREATE[새 프로젝트 생성]
+    DASH --> REGISTER[PDF·이미지 원본 등록]
+    DASH --> DELETE[프로젝트를 휴지통으로 이동]
     DASH --> SNAPSHOT[프로젝트 상태 조회]
     SNAPSHOT --> CARDS[목록·단계·진행률 표시]
     CARDS --> SOURCE[원문 검수]
@@ -37,7 +39,9 @@ flowchart LR
 - 검수 내용을 대시보드 카드에서 직접 수정
 - 데스크톱 앱 패키징
 
-프로젝트 카드와 상태 표시는 읽기 전용이며, `새 프로젝트` 제출 때만 새 workspace를 생성합니다. 기존 검수 화면은 편집 기능을 그대로 제공합니다.
+프로젝트 카드의 상태 표시는 읽기 전용입니다. 프로젝트 생성, 최초 원본 등록과
+휴지통 이동만 대시보드에서 workspace를 변경하며, 기존 검수 화면은 편집 기능을
+그대로 제공합니다.
 
 ### 2.1단계에서 추가한 일
 
@@ -47,6 +51,20 @@ flowchart LR
 - 기존 `create_project()`를 통해 CLI와 동일한 workspace 구조를 생성합니다.
 - 생성 직후 검색·필터를 초기화하고 새 프로젝트 카드를 표시합니다.
 - 같은 ID가 이미 있거나 입력이 유효하지 않으면 한글 오류를 표시합니다.
+- 프로젝트 카드의 `×` 버튼에서 이름과 ID를 다시 확인한 뒤 프로젝트 폴더 전체를 운영체제 휴지통으로 이동합니다.
+- 휴지통 이동 성공 후 페이지를 새로 불러와 카드와 요약을 함께 갱신합니다.
+
+### 2.2단계에서 추가한 일
+
+- 원본이 없는 프로젝트 카드에서 `PDF 또는 이미지 원본 등록` 모달을 엽니다.
+- PDF 한 개 또는 PNG·JPG·JPEG·WebP 이미지 여러 장을 선택합니다.
+- 등록 파일은 기존 CLI와 같은 application service를 통해 `01_input`에 복사하고 `project.json`을 갱신합니다.
+- 이미지 파일은 자연순으로 정렬하며 한 번에 최대 200개, 전체 요청은 256 MiB로 제한합니다.
+- 등록 단계에서는 추출·OCR·Gemini 호출을 실행하지 않습니다.
+- 원문 추출·OCR 시작 전에는 기존 원본을 삭제하고 새 파일로 교체할 수 있습니다.
+- 원문 처리가 시작되면 교체 버튼을 숨기고 서버 API에서도 교체를 거부합니다.
+- 이미지 원본 교체 때 프로젝트 공통 `ocr_prompt.txt`는 유지합니다.
+- 카드에 PDF 파일명 또는 첫 이미지 파일명과 전체 개수를 표시하고, 이미지가 여러 장이면 전체 파일 목록 모달을 제공합니다.
 
 ---
 
@@ -74,13 +92,14 @@ glk ui --workspace-root 다른/workspaces
 | 파일 | 책임 |
 |---|---|
 | `src/glk/application/dashboard_service.py` | 프로젝트 목록과 상태를 UI용 read model로 조합 |
+| `src/glk/application/source_registration_service.py` | PDF·이미지 원본 검증, 정렬, 복사와 manifest 등록 |
 | `src/glk/infrastructure/dashboard_server.py` | localhost HTTP API, 보안 검사, 검수 서버 수명주기 |
 | `src/glk/web/dashboard.html` | 외부 의존성 없는 반응형 HTML/CSS/JavaScript 화면 |
 | `src/glk/cli.py` | `glk ui` 인자와 서버 진입점 |
 | `tests/test_dashboard_service.py` | 빈 workspace와 프로젝트 상태 view model 검증 |
 | `tests/test_dashboard_server.py` | 페이지·API 보호와 검수 화면 실행 검증 |
 
-대시보드는 workspace 파일을 직접 해석하거나 수정하지 않습니다. `project_service`의 `list_projects()`와 `inspect_project()`를 통해 상태를 읽고, 검수 화면을 열 때도 기존 `create_*_review_server()`를 재사용합니다.
+대시보드는 workspace 파일을 직접 해석하거나 수정하지 않습니다. 프로젝트 조회·생성·선택 검증은 `project_service`를 거치고, 원본 등록은 `source_registration_service`, 삭제는 검증된 프로젝트 경로와 `send2trash`를 사용합니다. 검수 화면을 열 때도 기존 `create_*_review_server()`를 재사용합니다.
 
 ---
 
@@ -106,6 +125,7 @@ glk ui --workspace-root 다른/workspaces
       "project_id": "primal",
       "name": "Primal Rulebook",
       "source_type": "pdf",
+      "source_files": ["rulebook.pdf"],
       "stage": "source_review",
       "stage_label": "원문 검수",
       "progress": 25,
@@ -175,6 +195,77 @@ glk ui --workspace-root 다른/workspaces
 }
 ```
 
+### `POST|PUT /api/projects/{project_id}/source`
+
+`multipart/form-data` 요청으로 `source_type`, `files`와 이미지일 때 선택적인
+`ocr_prompt`를 전달합니다.
+
+- `POST`: 원본이 없는 프로젝트에 최초 등록
+- `PUT`: 원문 추출·OCR 시작 전 기존 원본 교체
+
+- `source_type=pdf`: `.pdf` 한 개
+- `source_type=images`: `.png`, `.jpg`, `.jpeg`, `.webp` 최대 200개
+- `ocr_prompt`: 이미지 프로젝트 공통 OCR 지침, UTF-8 기준 최대 64 KiB
+- 전체 요청 크기: 최대 256 MiB
+
+응답:
+
+```json
+{
+  "ok": true,
+  "source": {
+    "replaced": true,
+    "source_type": "images",
+    "source_file": "01_input/images",
+    "ocr_prompt_updated": true,
+    "files": [
+      "01_input/images/card-2.png",
+      "01_input/images/card-10.png"
+    ]
+  }
+}
+```
+
+교체는 기존 PDF 또는 이미지 세트를 삭제하고 새 파일만 남깁니다. 이미지 공통
+`ocr_prompt.txt`는 보존하며, 새 파일 등록에 실패하면 기존 입력과 manifest를
+복구합니다. 원문 처리 흔적이 있으면 `PUT`을 거부합니다. 등록·교체 성공 후
+대시보드는 상태를 다시 조회하지만 추출·OCR은 시작하지 않습니다.
+
+### `PATCH /api/projects/{project_id}/ocr-prompt`
+
+이미지 원본을 유지한 채 프로젝트 공통 OCR 프롬프트만 수정합니다.
+
+```json
+{
+  "ocr_prompt": "프로젝트별 아이콘과 읽기 순서 지침"
+}
+```
+
+등록된 이미지 원본이 있고 OCR이 아직 시작되지 않은 프로젝트에서만 허용합니다.
+저장 성공 시 `01_input/images/ocr_prompt.txt`만 원자적으로 교체하며 PDF·이미지
+원본과 manifest는 변경하지 않습니다.
+
+### `DELETE /api/projects/{project_id}`
+
+프로젝트 ID를 URL 경로에 전달합니다. 서버는 정규화된 ID인지, 대상이 설정된
+workspace 바로 아래의 프로젝트인지, `project.json`의 ID와 일치하는지 다시
+검증합니다.
+
+응답:
+
+```json
+{
+  "ok": true,
+  "project": {
+    "project_id": "primal",
+    "name": "Primal Rulebook"
+  }
+}
+```
+
+성공하면 프로젝트 폴더 전체가 운영체제 휴지통으로 이동합니다. 영구 삭제와
+휴지통 비우기는 제공하지 않습니다.
+
 ---
 
 ## 보안과 수명주기
@@ -182,53 +273,28 @@ glk ui --workspace-root 다른/workspaces
 - 대시보드와 하위 검수 서버는 `127.0.0.1`에만 bind합니다.
 - API는 임의 세션 token, `Host`, `Origin`을 함께 검사합니다.
 - HTML, CSS, JavaScript는 패키지 내부 파일만 사용하며 외부 CDN을 호출하지 않습니다.
-- 요청 크기를 제한하고 JSON object 형식만 허용합니다.
+- JSON 요청과 multipart 업로드의 크기·형식·파일 개수·확장자를 제한합니다.
 - 브라우저에 표시하는 오류는 공통 `code/message/detail` 구조를 사용합니다.
 - 대시보드 서버 종료 시 대시보드가 시작한 하위 검수 서버에 `shutdown()`과 `server_close()`를 호출합니다.
 
 ---
 
-## 다음 단계 후보
+## 다음 단계
 
-### 다음 작업: 프로젝트 삭제
+### 다음 작업: background job
 
-현재 생성·필터 변경을 먼저 커밋한 뒤 별도 커밋으로 구현합니다.
+추출·OCR·번역 같은 장시간 작업을 background job으로
+실행하고 진행률과 로그를 표시합니다. 브라우저 요청 thread에서 LLM 작업을
+직접 실행하지 않으며, 취소·재시도·중복 실행 방지 정책을 먼저 정해야 합니다.
+첫 구현 범위는 등록된 원본의 PDF 추출 또는 이미지 OCR을 시작하고, 실행 중
+상태와 완료·실패 결과를 대시보드에서 확인하는 흐름입니다.
 
-확정 범위:
+### 프로젝트 삭제에서 유지할 제한
 
-1. 프로젝트 카드 우측 상단에 접근 가능한 `×` 버튼을 표시합니다.
-2. 클릭하면 프로젝트 이름과 ID를 보여주는 확인 모달을 엽니다.
-3. 확인 버튼은 `휴지통으로 이동`으로 표시하며 즉시 영구 삭제하지 않습니다.
-4. `DELETE /api/projects/{project_id}`가 기존 localhost token·Host·Origin 검사를 그대로 적용합니다.
-5. 서버는 ID로 프로젝트를 다시 조회하고 대상이 workspace 바로 아래의 유효한 프로젝트인지 검증한 뒤 운영체제 휴지통으로 이동합니다.
-6. Windows와 macOS 휴지통을 동일하게 지원하기 위해 `send2trash>=1.8,<2` 의존성 사용을 검토합니다.
-7. 삭제 성공 후 브라우저에서 `window.location.reload()`를 실행해 목록과 요약을 전체 갱신합니다.
-8. 삭제 중에는 버튼을 비활성화하고 실패하면 기존 한글 오류 toast를 표시합니다.
-
-제외 범위:
-
-- 프로젝트별 검수 서버를 찾아 자동 종료하는 별도 로직은 추가하지 않습니다.
+- 프로젝트별 검수 서버를 찾아 자동 종료하는 별도 로직은 추가하지 않았습니다.
 - 삭제 후 남은 검수 서버가 문제가 되면 사용자가 `glk ui`를 재시작합니다.
 - 휴지통 비우기와 영구 삭제 기능은 제공하지 않습니다.
 - 새 프로젝트 생성 카드에는 삭제 버튼을 표시하지 않습니다.
-
-검증 항목:
-
-- 정상 프로젝트가 휴지통 이동 함수에 정확한 경로로 전달되는지 mock 기반 HTTP 테스트
-- 존재하지 않는 ID, 경로 이탈, 잘못된 요청 및 중복 삭제 거부
-- 삭제 취소 시 API가 호출되지 않는지 확인
-- 삭제 성공 후 전체 새로고침과 카드·요약 갱신 확인
-- macOS·Windows CI 전체 테스트와 Orca 브라우저 확인
-
-### 후속 작업: 원본 등록
-
-프로젝트 삭제 다음 작업은 원본 등록입니다.
-
-1. PDF 한 개 등록
-2. 이미지 여러 장 등록
-3. 원문 입력 종류와 모델·prompt 설정
-
-3단계에서는 추출·OCR·번역 같은 장시간 작업을 background job으로 실행하고 진행률과 로그를 표시합니다. 브라우저 요청 thread에서 LLM 작업을 직접 실행하지 않으며, 취소·재시도·중복 실행 방지 정책을 먼저 정해야 합니다.
 
 ---
 
@@ -275,22 +341,86 @@ glk ui --workspace-root 다른/workspaces
 
 - 카드 `×` → 확인 모달 → 운영체제 휴지통 이동 → 대시보드 전체 새로고침 흐름으로 확정했습니다.
 - 검수 서버 자동 종료와 영구 삭제는 구현 범위에서 제외했습니다.
-- 구현·테스트 기준은 `다음 단계 후보`의 프로젝트 삭제 항목에 기록했으며 소스 구현은 시작하지 않았습니다.
+- 구현·테스트 기준을 당시 다음 단계의 프로젝트 삭제 항목에 기록했으며 소스 구현은 시작하지 않았습니다.
+
+### 2026-07-24 — GUI 2.1 프로젝트 삭제
+
+- 프로젝트 카드에 접근 가능한 삭제 버튼과 프로젝트 이름·ID를 다시 보여주는 확인 모달을 추가했습니다.
+- `DELETE /api/projects/{project_id}`에 기존 token·Host·Origin 검사를 적용했습니다.
+- 프로젝트 ID, workspace 바로 아래 경로와 manifest ID를 서버에서 다시 검증합니다.
+- 검증을 통과한 프로젝트 폴더만 `send2trash`로 운영체제 휴지통에 이동하고, 성공 후 페이지 전체를 새로 불러옵니다.
+- 삭제 실패·존재하지 않는 프로젝트·경로 이탈·중복 요청을 HTTP 테스트로 검증했습니다.
+- Safari에서 삭제 모달과 취소 동작을 확인했으며 테스트용 프로젝트 외의 데이터는 건드리지 않았습니다.
+
+### 2026-07-24 — GUI 2.2 PDF·이미지 원본 등록
+
+- AI 작업과 분리된 `source_registration_service.py`를 추가하고 기존 PDF 추출·이미지 OCR의 등록 로직도 이 service를 재사용하도록 변경했습니다.
+- 원본이 없는 프로젝트에서 PDF 한 개 또는 이미지 여러 장을 선택하는 등록 모달을 추가했습니다.
+- `POST /api/projects/{project_id}/source` multipart API에 기존 token·Host·Origin 검사와 프로젝트 경로 검증을 적용했습니다.
+- 파일명, 형식, 개수, 전체 요청 크기, 이미지 출력명 충돌과 중복 등록을 검증합니다.
+- 등록 성공 후 원본 종류와 파일 목록을 다시 표시하며 추출·OCR·Gemini 호출은 실행하지 않습니다.
+- Orca 내장 브라우저에서 PDF 1개와 이미지 2개를 각각 실제 업로드하고, 등록 후 `PDF`·`IMAGES` 상태와 성공 안내를 확인했습니다.
+- 이미지 등록에서는 역순으로 선택한 파일이 `card-2.png` → `card-10.png` 자연순으로 표시·저장되는 것을 확인했습니다.
+- Orca 접근성 트리에서도 원본 형식 radio를 직접 선택할 수 있도록 전체 선택 영역을 실제 input에 연결했습니다.
+
+### 2026-07-24 — OCR 기본 prompt 일반화
+
+- Elder Scrolls POC 전용 아이콘 30종 prompt를 새 프로젝트의 자동 생성 기본값에서 제거했습니다.
+- `ocr_prompt.txt`는 게임별 아이콘, 읽기 순서와 고유 표기를 사용자가 채우는 게임 중립 템플릿으로 교체했습니다.
+- token 작성 형식은 가상 예시이며 실제 OCR 규칙으로 적용하지 말라고 명시했습니다.
+- 기존 POC prompt는 `elder_scrolls_ocr_prompt.example.txt`로 분리해 잃지 않고 보존했습니다.
+- 프로젝트 생성 테스트에서 중립 템플릿과 POC 예제의 분리를 확인합니다.
+
+### 2026-07-24 — 추출 전 원본 교체
+
+- 원본만 등록되고 추출·OCR이 시작되지 않은 프로젝트 카드에 `원본 교체` 버튼을 추가했습니다.
+- `PUT /api/projects/{project_id}/source`가 기존 원본 전체를 새 PDF 또는 이미지 세트로 교체합니다.
+- 교체 중 기존 입력 폴더를 임시 백업하고 실패하면 원본과 manifest를 복구합니다.
+- 이미지 교체에서도 프로젝트 공통 `ocr_prompt.txt`는 유지하고 기존 이미지별 prompt는 제거합니다.
+- 추출·OCR 또는 이후 단계의 파일이 하나라도 생성되면 UI에서 버튼을 숨기고 API도 교체를 거부합니다.
+- Orca 내장 브라우저에서 등록된 이미지 프로젝트의 `원본 교체` 버튼, 현재 형식 자동 선택, 삭제·유지 범위 안내와 제출 UI를 확인했으며 실제 사용자 원본은 변경하지 않았습니다.
+
+### 2026-07-24 — 등록 원본 파일명 표시
+
+- PDF 프로젝트 카드에는 등록된 PDF 파일명을 한 줄로 표시합니다.
+- 이미지 프로젝트 카드는 `첫 파일명 외 N개`로 요약하고 source badge에 전체 개수를 표시합니다.
+- 이미지가 여러 장이면 `파일 목록` 모달에서 입력 폴더 기준 상대 경로를 자연순으로 확인할 수 있습니다.
+- 원문 처리 전에는 목록 모달에서 바로 `원본 교체`로 이동하고, 처리 후에는 목록 열람만 허용합니다.
+- Orca 내장 브라우저에서 실제 PDF 파일명과 별도 다중 이미지 프로젝트의 badge 개수, 카드 요약, 자연순 파일 목록 모달을 확인했으며 사용자 원본은 변경하지 않았습니다.
+
+### 2026-07-24 — 이미지 OCR 프롬프트 UI 편집
+
+- 이미지 원본을 선택했을 때만 공통 `OCR 프롬프트` 편집 영역을 표시합니다.
+- 새 프로젝트는 자동 생성된 범용 템플릿을, 원본 교체는 현재 저장된 내용을 초기값으로 불러옵니다.
+- `편집 전 내용으로 되돌리기`로 모달을 열었을 때의 프로젝트 값을 복구할 수 있고 UTF-8 byte 수를 실시간 표시합니다.
+- 이미지 등록·교체 요청은 프롬프트를 `01_input/images/ocr_prompt.txt`에 원자적으로 저장합니다.
+- PDF 선택 시 프롬프트 영역과 multipart 필드를 모두 제외합니다.
+- 서버는 빈 프롬프트, NUL 문자, 64 KiB 초과 입력과 PDF용 프롬프트를 거부합니다.
+- Orca 내장 브라우저에서 실제 이미지 프로젝트의 저장값 로드, 복원 버튼, byte 표시와 PDF 전환 시 완전한 숨김을 확인했으며 원본과 프롬프트를 제출·변경하지 않았습니다.
+
+### 2026-07-24 — OCR 프롬프트 단독 수정
+
+- 이미지 프로젝트 카드에 원본 교체와 분리된 `OCR 프롬프트 수정` 버튼을 추가했습니다.
+- 전용 모달은 현재 저장값, 복원 버튼과 UTF-8 byte 수를 제공하며 원본 파일 입력은 요구하지 않습니다.
+- `PATCH /api/projects/{project_id}/ocr-prompt`는 프롬프트 파일만 원자적으로 저장합니다.
+- 이미지 원본이 없거나 PDF 프로젝트인 경우와 OCR 시작 후에는 UI와 API 모두 수정을 허용하지 않습니다.
+- 테스트에서 프롬프트 저장 전후의 등록 이미지 bytes와 manifest가 바뀌지 않는 것을 확인합니다.
+- Orca 내장 브라우저에서 실제 이미지 프로젝트의 전용 버튼, 저장값·복원·byte 표시와 파일 입력이 없는 모달을 확인했으며 사용자 프롬프트는 제출하지 않았습니다.
 
 검증 결과:
 
 ```text
 python -m unittest discover -s tests
-→ 120 tests OK
+→ 141 tests OK
 
 python -m compileall -q src tests
 → OK
 
 Python 3.10 feature grammar parse
-→ src/tests 61 files OK
+→ src/tests 63 files OK
 
 python -m mypy
-→ dashboard 포함 10 files, no issues
+→ dashboard·원본 등록 포함 11 files, no issues
 
 python -m pip check
 → no broken requirements
@@ -345,7 +475,9 @@ glk ui --no-open
 - [x] GUI 1단계 커밋과 push
 - [x] GUI 2.1 프로젝트 생성
 - [x] 프로젝트 삭제 범위와 제외 사항 확정
-- [ ] 프로젝트 삭제 UI·API 구현
-- [ ] GUI 2.2 PDF·이미지 등록 범위 확정
+- [x] 프로젝트 삭제 UI·API 구현
+- [x] GUI 2.2 PDF·이미지 등록 범위 확정
+- [x] GUI 2.2 PDF·이미지 등록 UI·API 구현
+- [ ] GUI 3 background job 범위와 상태 모델 확정
 
 다음 작업자는 이 체크리스트와 `git status`, 최신 커밋을 함께 확인하고 이어서 작업합니다. 구현 범위나 API가 바뀌면 코드와 같은 커밋에서 이 문서의 설계·이력·체크리스트도 갱신합니다.

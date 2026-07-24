@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from io import BytesIO
 import json
 import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+from PIL import Image
 
 from glk.application.project_service import create_project
 from glk.application.source_review_service import prepare_project_source_review
@@ -54,6 +58,8 @@ class DashboardServerTests(unittest.TestCase):
         *,
         method: str = "GET",
         payload: dict[str, object] | None = None,
+        body: bytes | None = None,
+        content_type: str | None = None,
         authorized: bool = True,
         origin: str | None = None,
     ) -> tuple[int, dict[str, object] | str]:
@@ -63,9 +69,15 @@ class DashboardServerTests(unittest.TestCase):
             headers["X-GLK-Token"] = self.server.auth_token
         if origin is not None:
             headers["Origin"] = origin
+        if body is not None and payload is not None:
+            raise AssertionError("Use either payload or body.")
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
+        elif body is not None:
+            data = body
+            if content_type is not None:
+                headers["Content-Type"] = content_type
         request = Request(
             self.server.origin + path,
             data=data,
@@ -84,11 +96,62 @@ class DashboardServerTests(unittest.TestCase):
             finally:
                 error.close()
 
+    @staticmethod
+    def _multipart_upload(
+        source_type: str,
+        files: list[tuple[str, bytes, str]],
+        *,
+        ocr_prompt: str | None = None,
+    ) -> tuple[bytes, str]:
+        boundary = "----glk-dashboard-test-boundary"
+        parts: list[bytes] = [
+            (
+                f"--{boundary}\r\n"
+                'Content-Disposition: form-data; name="source_type"\r\n'
+                "\r\n"
+                f"{source_type}\r\n"
+            ).encode("utf-8")
+        ]
+        if ocr_prompt is not None:
+            parts.append(
+                (
+                    f"--{boundary}\r\n"
+                    'Content-Disposition: form-data; name="ocr_prompt"\r\n'
+                    "Content-Type: text/plain; charset=utf-8\r\n"
+                    "\r\n"
+                    f"{ocr_prompt}\r\n"
+                ).encode("utf-8")
+            )
+        for filename, content, mime_type in files:
+            parts.append(
+                (
+                    f"--{boundary}\r\n"
+                    'Content-Disposition: form-data; name="files"; '
+                    f'filename="{filename}"\r\n'
+                    f"Content-Type: {mime_type}\r\n"
+                    "\r\n"
+                ).encode("utf-8")
+                + content
+                + b"\r\n"
+            )
+        parts.append(f"--{boundary}--\r\n".encode("ascii"))
+        return (
+            b"".join(parts),
+            f"multipart/form-data; boundary={boundary}",
+        )
+
     def test_serves_dashboard_and_protects_api(self) -> None:
         status, html = self._request("/", authorized=False)
         self.assertEqual(status, 200)
         self.assertIn("Game Localization Kit Dashboard", html)
         self.assertIn("data-create-project", html)
+        self.assertIn("data-delete-project", html)
+        self.assertIn("원본 교체", html)
+        self.assertIn("원본 파일 목록", html)
+        self.assertIn("OCR 프롬프트", html)
+        self.assertIn("OCR 프롬프트 수정", html)
+        self.assertIn("편집 전 내용으로 되돌리기", html)
+        self.assertIn("휴지통으로 이동", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
 
         status, unauthorized = self._request(
@@ -148,6 +211,17 @@ class DashboardServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 400)
         self.assertEqual(invalid["code"], "INVALID_REQUEST")
+
+        status, escaped = self._request(
+            "/api/review/open",
+            method="POST",
+            payload={
+                "project_id": "../dashboard_review",
+                "review_type": "source",
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(escaped["code"], "INVALID_REQUEST")
 
     def test_creates_project_and_rejects_duplicate_id(self) -> None:
         status, created = self._request(
@@ -213,6 +287,526 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(missing["code"], "PROJECT_INIT_FAILED")
         self.assertIn("ID를 입력", missing["message"])
+
+    def test_registers_pdf_source_without_running_extraction(self) -> None:
+        create_project(
+            name="Upload PDF",
+            project_id="upload_pdf",
+            workspace_root=self.workspace_root,
+        )
+        body, content_type = self._multipart_upload(
+            "pdf",
+            [
+                (
+                    "rulebook.pdf",
+                    b"%PDF-1.4\nregistered from dashboard\n%%EOF\n",
+                    "application/pdf",
+                )
+            ],
+        )
+
+        status, unauthorized = self._request(
+            "/api/projects/upload_pdf/source",
+            method="POST",
+            body=body,
+            content_type=content_type,
+            authorized=False,
+        )
+        self.assertEqual(status, 403)
+        self.assertFalse(unauthorized["ok"])
+
+        status, uploaded = self._request(
+            "/api/projects/upload_pdf/source",
+            method="POST",
+            body=body,
+            content_type=content_type,
+        )
+
+        self.assertEqual(status, 201)
+        self.assertTrue(uploaded["ok"])
+        self.assertEqual(uploaded["source"]["source_type"], "pdf")
+        self.assertEqual(
+            uploaded["source"]["files"],
+            ["01_input/pdf/rulebook.pdf"],
+        )
+        project_path = self.workspace_root / "upload_pdf"
+        self.assertTrue((project_path / "01_input/pdf/rulebook.pdf").is_file())
+        self.assertFalse(
+            (project_path / ".glk/state/pdf_acquisition.json").exists()
+        )
+
+        status, duplicate = self._request(
+            "/api/projects/upload_pdf/source",
+            method="POST",
+            body=body,
+            content_type=content_type,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(duplicate["code"], "SOURCE_REGISTER_FAILED")
+
+    def test_registers_multiple_images_in_natural_order(self) -> None:
+        create_project(
+            name="Upload Images",
+            project_id="upload_images",
+            workspace_root=self.workspace_root,
+        )
+
+        def png_bytes(color: str) -> bytes:
+            output = BytesIO()
+            Image.new("RGB", (8, 8), color).save(output, format="PNG")
+            return output.getvalue()
+
+        body, content_type = self._multipart_upload(
+            "images",
+            [
+                ("card-10.png", png_bytes("white"), "image/png"),
+                ("card-2.png", png_bytes("black"), "image/png"),
+            ],
+            ocr_prompt="Keep icon names and read title before body.",
+        )
+        status, uploaded = self._request(
+            "/api/projects/upload_images/source",
+            method="POST",
+            body=body,
+            content_type=content_type,
+        )
+
+        self.assertEqual(status, 201)
+        self.assertEqual(
+            uploaded["source"]["files"],
+            [
+                "01_input/images/card-2.png",
+                "01_input/images/card-10.png",
+            ],
+        )
+        self.assertTrue(uploaded["source"]["ocr_prompt_updated"])
+        project_path = self.workspace_root / "upload_images"
+        self.assertTrue(
+            (project_path / "01_input/images/card-2.png").is_file()
+        )
+        self.assertFalse(
+            (project_path / ".glk/state/image_ocr.json").exists()
+        )
+        self.assertEqual(
+            (project_path / "01_input/images/ocr_prompt.txt").read_text(
+                encoding="utf-8"
+            ),
+            "Keep icon names and read title before body.\n",
+        )
+
+    def test_rejects_invalid_ocr_prompt_uploads(self) -> None:
+        create_project(
+            name="Invalid OCR Prompt",
+            project_id="invalid_ocr_prompt",
+            workspace_root=self.workspace_root,
+        )
+        image_output = BytesIO()
+        Image.new("RGB", (8, 8), "white").save(
+            image_output,
+            format="PNG",
+        )
+        image_file = [
+            ("card.png", image_output.getvalue(), "image/png"),
+        ]
+
+        empty_body, empty_type = self._multipart_upload(
+            "images",
+            image_file,
+            ocr_prompt="   ",
+        )
+        status, empty = self._request(
+            "/api/projects/invalid_ocr_prompt/source",
+            method="POST",
+            body=empty_body,
+            content_type=empty_type,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(empty["code"], "SOURCE_REGISTER_FAILED")
+        self.assertEqual(
+            empty["message"],
+            "이미지 OCR 프롬프트를 입력하세요.",
+        )
+
+        large_body, large_type = self._multipart_upload(
+            "images",
+            image_file,
+            ocr_prompt="가" * 22_000,
+        )
+        status, large = self._request(
+            "/api/projects/invalid_ocr_prompt/source",
+            method="POST",
+            body=large_body,
+            content_type=large_type,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(large["code"], "SOURCE_REGISTER_FAILED")
+        self.assertEqual(
+            large["message"],
+            "이미지 OCR 프롬프트는 64 KiB 이하여야 합니다.",
+        )
+        self.assertIn("64 KiB", large["detail"])
+
+        pdf_body, pdf_type = self._multipart_upload(
+            "pdf",
+            [
+                (
+                    "rulebook.pdf",
+                    b"%PDF-1.4\ninvalid prompt\n%%EOF\n",
+                    "application/pdf",
+                )
+            ],
+            ocr_prompt="PDF does not use this.",
+        )
+        status, pdf = self._request(
+            "/api/projects/invalid_ocr_prompt/source",
+            method="POST",
+            body=pdf_body,
+            content_type=pdf_type,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(pdf["code"], "SOURCE_REGISTER_FAILED")
+        self.assertEqual(
+            pdf["message"],
+            "OCR 프롬프트는 이미지 원본을 선택했을 때만 사용할 수 있습니다.",
+        )
+        self.assertIn("image sources", pdf["detail"])
+
+        status, no_images = self._request(
+            "/api/projects/invalid_ocr_prompt/ocr-prompt",
+            method="PATCH",
+            payload={"ocr_prompt": "No registered images."},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(no_images["code"], "OCR_PROMPT_UPDATE_FAILED")
+        self.assertEqual(
+            no_images["message"],
+            "이미지 원본이 등록된 프로젝트에서만 OCR 프롬프트를 수정할 수 있습니다.",
+        )
+
+    def test_updates_only_ocr_prompt_before_processing(self) -> None:
+        location = create_project(
+            name="Prompt Only API",
+            project_id="prompt_only_api",
+            workspace_root=self.workspace_root,
+        )
+        image_output = BytesIO()
+        Image.new("RGB", (8, 8), "white").save(
+            image_output,
+            format="PNG",
+        )
+        upload_body, upload_type = self._multipart_upload(
+            "images",
+            [("card.png", image_output.getvalue(), "image/png")],
+            ocr_prompt="Initial prompt.",
+        )
+        status, _ = self._request(
+            "/api/projects/prompt_only_api/source",
+            method="POST",
+            body=upload_body,
+            content_type=upload_type,
+        )
+        self.assertEqual(status, 201)
+        image_path = location.path / "01_input/images/card.png"
+        prompt_path = location.path / "01_input/images/ocr_prompt.txt"
+        image_before = image_path.read_bytes()
+
+        status, unauthorized = self._request(
+            "/api/projects/prompt_only_api/ocr-prompt",
+            method="PATCH",
+            payload={"ocr_prompt": "Unauthorized edit."},
+            authorized=False,
+        )
+        self.assertEqual(status, 403)
+        self.assertFalse(unauthorized["ok"])
+
+        status, updated = self._request(
+            "/api/projects/prompt_only_api/ocr-prompt",
+            method="PATCH",
+            payload={"ocr_prompt": "Edited prompt only."},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(updated["ocr_prompt"]["updated"])
+        self.assertEqual(
+            updated["ocr_prompt"]["path"],
+            "01_input/images/ocr_prompt.txt",
+        )
+        self.assertEqual(
+            prompt_path.read_text(encoding="utf-8"),
+            "Edited prompt only.\n",
+        )
+        self.assertEqual(image_path.read_bytes(), image_before)
+
+        status, dashboard = self._request("/api/dashboard")
+        self.assertEqual(status, 200)
+        project = next(
+            item
+            for item in dashboard["projects"]
+            if item["project_id"] == "prompt_only_api"
+        )
+        self.assertEqual(project["ocr_prompt"], "Edited prompt only.\n")
+        self.assertTrue(project["ocr_prompt_edit"]["allowed"])
+
+        (location.path / ".glk/state/image_ocr.json").write_text(
+            "{}",
+            encoding="utf-8",
+        )
+        status, blocked = self._request(
+            "/api/projects/prompt_only_api/ocr-prompt",
+            method="PATCH",
+            payload={"ocr_prompt": "Too late."},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(blocked["code"], "OCR_PROMPT_UPDATE_FAILED")
+        self.assertEqual(
+            blocked["message"],
+            "OCR이 시작된 뒤에는 프롬프트를 수정할 수 없습니다.",
+        )
+        self.assertEqual(
+            prompt_path.read_text(encoding="utf-8"),
+            "Edited prompt only.\n",
+        )
+
+    def test_replaces_source_before_processing_and_rejects_after_started(
+        self,
+    ) -> None:
+        location = create_project(
+            name="Replace Upload",
+            project_id="replace_upload",
+            workspace_root=self.workspace_root,
+        )
+        prompt_path = location.path / "01_input/images/ocr_prompt.txt"
+        prompt_before = prompt_path.read_bytes()
+        pdf_body, pdf_content_type = self._multipart_upload(
+            "pdf",
+            [
+                (
+                    "old.pdf",
+                    b"%PDF-1.4\nold dashboard source\n%%EOF\n",
+                    "application/pdf",
+                )
+            ],
+        )
+        status, _ = self._request(
+            "/api/projects/replace_upload/source",
+            method="POST",
+            body=pdf_body,
+            content_type=pdf_content_type,
+        )
+        self.assertEqual(status, 201)
+
+        image_output = BytesIO()
+        Image.new("RGB", (8, 8), "white").save(
+            image_output,
+            format="PNG",
+        )
+        image_body, image_content_type = self._multipart_upload(
+            "images",
+            [("new.png", image_output.getvalue(), "image/png")],
+        )
+        status, unauthorized = self._request(
+            "/api/projects/replace_upload/source",
+            method="PUT",
+            body=image_body,
+            content_type=image_content_type,
+            authorized=False,
+        )
+        self.assertEqual(status, 403)
+        self.assertFalse(unauthorized["ok"])
+
+        status, replaced = self._request(
+            "/api/projects/replace_upload/source",
+            method="PUT",
+            body=image_body,
+            content_type=image_content_type,
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(replaced["source"]["replaced"])
+        self.assertEqual(replaced["source"]["source_type"], "images")
+        self.assertFalse(
+            (location.path / "01_input/pdf/old.pdf").exists()
+        )
+        self.assertTrue(
+            (location.path / "01_input/images/new.png").is_file()
+        )
+        self.assertEqual(prompt_path.read_bytes(), prompt_before)
+
+        edited_body, edited_content_type = self._multipart_upload(
+            "images",
+            [("new.png", image_output.getvalue(), "image/png")],
+            ocr_prompt="Use the edited project OCR rules.",
+        )
+        status, edited = self._request(
+            "/api/projects/replace_upload/source",
+            method="PUT",
+            body=edited_body,
+            content_type=edited_content_type,
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(edited["source"]["ocr_prompt_updated"])
+        self.assertEqual(
+            prompt_path.read_text(encoding="utf-8"),
+            "Use the edited project OCR rules.\n",
+        )
+
+        status, dashboard = self._request("/api/dashboard")
+        self.assertEqual(status, 200)
+        replaced_project = next(
+            project
+            for project in dashboard["projects"]
+            if project["project_id"] == "replace_upload"
+        )
+        self.assertEqual(replaced_project["source_files"], ["new.png"])
+
+        (location.path / ".glk/state/image_ocr.json").write_text(
+            "{}",
+            encoding="utf-8",
+        )
+        status, blocked = self._request(
+            "/api/projects/replace_upload/source",
+            method="PUT",
+            body=pdf_body,
+            content_type=pdf_content_type,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(blocked["code"], "SOURCE_REPLACE_FAILED")
+        self.assertTrue(
+            (location.path / "01_input/images/new.png").is_file()
+        )
+        self.assertFalse(
+            (location.path / "01_input/pdf/old.pdf").exists()
+        )
+
+    def test_source_upload_rejects_bad_input_and_unknown_project(self) -> None:
+        create_project(
+            name="Invalid Upload",
+            project_id="invalid_upload",
+            workspace_root=self.workspace_root,
+        )
+        body, content_type = self._multipart_upload(
+            "pdf",
+            [("not-pdf.txt", b"not a pdf", "text/plain")],
+        )
+        status, invalid = self._request(
+            "/api/projects/invalid_upload/source",
+            method="POST",
+            body=body,
+            content_type=content_type,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(invalid["code"], "SOURCE_REGISTER_FAILED")
+
+        valid_body, valid_content_type = self._multipart_upload(
+            "pdf",
+            [("book.pdf", b"%PDF-1.4\n%%EOF\n", "application/pdf")],
+        )
+        status, missing = self._request(
+            "/api/projects/not_found/source",
+            method="POST",
+            body=valid_body,
+            content_type=valid_content_type,
+        )
+        self.assertEqual(status, 404)
+        self.assertEqual(missing["code"], "RESOURCE_NOT_FOUND")
+
+        status, escaped = self._request(
+            "/api/projects/..%2Finvalid_upload/source",
+            method="POST",
+            body=valid_body,
+            content_type=valid_content_type,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(escaped["code"], "SOURCE_REGISTER_FAILED")
+
+    @patch("glk.infrastructure.dashboard_server.send2trash")
+    def test_moves_project_to_trash_and_rejects_duplicate_delete(
+        self,
+        mocked_send2trash,
+    ) -> None:
+        location = create_project(
+            name="Delete Me",
+            project_id="delete_me",
+            workspace_root=self.workspace_root,
+        )
+        trash_root = Path(self.temporary_directory.name) / "trash"
+        trash_root.mkdir()
+
+        def move_to_test_trash(value: str) -> None:
+            path = Path(value)
+            path.rename(trash_root / path.name)
+
+        mocked_send2trash.side_effect = move_to_test_trash
+
+        status, unauthorized = self._request(
+            "/api/projects/delete_me",
+            method="DELETE",
+            authorized=False,
+        )
+        self.assertEqual(status, 403)
+        self.assertFalse(unauthorized["ok"])
+        self.assertTrue(location.path.is_dir())
+
+        status, deleted = self._request(
+            "/api/projects/delete_me",
+            method="DELETE",
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(deleted["ok"])
+        self.assertEqual(deleted["project"]["project_id"], "delete_me")
+        mocked_send2trash.assert_called_once_with(str(location.path))
+        self.assertFalse(location.path.exists())
+        self.assertTrue((trash_root / "delete_me").is_dir())
+
+        status, missing = self._request(
+            "/api/projects/delete_me",
+            method="DELETE",
+        )
+        self.assertEqual(status, 404)
+        self.assertEqual(missing["code"], "RESOURCE_NOT_FOUND")
+
+    @patch("glk.infrastructure.dashboard_server.send2trash")
+    def test_delete_rejects_path_escape_and_unknown_project(
+        self,
+        mocked_send2trash,
+    ) -> None:
+        status, invalid = self._request(
+            "/api/projects/..%2Foutside",
+            method="DELETE",
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(invalid["code"], "PROJECT_DELETE_FAILED")
+
+        status, missing = self._request(
+            "/api/projects/not_found",
+            method="DELETE",
+        )
+        self.assertEqual(status, 404)
+        self.assertEqual(missing["code"], "RESOURCE_NOT_FOUND")
+        mocked_send2trash.assert_not_called()
+
+    @patch(
+        "glk.infrastructure.dashboard_server.send2trash",
+        side_effect=OSError("trash unavailable"),
+    )
+    def test_delete_reports_trash_failure(
+        self,
+        mocked_send2trash,
+    ) -> None:
+        location = create_project(
+            name="Keep Me",
+            project_id="keep_me",
+            workspace_root=self.workspace_root,
+        )
+
+        status, failed = self._request(
+            "/api/projects/keep_me",
+            method="DELETE",
+        )
+
+        self.assertEqual(status, 500)
+        self.assertEqual(failed["code"], "PROJECT_DELETE_FAILED")
+        self.assertIn("휴지통", failed["message"])
+        self.assertTrue(location.path.is_dir())
+        mocked_send2trash.assert_called_once_with(str(location.path))
 
 
 if __name__ == "__main__":

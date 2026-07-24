@@ -14,11 +14,13 @@ dependencies = [
   "PyPDF2>=3.0,<4",
   "PyMuPDF>=1.28,<2",
   "python-dotenv>=1.2,<2",
+  "send2trash>=1.8,<2",
 ]
 
 [project.optional-dependencies]
 dev = [
   "mypy>=1.20,<2",
+  "types-Send2Trash>=1.8,<3",
 ]
 
 [project.scripts]
@@ -41,6 +43,7 @@ files = [
   "src/glk/error_response.py",
   "src/glk/application/review_types.py",
   "src/glk/application/dashboard_service.py",
+  "src/glk/application/source_registration_service.py",
   "src/glk/application/source_review_service.py",
   "src/glk/application/glossary_review_service.py",
   "src/glk/application/translation_review_service.py",

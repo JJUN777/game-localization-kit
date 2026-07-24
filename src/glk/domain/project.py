@@ -164,7 +164,7 @@ class ProjectManifest:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
-    def with_source_file(self, source_file: str) -> ProjectManifest:
+    def with_source_file(self, source_file: str | None) -> ProjectManifest:
         updated = replace(self, source_file=source_file)
         updated.validate()
         return updated

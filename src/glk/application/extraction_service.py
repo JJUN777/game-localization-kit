@@ -12,16 +12,18 @@ import pymupdf
 
 from glk.application._hashing import sha256_bytes as _sha256_bytes
 from glk.application._hashing import sha256_file as _sha256_file
-from glk.application._io import copy_file_atomic as _copy_source_atomic
 from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.application._io import write_text_atomic as _write_text_atomic
 from glk.application.project_service import (
     ProjectLocation,
     load_project,
-    update_project_source,
 )
-from glk.domain.workspace import WorkspacePaths, is_pdf_source_file
+from glk.application.source_registration_service import (
+    SourceRegistrationError,
+    register_pdf_source,
+)
+from glk.domain.workspace import WorkspacePaths
 from glk.extraction.layout import (
     LayoutValidationError,
     LayoutProvider,
@@ -106,53 +108,6 @@ def _resolve_project_source(
     if not location.manifest.source_file:
         raise ExtractionError("No source PDF is registered; provide --file.")
     return _resolve_file(location.path / location.manifest.source_file)
-
-
-def _register_source(
-    location: ProjectLocation, source_path: Path, force: bool
-) -> tuple[ProjectLocation, Path, str]:
-    paths = WorkspacePaths(location.path)
-    input_dir = paths.input_pdf_dir.resolve()
-    destination = (
-        source_path
-        if source_path.parent == input_dir
-        else input_dir / source_path.name
-    )
-    source_file = paths.relative(destination)
-    current_source = location.manifest.source_file
-    if current_source and current_source != source_file and not force:
-        raise ExtractionError(
-            f"Project source is already registered as {current_source}. "
-            "Use --force to replace it."
-        )
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    source_hash = _sha256_file(source_path)
-    same_path = source_path == destination.resolve()
-    if destination.exists() and not same_path:
-        destination_hash = _sha256_file(destination)
-        if destination_hash != source_hash and not force:
-            raise ExtractionError(
-                f"A different {source_file} is already registered. "
-                "Use --force to replace the project source."
-            )
-        if destination_hash != source_hash or force:
-            _copy_source_atomic(source_path, destination)
-    elif not destination.exists():
-        _copy_source_atomic(source_path, destination)
-    registered_hash = _sha256_file(destination)
-    if registered_hash != source_hash:
-        raise ExtractionError("Registered PDF hash does not match the input PDF.")
-    if (
-        force
-        and current_source != source_file
-        and is_pdf_source_file(current_source)
-    ):
-        previous_source = location.path / str(current_source)
-        if previous_source.is_file():
-            previous_source.unlink()
-    if current_source != source_file:
-        location = update_project_source(location, source_file)
-    return location, destination, registered_hash
 
 
 def _load_cached_layout(
@@ -249,7 +204,17 @@ def extract_project_pdf(
         )
 
     active_provider = provider or GeminiLayoutProvider.from_environment(model_name)
-    location, registered_source, source_hash = _register_source(location, source_path, force)
+    try:
+        registered = register_pdf_source(
+            location,
+            source_path,
+            force=force,
+        )
+    except SourceRegistrationError as error:
+        raise ExtractionError(str(error)) from error
+    location = registered.location
+    registered_source = registered.path
+    source_hash = registered.sha256
     paths = WorkspacePaths(location.path)
     pages_dir = paths.pdf_pages
     fragments_dir = paths.pdf_fragments

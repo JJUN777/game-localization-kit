@@ -156,6 +156,21 @@ review TXT는 `[PAGE]` 또는 `[SOURCE]`, `[BLOCK]`, `[[GLK_END ...]]` marker로
 
 **파일 확정:** application service는 `_io.py`의 공통 writer를 사용합니다. 대상과 같은 폴더에 충돌하지 않는 고유 임시 파일을 만든 뒤 `flush`/`fsync` → `os.replace`로 교체하고, 실패하면 임시 파일을 정리합니다. 내용 hash는 `_hashing.py`, 번역과 선택 재번역이 공유하는 원문·termbase·prompt 로딩은 `_translation_context.py`가 담당합니다.
 
+**원본 교체:** 원문 추출·OCR이 시작되기 전만 허용합니다. 기존 PDF·이미지 입력
+폴더를 프로젝트 내부 임시 위치로 먼저 이동한 뒤 새 원본을 등록하고, 실패하면
+입력 폴더와 manifest를 되돌립니다. 이미지 공통 `ocr_prompt.txt`는 새 입력
+폴더로 복사해 유지하며, UI에서 수정한 프롬프트가 있으면 이미지 등록과 같은
+트랜잭션 안에서 원자적으로 저장합니다. 원문 처리 결과나 state가 하나라도 있으면 교체를
+거부하므로 파생 산출물 정리와 사용자 검수 내용 유실은 발생하지 않습니다.
+
+대시보드 read model의 `source_files`는 PDF 파일명 또는 이미지 입력 루트 기준
+상대 경로 목록입니다. 이미지 목록은 source 등록과 같은 자연순 정렬을 사용하며,
+카드 요약과 전체 파일 목록 모달이 동일한 배열을 소비합니다.
+`ocr_prompt`는 프로젝트의 현재 공통 OCR 지침을 제공하며 이미지 등록·교체
+모달과 프롬프트 단독 수정 모달의 초기값으로 사용됩니다. `ocr_prompt_edit`는
+등록된 이미지 원본과 `source_processing_started`를 기준으로 단독 수정 가능
+여부와 사유를 제공합니다.
+
 ---
 
 ## 외부 모델 사용 경계
@@ -245,12 +260,14 @@ ID·순서·숫자·token·HTML·용어 검증
 
 ## 로컬 대시보드와 HTML 검수 서버 보안
 
-`glk ui` 대시보드는 `dashboard_service`가 만든 읽기 전용 프로젝트 상태를 표시하고, 준비된 기존 `source`, `glossary`, `translation` 검수 서버를 필요할 때 실행합니다. 대시보드에서 연 검수 서버는 같은 프로젝트와 종류에 대해 재사용하며 대시보드 종료 시 함께 종료합니다.
+`glk ui` 대시보드는 `dashboard_service`가 만든 읽기 전용 프로젝트 상태를 표시하고, 준비된 기존 `source`, `glossary`, `translation` 검수 서버를 필요할 때 실행합니다. 프로젝트 생성과 삭제 요청은 application service의 규칙을 재사용합니다. PDF·이미지 최초 등록은 `source_registration_service`가 CLI와 GUI에 같은 복사·manifest 규칙을 제공하며 AI 작업은 실행하지 않습니다. 삭제할 때는 정규화된 ID, workspace 바로 아래 경로와 manifest ID를 다시 확인한 뒤 검증된 프로젝트 폴더만 `send2trash`로 운영체제 휴지통에 이동합니다. 대시보드에서 연 검수 서버는 같은 프로젝트와 종류에 대해 재사용하며 대시보드 종료 시 함께 종료합니다.
 
 대시보드와 세 검수 서버가 공유하는 보안 경계:
 
 - `127.0.0.1`에만 bind하고 외부 interface 노출 불가
 - 요청별 임의 session token과 Host·Origin 검사
+- 원본 multipart 요청의 전체 크기·파일 개수·파일명·확장자와 이미지 OCR
+  프롬프트의 UTF-8·빈 값·64 KiB 제한 검증
 - 현재 파일 SHA-256을 요구해 동시 저장 충돌 차단
 - API 요청 크기, block ID 집합과 reserved marker 검증
 - 외부 CDN, font, script 미사용
@@ -258,6 +275,9 @@ ID·순서·숫자·token·HTML·용어 검증
 - 선택 재번역 때만 서버가 Gemini API 호출
 
 UI는 workspace 파일을 직접 다루지 않고 기존 application service를 호출합니다.
+`PATCH /api/projects/{project_id}/ocr-prompt`도 이미지 원본 등록 여부와 OCR
+시작 상태를 application service에서 다시 검사한 뒤 `ocr_prompt.txt`만
+원자적으로 교체합니다.
 
 ---
 

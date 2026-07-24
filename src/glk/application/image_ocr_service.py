@@ -6,7 +6,6 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import re
 from typing import Any, Callable, Protocol
 
 from PIL import Image, ImageOps
@@ -20,7 +19,13 @@ from glk.application._io import write_text_atomic as _write_text_atomic
 from glk.application.project_service import (
     ProjectLocation,
     load_project,
-    update_project_source,
+)
+from glk.application.source_registration_service import (
+    SUPPORTED_IMAGE_EXTENSIONS,
+    SourceRegistrationError,
+    discover_source_images,
+    register_image_sources,
+    validate_image_output_collisions,
 )
 from glk.domain.workspace import IMAGE_SOURCE_ROOT, WorkspacePaths
 from glk.extraction.image_ocr import (
@@ -32,7 +37,7 @@ from glk.extraction.image_ocr import (
 from glk.infrastructure.gemini_ocr import GeminiImageOcrProvider
 
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+IMAGE_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS
 ProgressCallback = Callable[[str], None]
 
 
@@ -102,39 +107,15 @@ def _resolve_optional_file(path: str | Path) -> Path:
     return candidate
 
 
-def _natural_key(path: Path, root: Path) -> list[tuple[int, int | str]]:
-    relative = path.relative_to(root).as_posix().casefold()
-    return [
-        (0, int(part)) if part.isdigit() else (1, part)
-        for part in re.split(r"(\d+)", relative)
-        if part
-    ]
-
-
 def discover_images(folder: Path) -> list[Path]:
-    return sorted(
-        (
-            path
-            for path in folder.rglob("*")
-            if path.is_file()
-            and not any(part.startswith(".") for part in path.relative_to(folder).parts)
-            and path.suffix.casefold() in IMAGE_EXTENSIONS
-        ),
-        key=lambda path: _natural_key(path, folder),
-    )
+    return discover_source_images(folder)
 
 
 def _validate_output_collisions(images: list[Path], root: Path) -> None:
-    outputs: dict[Path, Path] = {}
-    for image_path in images:
-        output = image_path.relative_to(root).with_suffix(".txt")
-        previous = outputs.get(output)
-        if previous is not None:
-            raise ImageOcrError(
-                f"Output filename collision: {previous.name} and {image_path.name} "
-                f"both map to {output.as_posix()}"
-            )
-        outputs[output] = image_path
+    try:
+        validate_image_output_collisions(images, root)
+    except SourceRegistrationError as error:
+        raise ImageOcrError(str(error)) from error
 
 
 def _load_image(path: Path) -> Image.Image:
@@ -183,47 +164,6 @@ def _registered_source_folder(location: ProjectLocation) -> Path:
             )
         raise ImageOcrError("No image folder is registered; provide --folder.")
     return WorkspacePaths(location.path).input_images_dir
-
-
-def _register_images(
-    location: ProjectLocation,
-    source_folder: Path,
-    images: list[Path],
-    *,
-    force: bool,
-) -> tuple[ProjectLocation, Path, list[Path]]:
-    if location.manifest.source_file not in {None, IMAGE_SOURCE_ROOT} and not force:
-        raise ImageOcrError(
-            f"Project source is already registered as {location.manifest.source_file}. "
-            "Use --force to replace the project source type."
-        )
-    destination_root = WorkspacePaths(location.path).input_images_dir
-    registered: list[Path] = []
-    for source_image in images:
-        relative = source_image.relative_to(source_folder)
-        destination = destination_root / relative
-        if source_image.resolve() != destination.resolve():
-            if destination.is_file():
-                same = _sha256_file(source_image) == _sha256_file(destination)
-                if not same and not force:
-                    raise ImageOcrError(
-                        f"A different source image is already registered: {relative}. "
-                        "Use --force to replace it."
-                    )
-                if not same:
-                    _copy_file_atomic(source_image, destination)
-            else:
-                _copy_file_atomic(source_image, destination)
-        registered.append(destination)
-
-        sidecar = source_image.with_name(source_image.name + ".prompt.txt")
-        if sidecar.is_file():
-            destination_sidecar = destination.with_name(destination.name + ".prompt.txt")
-            if sidecar.resolve() != destination_sidecar.resolve():
-                _copy_file_atomic(sidecar, destination_sidecar)
-    if location.manifest.source_file != IMAGE_SOURCE_ROOT:
-        location = update_project_source(location, IMAGE_SOURCE_ROOT)
-    return location, destination_root, registered
 
 
 def ocr_project_images(
@@ -276,9 +216,18 @@ def ocr_project_images(
         )
 
     if folder is not None:
-        location, registered_folder, registered_images = _register_images(
-            location, source_folder, images, force=force
-        )
+        try:
+            registered = register_image_sources(
+                location,
+                source_folder,
+                images,
+                force=force,
+            )
+        except SourceRegistrationError as error:
+            raise ImageOcrError(str(error)) from error
+        location = registered.location
+        registered_folder = registered.root
+        registered_images = list(registered.files)
     else:
         registered_folder = source_folder
         registered_images = images

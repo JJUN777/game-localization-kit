@@ -12,7 +12,12 @@ from typing import Any
 
 from glk.application._hashing import sha256_file_if_exists as _sha256_file
 from glk.application._io import write_json_atomic as _write_json_atomic
-from glk.domain.project import ProjectError, ProjectManifest
+from glk.domain.project import (
+    ProjectError,
+    ProjectManifest,
+    ProjectValidationError,
+    normalize_project_id,
+)
 from glk.domain.workspace import (
     IMAGE_SOURCE_ROOT,
     WORKSPACE_DIRECTORIES,
@@ -189,12 +194,70 @@ def load_project(
     return ProjectLocation(project_path, manifest, ())
 
 
+def load_workspace_project_id(
+    project_id: str,
+    workspace_root: str | Path = DEFAULT_WORKSPACE_ROOT,
+) -> ProjectLocation:
+    """Load only a direct child project selected by its canonical ID."""
+    if not isinstance(project_id, str) or not project_id:
+        raise ProjectValidationError("Project ID is required.")
+    try:
+        normalized_id = normalize_project_id(project_id)
+    except ProjectValidationError:
+        raise
+    if project_id != normalized_id:
+        raise ProjectValidationError(
+            "Project ID must use lowercase English letters, numbers, and "
+            "single underscores only."
+        )
+
+    root = _resolve_path(workspace_root)
+    candidate = root / project_id
+    location = load_project(candidate, root)
+    if (
+        location.path.parent != root
+        or location.path != candidate.resolve()
+        or location.manifest.project_id != project_id
+    ):
+        raise ProjectValidationError(
+            "Project must be a direct child of the configured workspace root."
+        )
+    return location
+
+
 def update_project_source(
-    location: ProjectLocation, source_file: str
+    location: ProjectLocation, source_file: str | None
 ) -> ProjectLocation:
     manifest = location.manifest.with_source_file(source_file)
     _write_json_atomic(location.path / "project.json", manifest.to_dict())
     return ProjectLocation(location.path, manifest, location.created_paths, location.dry_run)
+
+
+def source_processing_started(location: ProjectLocation) -> bool:
+    """Return whether acquisition or any source-derived work has written files."""
+    paths = WorkspacePaths(location.path)
+    derived_roots = (
+        paths.source_dir,
+        location.path / "03_terminology",
+        location.path / ".glk/cache",
+        paths.segments_dir,
+        paths.state_dir,
+        location.path / ".glk/reports",
+        location.path / "05_output",
+    )
+    if any(
+        path.is_file()
+        for root in derived_roots
+        if root.is_dir()
+        for path in root.rglob("*")
+    ):
+        return True
+
+    translation_dir = location.path / "04_translation"
+    return any(
+        path.is_file() and path != paths.translation_prompt
+        for path in translation_dir.rglob("*")
+    )
 
 
 def inspect_project(
@@ -539,6 +602,7 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
 
     return {
         "source_type": source_type,
+        "source_processing_started": source_processing_started(location),
         "source_acquired": source_acquired,
         "review_source_ready": review_source_ready,
         "qa_status": qa_status,

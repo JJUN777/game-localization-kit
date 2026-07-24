@@ -6,6 +6,10 @@ from pathlib import Path
 
 from glk.application.dashboard_service import get_dashboard_document
 from glk.application.project_service import create_project
+from glk.application.source_registration_service import (
+    register_project_images,
+    register_project_pdf,
+)
 
 
 class DashboardServiceTests(unittest.TestCase):
@@ -46,6 +50,71 @@ class DashboardServiceTests(unittest.TestCase):
             self.assertFalse(project["reviews"]["source"]["enabled"])
             self.assertFalse(project["reviews"]["glossary"]["enabled"])
             self.assertFalse(project["reviews"]["translation"]["enabled"])
+            self.assertIn("프로젝트 공통 OCR", project["ocr_prompt"])
+
+    def test_source_replacement_is_hidden_after_processing_starts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace_root = root / "workspaces"
+            source_pdf = root / "rulebook.pdf"
+            source_pdf.write_bytes(b"%PDF-1.4\nsource\n")
+            location = create_project(
+                name="Replaceable Source",
+                workspace_root=workspace_root,
+            )
+            register_project_pdf(
+                project="replaceable_source",
+                file=source_pdf,
+                workspace_root=workspace_root,
+            )
+
+            before = get_dashboard_document(workspace_root)["projects"][0]
+            self.assertTrue(before["source_replacement"]["allowed"])
+            self.assertEqual(before["source_files"], ["rulebook.pdf"])
+
+            (location.path / ".glk/state/pdf_acquisition.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+            after = get_dashboard_document(workspace_root)["projects"][0]
+            self.assertFalse(after["source_replacement"]["allowed"])
+            self.assertIn("시작되어", after["source_replacement"]["reason"])
+
+    def test_image_source_files_use_relative_paths_and_natural_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace_root = root / "workspaces"
+            source_images = root / "images"
+            nested = source_images / "cards"
+            nested.mkdir(parents=True)
+            (nested / "card-10.png").write_bytes(b"image 10")
+            (nested / "card-2.png").write_bytes(b"image 2")
+            create_project(
+                name="Image Files",
+                workspace_root=workspace_root,
+            )
+            register_project_images(
+                project="image_files",
+                folder=source_images,
+                workspace_root=workspace_root,
+            )
+
+            project = get_dashboard_document(workspace_root)["projects"][0]
+
+            self.assertEqual(
+                project["source_files"],
+                ["cards/card-2.png", "cards/card-10.png"],
+            )
+            self.assertIn("프로젝트 공통 OCR", project["ocr_prompt"])
+            self.assertTrue(project["ocr_prompt_edit"]["allowed"])
+
+            (workspace_root / "image_files/.glk/state/image_ocr.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+            after = get_dashboard_document(workspace_root)["projects"][0]
+            self.assertFalse(after["ocr_prompt_edit"]["allowed"])
+            self.assertIn("시작되어", after["ocr_prompt_edit"]["reason"])
 
 
 if __name__ == "__main__":

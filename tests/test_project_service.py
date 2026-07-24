@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+from importlib.resources import files
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +18,7 @@ from glk.application.project_service import (
     inspect_project,
     list_projects,
     load_project,
+    load_workspace_project_id,
 )
 from glk.domain.project import ProjectManifest, ProjectValidationError, normalize_project_id
 
@@ -67,11 +69,11 @@ class ProjectServiceTests(unittest.TestCase):
             prompt_path = location.path / DEFAULT_OCR_PROMPT
             self.assertTrue(prompt_path.is_file())
             prompt = prompt_path.read_text(encoding="utf-8")
-            self.assertIn("다음 아이콘은 텍스트가 아니지만", prompt)
-            self.assertIn("{DEF}", prompt)
-            self.assertIn("{HP}", prompt)
-            self.assertIn("{eWater}", prompt)
-            self.assertIn("{tWater}", prompt)
+            self.assertIn("# 프로젝트 공통 OCR 추가 지침", prompt)
+            self.assertIn("TOKEN_NAME", prompt)
+            self.assertIn("[ICON: concise visible description]", prompt)
+            self.assertIn("가상 예시이며 실제 OCR 규칙이 아닙니다", prompt)
+            self.assertNotRegex(prompt, r"\{[A-Za-z][A-Za-z0-9_]*\}")
             for relative_path in PROJECT_INPUT_DIRECTORIES + PROJECT_DIRECTORIES:
                 self.assertTrue((location.path / relative_path).is_dir())
 
@@ -111,6 +113,17 @@ class ProjectServiceTests(unittest.TestCase):
                 self.assertFalse((location.path / legacy_directory).exists())
             self.assertFalse((location.path / "02_source/assets").exists())
 
+    def test_elder_scrolls_poc_prompt_is_preserved_as_an_example(self) -> None:
+        prompt = (
+            files("glk.templates")
+            .joinpath("elder_scrolls_ocr_prompt.example.txt")
+            .read_text(encoding="utf-8")
+        )
+        self.assertIn("# Elder Scrolls POC OCR prompt 예제", prompt)
+        self.assertIn("{DMGR}", prompt)
+        self.assertIn("{eWater}", prompt)
+        self.assertIn("{tWater}", prompt)
+
     def test_duplicate_project_does_not_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory) / "workspaces"
@@ -119,6 +132,34 @@ class ProjectServiceTests(unittest.TestCase):
             with self.assertRaises(ProjectExistsError):
                 create_project(name="Demo Game", workspace_root=root)
             self.assertEqual((location.path / "project.json").read_bytes(), manifest_before)
+
+    def test_load_workspace_project_id_rejects_paths_and_noncanonical_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory) / "workspaces"
+            location = create_project(name="Safe Project", workspace_root=root)
+
+            loaded = load_workspace_project_id("safe_project", root)
+            self.assertEqual(loaded.path, location.path)
+
+            for project_id in (
+                "../safe_project",
+                "safe_project/child",
+                "Safe_Project",
+                "safe__project",
+            ):
+                with self.subTest(project_id=project_id):
+                    with self.assertRaises(ProjectValidationError):
+                        load_workspace_project_id(project_id, root)
+
+            manifest_path = location.path / "project.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["project_id"] = "different_project"
+            manifest_path.write_text(
+                json.dumps(manifest),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ProjectValidationError):
+                load_workspace_project_id("safe_project", root)
 
     def test_dry_run_does_not_touch_filesystem(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

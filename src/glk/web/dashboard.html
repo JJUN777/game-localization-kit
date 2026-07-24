@@ -302,6 +302,13 @@
       font-size: 12px;
     }
 
+    .project-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
     .source-badge {
       padding: 6px 9px;
       border-radius: 999px;
@@ -311,6 +318,66 @@
       font-weight: 850;
       letter-spacing: .06em;
       text-transform: uppercase;
+    }
+
+    .source-file-row {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 18px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--muted);
+      background: #faf8f2;
+    }
+
+    .source-file-summary {
+      min-width: 0;
+      overflow: hidden;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .source-file-list-button {
+      flex-shrink: 0;
+      padding: 5px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--green);
+      background: #fff;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .source-file-list-button:hover {
+      border-color: var(--green);
+    }
+
+    .delete-project-button {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      place-items: center;
+      color: var(--muted);
+      background: #fff;
+      font-size: 18px;
+      line-height: 1;
+      transition: border-color .15s ease, color .15s ease,
+        background .15s ease;
+    }
+
+    .delete-project-button:hover {
+      border-color: rgb(207 75 47 / 45%);
+      color: var(--accent-dark);
+      background: rgb(207 75 47 / 6%);
     }
 
     .stage-row {
@@ -413,6 +480,39 @@
       background: #f4f2ed;
     }
 
+    .source-register-button {
+      grid-column: 1 / -1;
+      padding: 11px 12px;
+      border: 1px solid var(--green);
+      border-radius: 10px;
+      color: #fff;
+      background: var(--green);
+      font-size: 12px;
+      font-weight: 800;
+      transition: transform .15s ease, opacity .15s ease;
+    }
+
+    .source-register-button:hover {
+      transform: translateY(-1px);
+    }
+
+    .ocr-prompt-button {
+      grid-column: 1 / -1;
+      padding: 10px 12px;
+      border: 1px solid rgb(40 115 90 / 38%);
+      border-radius: 10px;
+      color: var(--green);
+      background: rgb(40 115 90 / 7%);
+      font-size: 12px;
+      font-weight: 800;
+      transition: border-color .15s ease, transform .15s ease;
+    }
+
+    .ocr-prompt-button:hover {
+      border-color: var(--green);
+      transform: translateY(-1px);
+    }
+
     .path {
       overflow: hidden;
       margin-top: 14px;
@@ -465,6 +565,18 @@
       box-shadow: 0 28px 90px rgb(30 25 20 / 24%);
     }
 
+    #sourceDialog,
+    #ocrPromptDialog {
+      width: min(720px, calc(100% - 28px));
+      max-height: calc(100vh - 28px);
+    }
+
+    #sourceDialog .modal-form,
+    #ocrPromptDialog .modal-form {
+      max-height: calc(100vh - 28px);
+      overflow-y: auto;
+    }
+
     dialog::backdrop {
       background: rgb(24 32 31 / 48%);
       backdrop-filter: blur(4px);
@@ -512,12 +624,15 @@
       margin-top: 17px;
     }
 
+    .field[hidden] { display: none; }
+
     .field label {
       font-size: 13px;
       font-weight: 750;
     }
 
-    .field input {
+    .field input,
+    .field textarea {
       width: 100%;
       padding: 12px 13px;
       border: 1px solid var(--line);
@@ -527,9 +642,37 @@
       background: #fff;
     }
 
-    .field input:focus {
+    .field textarea {
+      min-height: 230px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .field input:focus,
+    .field textarea:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 3px rgb(207 75 47 / 12%);
+    }
+
+    .field-label-row,
+    .field-help-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .field-reset {
+      padding: 0;
+      border: 0;
+      color: var(--accent-dark);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 750;
+      text-decoration: underline;
+      text-underline-offset: 3px;
     }
 
     .field-help {
@@ -537,6 +680,18 @@
       color: var(--muted);
       font-size: 11px;
       line-height: 1.55;
+    }
+
+    .field-count {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px;
+    }
+
+    .field-count.limit {
+      color: var(--accent-dark);
+      font-weight: 800;
     }
 
     .modal-actions {
@@ -566,9 +721,158 @@
       background: var(--ink);
     }
 
-    .modal-submit:disabled {
+    .modal-submit:disabled,
+    .modal-delete:disabled,
+    .source-submit:disabled {
       cursor: wait;
       opacity: .55;
+    }
+
+    .source-note {
+      margin: 0;
+      padding: 13px 15px;
+      border: 1px solid rgb(40 115 90 / 24%);
+      border-radius: 12px;
+      color: #225d4a;
+      background: rgb(40 115 90 / 7%);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .source-type-options {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 18px;
+    }
+
+    .source-type-option {
+      position: relative;
+      cursor: pointer;
+    }
+
+    .source-type-option input {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .source-type-option span {
+      display: block;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      color: var(--muted);
+      background: #fff;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .source-type-option input:checked + span {
+      border-color: var(--green);
+      color: var(--green);
+      background: rgb(40 115 90 / 7%);
+      box-shadow: 0 0 0 2px rgb(40 115 90 / 8%);
+    }
+
+    .source-type-option input:focus-visible + span {
+      outline: 3px solid rgb(40 115 90 / 18%);
+      outline-offset: 2px;
+    }
+
+    .selected-files {
+      max-height: 130px;
+      margin: 0;
+      padding: 0;
+      overflow-y: auto;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      line-height: 1.65;
+      list-style: none;
+    }
+
+    .selected-files li {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .registered-source-files {
+      max-height: min(46vh, 360px);
+      margin: 17px 0 0;
+      padding: 8px 8px 8px 34px;
+      overflow-y: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--ink);
+      background: #faf8f2;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .registered-source-files li {
+      padding: 3px 4px;
+      overflow-wrap: anywhere;
+    }
+
+    .source-files-replace {
+      border: 1px solid var(--green);
+      color: #fff;
+      background: var(--green);
+    }
+
+    .source-files-replace[hidden] {
+      display: none;
+    }
+
+    .source-submit {
+      border: 1px solid var(--green);
+      color: #fff;
+      background: var(--green);
+    }
+
+    .delete-warning {
+      margin: 0;
+      padding: 14px 16px;
+      border: 1px solid rgb(169 110 22 / 30%);
+      border-radius: 12px;
+      color: #6e450c;
+      background: #fff6df;
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .delete-identity {
+      margin-top: 17px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #faf8f2;
+    }
+
+    .delete-identity strong {
+      display: block;
+      font-size: 15px;
+    }
+
+    .delete-identity code {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .modal-delete {
+      border-color: var(--accent-dark);
+      color: #fff;
+      background: var(--accent-dark);
     }
 
     .toast {
@@ -712,12 +1016,185 @@
     </form>
   </dialog>
 
+  <dialog id="sourceDialog" aria-labelledby="sourceDialogTitle">
+    <form class="modal-form" id="sourceForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker" id="sourceDialogKicker">Register originals</p>
+          <h2 id="sourceDialogTitle">원본 등록</h2>
+        </div>
+        <button class="modal-close" id="sourceDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <p class="source-note" id="sourceDialogNote">
+        선택한 파일은 프로젝트의 <code>01_input</code>에 복사합니다.
+        이 단계에서는 추출·OCR이나 Gemini 호출을 실행하지 않습니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="sourceProjectName"></strong>
+        <code id="sourceProjectId"></code>
+      </div>
+
+      <div class="source-type-options" role="radiogroup"
+        aria-label="원본 형식">
+        <label class="source-type-option">
+          <input type="radio" name="source_type" value="pdf" checked>
+          <span>PDF 한 개</span>
+        </label>
+        <label class="source-type-option">
+          <input type="radio" name="source_type" value="images">
+          <span>이미지 여러 장</span>
+        </label>
+      </div>
+
+      <div class="field">
+        <label for="sourceFiles" id="sourceFilesLabel">PDF 파일</label>
+        <input id="sourceFiles" name="files" type="file"
+          accept=".pdf,application/pdf" required>
+        <p class="field-help" id="sourceFilesHelp">
+          PDF 파일 한 개를 선택하세요. 전체 업로드 한도는 256 MiB입니다.
+        </p>
+        <ul class="selected-files" id="selectedFiles"
+          aria-live="polite"></ul>
+      </div>
+
+      <div class="field" id="ocrPromptField" hidden>
+        <div class="field-label-row">
+          <label for="ocrPrompt">OCR 프롬프트</label>
+          <button class="field-reset" id="ocrPromptReset" type="button">
+            편집 전 내용으로 되돌리기
+          </button>
+        </div>
+        <textarea id="ocrPrompt" name="ocr_prompt"
+          aria-describedby="ocrPromptHelp" spellcheck="false"></textarea>
+        <div class="field-help-row">
+          <p class="field-help" id="ocrPromptHelp">
+            모든 이미지 OCR에 적용되며
+            <code>01_input/images/ocr_prompt.txt</code>에 저장됩니다.
+          </p>
+          <span class="field-count" id="ocrPromptCount"></span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel" id="sourceDialogCancel"
+          type="button">취소</button>
+        <button class="modal-button source-submit" id="sourceSubmit"
+          type="submit">원본 등록</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="ocrPromptDialog" aria-labelledby="ocrPromptDialogTitle">
+    <form class="modal-form" id="ocrPromptForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Edit OCR prompt</p>
+          <h2 id="ocrPromptDialogTitle">OCR 프롬프트 수정</h2>
+        </div>
+        <button class="modal-close" id="ocrPromptDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <p class="source-note">
+        이미지 원본은 그대로 유지하고 프로젝트 공통 OCR 프롬프트만
+        저장합니다. OCR 시작 전까지만 수정할 수 있습니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="ocrPromptProjectName"></strong>
+        <code id="ocrPromptProjectId"></code>
+      </div>
+
+      <div class="field">
+        <div class="field-label-row">
+          <label for="ocrPromptEdit">OCR 프롬프트</label>
+          <button class="field-reset" id="ocrPromptEditReset" type="button">
+            편집 전 내용으로 되돌리기
+          </button>
+        </div>
+        <textarea id="ocrPromptEdit" name="ocr_prompt"
+          aria-describedby="ocrPromptEditHelp" spellcheck="false"
+          required></textarea>
+        <div class="field-help-row">
+          <p class="field-help" id="ocrPromptEditHelp">
+            <code>01_input/images/ocr_prompt.txt</code>만 변경됩니다.
+          </p>
+          <span class="field-count" id="ocrPromptEditCount"></span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel" id="ocrPromptDialogCancel"
+          type="button">취소</button>
+        <button class="modal-button modal-submit" id="ocrPromptSubmit"
+          type="submit">프롬프트 저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="sourceFilesDialog" aria-labelledby="sourceFilesDialogTitle">
+    <div class="modal-form">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Registered originals</p>
+          <h2 id="sourceFilesDialogTitle">원본 파일 목록</h2>
+        </div>
+        <button class="modal-close" id="sourceFilesDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <div class="delete-identity">
+        <strong id="sourceFilesProjectName"></strong>
+        <code id="sourceFilesProjectId"></code>
+      </div>
+      <ol class="registered-source-files" id="registeredSourceFiles"></ol>
+
+      <div class="modal-actions">
+        <button class="modal-button source-files-replace"
+          id="sourceFilesReplace" type="button">원본 교체</button>
+        <button class="modal-button modal-cancel" id="sourceFilesDialogDone"
+          type="button">닫기</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="deleteDialog" aria-labelledby="deleteDialogTitle">
+    <form class="modal-form" id="deleteForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Move to trash</p>
+          <h2 id="deleteDialogTitle">프로젝트 삭제</h2>
+        </div>
+        <button class="modal-close" id="deleteDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <p class="delete-warning">
+        프로젝트 폴더 전체를 운영체제 휴지통으로 이동합니다. 휴지통을 비우기
+        전에는 Finder 또는 파일 탐색기에서 복구할 수 있습니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="deleteProjectName"></strong>
+        <code id="deleteProjectId"></code>
+      </div>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel" id="deleteDialogCancel"
+          type="button">취소</button>
+        <button class="modal-button modal-delete" id="deleteSubmit"
+          type="submit">휴지통으로 이동</button>
+      </div>
+    </form>
+  </dialog>
+
   <div class="toast" id="toast" role="status"></div>
 
   <script>
     "use strict";
 
     const AUTH_TOKEN = __GLK_TOKEN_JSON__;
+    const MAX_OCR_PROMPT_BYTES = 64 * 1024;
     const reviewLabels = {
       source: "원문 검수",
       glossary: "용어 검수",
@@ -726,6 +1203,10 @@
     let dashboard = null;
     let activeFilter = "all";
     let toastTimer = null;
+    let pendingSourceProject = null;
+    let pendingSourceFilesProject = null;
+    let pendingOcrPromptProject = null;
+    let pendingDeleteProject = null;
 
     const byId = (id) => document.getElementById(id);
 
@@ -739,11 +1220,13 @@
     }
 
     async function api(path, options = {}) {
+      const isFormData = options.body instanceof FormData;
       const response = await fetch(path, {
         ...options,
         headers: {
           "X-GLK-Token": AUTH_TOKEN,
-          ...(options.body ? {"Content-Type": "application/json"} : {}),
+          ...(options.body && !isFormData
+            ? {"Content-Type": "application/json"} : {}),
           ...(options.headers || {}),
         },
       });
@@ -764,9 +1247,12 @@
       }, 3500);
     }
 
-    function sourceTypeLabel(type) {
-      if (type === "images") return "Images";
+    function sourceTypeLabel(project) {
+      const type = project.source_type;
+      const count = project.source_files?.length || 0;
+      if (type === "images") return count ? `Images · ${count}개` : "Images";
       if (type === "pdf") return "PDF";
+      if (type === "mixed") return count ? `Mixed · ${count}개` : "Mixed";
       return "대기";
     }
 
@@ -816,6 +1302,63 @@
       </button>`;
     }
 
+    function sourceRegistrationButton(project) {
+      if (project.source_type) {
+        if (!project.source_replacement?.allowed) return "";
+        return `<button class="source-register-button" type="button"
+          data-register-source="${escapeHtml(project.project_id)}"
+          data-project-name="${escapeHtml(project.name)}"
+          data-source-type="${escapeHtml(project.source_type)}"
+          data-replace-source="true"
+          title="${escapeHtml(project.source_replacement.reason)}">
+          원본 교체
+        </button>`;
+      }
+      return `<button class="source-register-button" type="button"
+        data-register-source="${escapeHtml(project.project_id)}"
+        data-project-name="${escapeHtml(project.name)}"
+        data-replace-source="false">
+        PDF 또는 이미지 원본 등록
+      </button>`;
+    }
+
+    function ocrPromptEditButton(project) {
+      if (
+        project.source_type !== "images"
+        || !project.ocr_prompt_edit?.allowed
+      ) {
+        return "";
+      }
+      return `<button class="ocr-prompt-button" type="button"
+        data-edit-ocr-prompt="${escapeHtml(project.project_id)}"
+        title="${escapeHtml(project.ocr_prompt_edit.reason)}">
+        OCR 프롬프트 수정
+      </button>`;
+    }
+
+    function sourceFileSummary(project) {
+      const files = project.source_files || [];
+      if (!files.length) return "";
+      const multipleImages =
+        project.source_type === "images" && files.length > 1;
+      const summary = multipleImages
+        ? `${files[0]} 외 ${files.length - 1}개`
+        : files[0];
+      const listButton = multipleImages
+        ? `<button class="source-file-list-button" type="button"
+            data-source-files="${escapeHtml(project.project_id)}"
+            aria-label="${escapeHtml(project.name)} 원본 파일 ${files.length}개 보기">
+            파일 목록
+          </button>`
+        : "";
+      return `<div class="source-file-row">
+        <span class="source-file-summary" title="${escapeHtml(summary)}">
+          ${escapeHtml(summary)}
+        </span>
+        ${listButton}
+      </div>`;
+    }
+
     function projectCard(project) {
       const pathTitle = escapeHtml(project.path);
       return `<article class="project-card">
@@ -824,8 +1367,16 @@
             <h2 class="project-name">${escapeHtml(project.name)}</h2>
             <span class="project-id">${escapeHtml(project.project_id)}</span>
           </div>
-          <span class="source-badge">${sourceTypeLabel(project.source_type)}</span>
+          <div class="project-controls">
+            <span class="source-badge">${sourceTypeLabel(project)}</span>
+            <button class="delete-project-button" type="button"
+              data-delete-project="${escapeHtml(project.project_id)}"
+              data-project-name="${escapeHtml(project.name)}"
+              aria-label="${escapeHtml(project.name)} 프로젝트 삭제"
+              title="프로젝트 삭제">×</button>
+          </div>
         </div>
+        ${sourceFileSummary(project)}
         <div class="stage-row">
           <span class="stage">${escapeHtml(project.stage_label)}</span>
           <span class="progress-value">${project.progress}%</span>
@@ -840,6 +1391,8 @@
           <span class="pipeline-step ${stepState(project, "translation")}">번역 검수</span>
         </div>
         <div class="actions">
+          ${sourceRegistrationButton(project)}
+          ${ocrPromptEditButton(project)}
           ${reviewButton(project, "source")}
           ${reviewButton(project, "glossary")}
           ${reviewButton(project, "translation")}
@@ -946,6 +1499,185 @@
       byId("projectDialog").close();
     }
 
+    function selectedSourceType() {
+      return byId("sourceForm").elements.source_type.value;
+    }
+
+    function promptBytes(inputId) {
+      return new TextEncoder().encode(byId(inputId).value).length;
+    }
+
+    function updatePromptCount(inputId, countId) {
+      const bytes = promptBytes(inputId);
+      const count = byId(countId);
+      count.textContent =
+        `${bytes.toLocaleString("ko-KR")} / ${MAX_OCR_PROMPT_BYTES.toLocaleString("ko-KR")} bytes`;
+      count.classList.toggle("limit", bytes > MAX_OCR_PROMPT_BYTES);
+      return bytes;
+    }
+
+    function updateOcrPromptCount() {
+      updatePromptCount("ocrPrompt", "ocrPromptCount");
+    }
+
+    function updateOcrPromptEditCount() {
+      updatePromptCount("ocrPromptEdit", "ocrPromptEditCount");
+    }
+
+    function updateSourceFileInput() {
+      const input = byId("sourceFiles");
+      const images = selectedSourceType() === "images";
+      input.value = "";
+      input.multiple = images;
+      input.accept = images
+        ? ".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+        : ".pdf,application/pdf";
+      byId("sourceFilesLabel").textContent =
+        images ? "이미지 파일" : "PDF 파일";
+      byId("sourceFilesHelp").textContent = images
+        ? "PNG, JPG, JPEG, WebP 파일을 최대 200개 선택하세요. 파일명 자연순으로 등록합니다."
+        : "PDF 파일 한 개를 선택하세요. 전체 업로드 한도는 256 MiB입니다.";
+      byId("selectedFiles").replaceChildren();
+      byId("ocrPromptField").hidden = !images;
+      byId("ocrPrompt").required = images;
+      updateOcrPromptCount();
+    }
+
+    function renderSelectedFiles() {
+      const collator = new Intl.Collator("ko", {
+        numeric: true,
+        sensitivity: "base",
+      });
+      const files = [...byId("sourceFiles").files]
+        .sort((left, right) => collator.compare(left.name, right.name));
+      const list = byId("selectedFiles");
+      list.replaceChildren();
+      for (const file of files) {
+        const item = document.createElement("li");
+        item.textContent = file.name;
+        list.append(item);
+      }
+    }
+
+    function openSourceDialog(projectId, projectName, replace, sourceType) {
+      const form = byId("sourceForm");
+      const project = dashboard?.projects.find(
+        (value) => value.project_id === projectId
+      );
+      const savedOcrPrompt = project?.ocr_prompt || "";
+      form.reset();
+      if (replace && ["pdf", "images"].includes(sourceType)) {
+        form.elements.source_type.value = sourceType;
+      }
+      byId("ocrPrompt").value = savedOcrPrompt;
+      pendingSourceProject = {
+        projectId,
+        projectName,
+        replace,
+        savedOcrPrompt,
+      };
+      byId("sourceDialogKicker").textContent =
+        replace ? "Replace originals" : "Register originals";
+      byId("sourceDialogTitle").textContent =
+        replace ? "원본 교체" : "원본 등록";
+      byId("sourceDialogNote").innerHTML = replace
+        ? "기존 원본은 삭제되고 선택한 파일로 교체됩니다. 이미지 형식에서는 저장된 OCR 프롬프트도 확인·수정할 수 있으며, 원문 추출·OCR 시작 전까지만 교체할 수 있습니다."
+        : "선택한 파일은 프로젝트의 <code>01_input</code>에 복사합니다. 이미지 형식에서는 OCR 프롬프트를 함께 저장하며, 이 단계에서는 Gemini 호출을 실행하지 않습니다.";
+      byId("sourceSubmit").textContent =
+        replace ? "기존 원본 교체" : "원본 등록";
+      byId("sourceProjectName").textContent = projectName;
+      byId("sourceProjectId").textContent = projectId;
+      updateSourceFileInput();
+      byId("sourceDialog").showModal();
+      byId("sourceFiles").focus();
+    }
+
+    function closeSourceDialog() {
+      byId("sourceDialog").close();
+    }
+
+    function openOcrPromptDialog(projectId) {
+      const project = dashboard?.projects.find(
+        (value) => value.project_id === projectId
+      );
+      if (!project?.ocr_prompt_edit?.allowed) {
+        showToast(
+          project?.ocr_prompt_edit?.reason
+            || "OCR 프롬프트를 수정할 수 없습니다.",
+          true,
+        );
+        return;
+      }
+      pendingOcrPromptProject = {
+        projectId,
+        savedOcrPrompt: project.ocr_prompt || "",
+      };
+      byId("ocrPromptProjectName").textContent = project.name;
+      byId("ocrPromptProjectId").textContent = project.project_id;
+      byId("ocrPromptEdit").value = project.ocr_prompt || "";
+      updateOcrPromptEditCount();
+      byId("ocrPromptDialog").showModal();
+      byId("ocrPromptEdit").focus();
+    }
+
+    function closeOcrPromptDialog() {
+      byId("ocrPromptDialog").close();
+    }
+
+    function openSourceFilesDialog(projectId) {
+      const project = dashboard?.projects.find(
+        (value) => value.project_id === projectId
+      );
+      if (!project) {
+        showToast("프로젝트 파일 정보를 찾지 못했습니다.", true);
+        return;
+      }
+      pendingSourceFilesProject = project;
+      byId("sourceFilesProjectName").textContent = project.name;
+      byId("sourceFilesProjectId").textContent =
+        `${project.project_id} · ${project.source_files.length}개`;
+      const list = byId("registeredSourceFiles");
+      list.replaceChildren();
+      for (const filename of project.source_files) {
+        const item = document.createElement("li");
+        item.textContent = filename;
+        list.append(item);
+      }
+      const replaceButton = byId("sourceFilesReplace");
+      replaceButton.hidden = !project.source_replacement?.allowed;
+      replaceButton.title = project.source_replacement?.reason || "";
+      byId("sourceFilesDialog").showModal();
+      byId("sourceFilesDialogDone").focus();
+    }
+
+    function closeSourceFilesDialog() {
+      byId("sourceFilesDialog").close();
+    }
+
+    function replaceFromSourceFiles() {
+      const project = pendingSourceFilesProject;
+      if (!project?.source_replacement?.allowed) return;
+      closeSourceFilesDialog();
+      openSourceDialog(
+        project.project_id,
+        project.name,
+        true,
+        project.source_type,
+      );
+    }
+
+    function openDeleteDialog(projectId, projectName) {
+      pendingDeleteProject = {projectId, projectName};
+      byId("deleteProjectName").textContent = projectName;
+      byId("deleteProjectId").textContent = projectId;
+      byId("deleteDialog").showModal();
+      byId("deleteDialogCancel").focus();
+    }
+
+    function closeDeleteDialog() {
+      byId("deleteDialog").close();
+    }
+
     async function createProject(event) {
       event.preventDefault();
       const form = event.currentTarget;
@@ -976,6 +1708,132 @@
       }
     }
 
+    async function deleteProject(event) {
+      event.preventDefault();
+      if (!pendingDeleteProject) return;
+      const project = pendingDeleteProject;
+      const submit = byId("deleteSubmit");
+      submit.disabled = true;
+      try {
+        await api(`/api/projects/${encodeURIComponent(project.projectId)}`, {
+          method: "DELETE",
+        });
+        window.location.reload();
+      } catch (error) {
+        showToast(error.message, true);
+        submit.disabled = false;
+      }
+    }
+
+    async function registerSource(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!pendingSourceProject || !form.reportValidity()) return;
+      const submit = byId("sourceSubmit");
+      const sourceType = selectedSourceType();
+      const collator = new Intl.Collator("ko", {
+        numeric: true,
+        sensitivity: "base",
+      });
+      const files = [...byId("sourceFiles").files]
+        .sort((left, right) => collator.compare(left.name, right.name));
+      if (
+        (sourceType === "pdf" && files.length !== 1)
+        || (sourceType === "images" && !files.length)
+      ) {
+        showToast("등록할 원본 파일을 확인하세요.", true);
+        return;
+      }
+      if (files.length > 200) {
+        showToast("이미지는 한 번에 최대 200개까지 등록할 수 있습니다.", true);
+        return;
+      }
+      const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+      if (totalBytes > 255 * 1024 * 1024) {
+        showToast("전체 파일 크기는 255 MiB 이하여야 합니다.", true);
+        return;
+      }
+      const ocrPrompt = byId("ocrPrompt").value;
+      if (sourceType === "images" && !ocrPrompt.trim()) {
+        showToast("이미지 OCR 프롬프트를 입력하세요.", true);
+        byId("ocrPrompt").focus();
+        return;
+      }
+      if (
+        sourceType === "images"
+        && promptBytes("ocrPrompt") > MAX_OCR_PROMPT_BYTES
+      ) {
+        showToast("OCR 프롬프트는 64 KiB 이하여야 합니다.", true);
+        byId("ocrPrompt").focus();
+        return;
+      }
+
+      const body = new FormData();
+      body.append("source_type", sourceType);
+      if (sourceType === "images") body.append("ocr_prompt", ocrPrompt);
+      for (const file of files) body.append("files", file, file.name);
+      submit.disabled = true;
+      try {
+        const result = await api(
+          `/api/projects/${encodeURIComponent(
+            pendingSourceProject.projectId
+          )}/source`,
+          {
+            method: pendingSourceProject.replace ? "PUT" : "POST",
+            body,
+          },
+        );
+        const replaced = pendingSourceProject.replace;
+        closeSourceDialog();
+        await refresh(true);
+        const count = result.source.files.length;
+        showToast(
+          `${sourceType === "pdf" ? "PDF" : `이미지 ${count}개`} 원본을 ${replaced ? "교체" : "등록"}했습니다.`
+        );
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    async function saveOcrPrompt(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!pendingOcrPromptProject || !form.reportValidity()) return;
+      const prompt = byId("ocrPromptEdit").value;
+      if (!prompt.trim()) {
+        showToast("이미지 OCR 프롬프트를 입력하세요.", true);
+        byId("ocrPromptEdit").focus();
+        return;
+      }
+      if (promptBytes("ocrPromptEdit") > MAX_OCR_PROMPT_BYTES) {
+        showToast("OCR 프롬프트는 64 KiB 이하여야 합니다.", true);
+        byId("ocrPromptEdit").focus();
+        return;
+      }
+      const submit = byId("ocrPromptSubmit");
+      submit.disabled = true;
+      try {
+        await api(
+          `/api/projects/${encodeURIComponent(
+            pendingOcrPromptProject.projectId
+          )}/ocr-prompt`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ocr_prompt: prompt}),
+          },
+        );
+        closeOcrPromptDialog();
+        await refresh(true);
+        showToast("이미지 OCR 프롬프트를 저장했습니다.");
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
     byId("refreshButton").addEventListener("click", () => refresh(false));
     byId("emptyCreateButton").addEventListener("click", openProjectDialog);
     byId("projectDialogClose").addEventListener("click", closeProjectDialog);
@@ -983,6 +1841,74 @@
     byId("projectForm").addEventListener("submit", createProject);
     byId("projectDialog").addEventListener("close", () => {
       byId("projectForm").reset();
+    });
+    byId("sourceDialogClose").addEventListener("click", closeSourceDialog);
+    byId("sourceDialogCancel").addEventListener("click", closeSourceDialog);
+    byId("sourceForm").addEventListener("submit", registerSource);
+    byId("sourceForm").addEventListener("change", (event) => {
+      if (event.target.name === "source_type") updateSourceFileInput();
+      if (event.target.id === "sourceFiles") renderSelectedFiles();
+    });
+    byId("ocrPrompt").addEventListener("input", updateOcrPromptCount);
+    byId("ocrPromptReset").addEventListener("click", () => {
+      byId("ocrPrompt").value =
+        pendingSourceProject?.savedOcrPrompt || "";
+      updateOcrPromptCount();
+      byId("ocrPrompt").focus();
+    });
+    byId("sourceDialog").addEventListener("close", () => {
+      pendingSourceProject = null;
+      byId("sourceForm").reset();
+      byId("sourceSubmit").disabled = false;
+      updateSourceFileInput();
+    });
+    byId("ocrPromptDialogClose").addEventListener(
+      "click",
+      closeOcrPromptDialog,
+    );
+    byId("ocrPromptDialogCancel").addEventListener(
+      "click",
+      closeOcrPromptDialog,
+    );
+    byId("ocrPromptForm").addEventListener("submit", saveOcrPrompt);
+    byId("ocrPromptEdit").addEventListener(
+      "input",
+      updateOcrPromptEditCount,
+    );
+    byId("ocrPromptEditReset").addEventListener("click", () => {
+      byId("ocrPromptEdit").value =
+        pendingOcrPromptProject?.savedOcrPrompt || "";
+      updateOcrPromptEditCount();
+      byId("ocrPromptEdit").focus();
+    });
+    byId("ocrPromptDialog").addEventListener("close", () => {
+      pendingOcrPromptProject = null;
+      byId("ocrPromptForm").reset();
+      byId("ocrPromptSubmit").disabled = false;
+      updateOcrPromptEditCount();
+    });
+    byId("sourceFilesDialogClose").addEventListener(
+      "click",
+      closeSourceFilesDialog,
+    );
+    byId("sourceFilesDialogDone").addEventListener(
+      "click",
+      closeSourceFilesDialog,
+    );
+    byId("sourceFilesReplace").addEventListener(
+      "click",
+      replaceFromSourceFiles,
+    );
+    byId("sourceFilesDialog").addEventListener("close", () => {
+      pendingSourceFilesProject = null;
+      byId("registeredSourceFiles").replaceChildren();
+    });
+    byId("deleteDialogClose").addEventListener("click", closeDeleteDialog);
+    byId("deleteDialogCancel").addEventListener("click", closeDeleteDialog);
+    byId("deleteForm").addEventListener("submit", deleteProject);
+    byId("deleteDialog").addEventListener("close", () => {
+      pendingDeleteProject = null;
+      byId("deleteSubmit").disabled = false;
     });
     byId("searchInput").addEventListener("input", render);
     document.querySelector(".filters").addEventListener("click", (event) => {
@@ -995,6 +1921,34 @@
       render();
     });
     byId("projectGrid").addEventListener("click", (event) => {
+      const promptButton = event.target.closest("[data-edit-ocr-prompt]");
+      if (promptButton) {
+        openOcrPromptDialog(promptButton.dataset.editOcrPrompt);
+        return;
+      }
+      const sourceFilesButton = event.target.closest("[data-source-files]");
+      if (sourceFilesButton) {
+        openSourceFilesDialog(sourceFilesButton.dataset.sourceFiles);
+        return;
+      }
+      const sourceButton = event.target.closest("[data-register-source]");
+      if (sourceButton) {
+        openSourceDialog(
+          sourceButton.dataset.registerSource,
+          sourceButton.dataset.projectName,
+          sourceButton.dataset.replaceSource === "true",
+          sourceButton.dataset.sourceType || null,
+        );
+        return;
+      }
+      const deleteButton = event.target.closest("[data-delete-project]");
+      if (deleteButton) {
+        openDeleteDialog(
+          deleteButton.dataset.deleteProject,
+          deleteButton.dataset.projectName,
+        );
+        return;
+      }
       const createButton = event.target.closest("[data-create-project]");
       if (createButton) {
         openProjectDialog();
