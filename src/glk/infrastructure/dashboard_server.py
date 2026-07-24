@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 import webbrowser
 
 from glk.application.dashboard_service import get_dashboard_document
+from glk.application.project_service import create_project as create_project_workspace
 from glk.error_response import make_http_error_response
 from glk.infrastructure.glossary_review_server import (
     create_glossary_review_server,
@@ -62,6 +63,7 @@ class DashboardHttpServer(ThreadingHTTPServer):
         super().__init__(server_address, handler_class)
         self.workspace_root = str(workspace_root)
         self.auth_token = secrets.token_urlsafe(32)
+        self.mutation_lock = threading.Lock()
         self._review_lock = threading.Lock()
         self._review_servers: dict[
             tuple[str, str], tuple[ThreadingHTTPServer, threading.Thread]
@@ -248,7 +250,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
-        if path != "/api/review/open":
+        if path not in {"/api/projects", "/api/review/open"}:
             self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
             return
         if not self._api_authorized():
@@ -259,6 +261,32 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
         try:
             request = self._read_request_json()
+            if path == "/api/projects":
+                name = request.get("name")
+                project_id = request.get("project_id")
+                if not isinstance(name, str) or not name.strip():
+                    raise DashboardError("Project name is required.")
+                if not isinstance(project_id, str) or not project_id.strip():
+                    raise DashboardError("Project ID is required.")
+                normalized_id = project_id.strip()
+                with self.server.mutation_lock:
+                    location = create_project_workspace(
+                        name=name.strip(),
+                        project_id=normalized_id,
+                        workspace_root=self.server.workspace_root,
+                    )
+                self._send_json(
+                    HTTPStatus.CREATED,
+                    {
+                        "ok": True,
+                        "project": {
+                            "project_id": location.manifest.project_id,
+                            "name": location.manifest.name,
+                            "path": str(location.path),
+                        },
+                    },
+                )
+                return
             project_id = request.get("project_id")
             review_type = request.get("review_type")
             if not isinstance(project_id, str) or not isinstance(review_type, str):
@@ -267,7 +295,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 )
             url = self.server.open_review(project_id, review_type)
         except (DashboardError, OSError, TypeError, ValueError) as error:
-            self._send_error_json(HTTPStatus.BAD_REQUEST, error)
+            code = (
+                "PROJECT_INIT_FAILED"
+                if path == "/api/projects"
+                else "INVALID_REQUEST"
+            )
+            self._send_error_json(HTTPStatus.BAD_REQUEST, error, code=code)
             return
         self._send_json(HTTPStatus.OK, {"ok": True, "url": url})
 

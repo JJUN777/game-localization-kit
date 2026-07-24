@@ -88,6 +88,7 @@ class DashboardServerTests(unittest.TestCase):
         status, html = self._request("/", authorized=False)
         self.assertEqual(status, 200)
         self.assertIn("Game Localization Kit Dashboard", html)
+        self.assertIn("data-create-project", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
 
         status, unauthorized = self._request(
@@ -147,6 +148,71 @@ class DashboardServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 400)
         self.assertEqual(invalid["code"], "INVALID_REQUEST")
+
+    def test_creates_project_and_rejects_duplicate_id(self) -> None:
+        status, created = self._request(
+            "/api/projects",
+            method="POST",
+            payload={
+                "name": "Created From Dashboard",
+                "project_id": "created_game",
+            },
+        )
+        self.assertEqual(status, 201)
+        self.assertTrue(created["ok"])
+        self.assertEqual(created["project"]["project_id"], "created_game")
+        project_path = self.workspace_root / "created_game"
+        self.assertTrue((project_path / "project.json").is_file())
+        self.assertTrue(
+            (project_path / "01_input/images/ocr_prompt.txt").is_file()
+        )
+
+        status, dashboard = self._request("/api/dashboard")
+        self.assertEqual(status, 200)
+        self.assertEqual(dashboard["summary"]["projects"], 2)
+
+        status, duplicate = self._request(
+            "/api/projects",
+            method="POST",
+            payload={
+                "name": "Duplicate",
+                "project_id": "created_game",
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(duplicate["code"], "PROJECT_INIT_FAILED")
+        self.assertIn("이미 존재", duplicate["message"])
+
+    def test_project_creation_requires_a_name(self) -> None:
+        status, invalid = self._request(
+            "/api/projects",
+            method="POST",
+            payload={"name": "   "},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(invalid["code"], "PROJECT_INIT_FAILED")
+
+    def test_project_creation_rejects_non_ascii_project_id(self) -> None:
+        status, invalid = self._request(
+            "/api/projects",
+            method="POST",
+            payload={
+                "name": "한글 프로젝트",
+                "project_id": "한글_프로젝트",
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(invalid["code"], "PROJECT_INIT_FAILED")
+        self.assertIn("영문 소문자", invalid["message"])
+
+        status, missing = self._request(
+            "/api/projects",
+            method="POST",
+            payload={"name": "Missing ID"},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(missing["code"], "PROJECT_INIT_FAILED")
+        self.assertIn("ID를 입력", missing["message"])
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ class DashboardServiceTests(unittest.TestCase):
             document = get_dashboard_document(workspace_root)
 
             self.assertEqual(document["summary"]["projects"], 1)
+            self.assertEqual(document["summary"]["in_progress"], 0)
             project = document["projects"][0]
             self.assertEqual(project["project_id"], "dashboard_game")
             self.assertEqual(project["stage"], "not_started")

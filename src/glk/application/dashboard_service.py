@@ -132,6 +132,10 @@ def get_dashboard_document(
         bool(project["pipeline"]["final_translation_approved"])
         for project in projects
     )
+    in_progress = sum(
+        project["stage"] not in {"not_started", "completed"}
+        for project in projects
+    )
     needs_attention = sum(
         project["stage"] in {"translation_qa_failed"}
         or not project["workspace_ready"]
@@ -143,7 +147,7 @@ def get_dashboard_document(
         "workspace_root": listed.workspace_root,
         "summary": {
             "projects": len(projects),
-            "in_progress": len(projects) - completed,
+            "in_progress": in_progress,
             "completed": completed,
             "needs_attention": needs_attention,
         },

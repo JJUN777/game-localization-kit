@@ -96,6 +96,15 @@ def _message_for_detail(detail: str) -> str | None:
         return "PDF 파일을 찾을 수 없습니다. 입력 경로를 확인하세요."
     if "image folder not found" in normalized:
         return "이미지 폴더를 찾을 수 없습니다. 입력 경로를 확인하세요."
+    if "project workspace already exists" in normalized:
+        return "같은 프로젝트 ID가 이미 존재합니다. 다른 프로젝트 ID를 입력하세요."
+    if "project id is required" in normalized:
+        return "프로젝트 ID를 입력하세요."
+    if (
+        "project id must use lowercase english" in normalized
+        or "project id is empty after normalization" in normalized
+    ):
+        return "프로젝트 ID는 영문 소문자, 숫자, 밑줄(_)만 사용할 수 있습니다."
     if "project" in normalized and "not found" in normalized:
         return "프로젝트를 찾을 수 없습니다. 프로젝트 ID와 workspace 경로를 확인하세요."
     if "port must be between" in normalized:

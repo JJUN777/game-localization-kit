@@ -1047,7 +1047,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     init_parser = subparsers.add_parser("init", help="Create a project workspace")
     init_parser.add_argument("name", help="Human-readable project name")
-    init_parser.add_argument("--project-id", help="Portable project directory name")
+    init_parser.add_argument(
+        "--project-id",
+        help="Directory ID using lowercase English letters, numbers, and underscores",
+    )
     init_parser.add_argument("--profile", default="default", help="Game configuration profile")
     init_parser.add_argument("--source-language", default="en", help="Source language code")
     init_parser.add_argument("--target-language", default="ko", help="Target language code")

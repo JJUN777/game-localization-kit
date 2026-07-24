@@ -24,7 +24,16 @@ from glk.domain.project import ProjectManifest, ProjectValidationError, normaliz
 class ProjectManifestTests(unittest.TestCase):
     def test_normalize_project_id_is_portable(self) -> None:
         self.assertEqual(normalize_project_id("The Elder Scrolls: Rulebook"), "the_elder_scrolls_rulebook")
-        self.assertEqual(normalize_project_id("한글 룰북"), "한글_룰북")
+        with self.assertRaises(ProjectValidationError):
+            normalize_project_id("한글 룰북")
+
+    def test_project_id_accepts_only_portable_ascii_characters(self) -> None:
+        manifest = ProjectManifest.create(name="한글 룰북", project_id="korean_rulebook_2")
+        self.assertEqual(manifest.project_id, "korean_rulebook_2")
+        for project_id in ("한글_룰북", "game-name", "Game_Name", "_game", "game__name"):
+            with self.subTest(project_id=project_id):
+                with self.assertRaises(ProjectValidationError):
+                    ProjectManifest.create(name="Test", project_id=project_id)
 
     def test_rejects_reserved_windows_name(self) -> None:
         with self.assertRaises(ProjectValidationError):

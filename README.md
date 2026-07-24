@@ -48,6 +48,9 @@ GEMINI_MODEL=gemini-2.5-flash
 glk init "Primal Rulebook" --project-id primal
 ```
 
+프로젝트 이름에는 한글을 사용할 수 있습니다. 실제 폴더명이 되는 프로젝트 ID는
+운영체제 간 호환성을 위해 영문 소문자, 숫자, 밑줄(`_`)만 사용합니다.
+
 ### 3. PDF 또는 이미지 넣기
 
 ```text
@@ -275,7 +278,8 @@ glk init "Primal Rulebook" --project-id primal
 - `Primal Rulebook`: 화면과 manifest에 표시되는 프로젝트 이름
 - `primal`: 폴더명과 CLI에서 계속 사용하는 고정 ID
 
-프로젝트 ID를 생략하면 이름에서 자동 생성합니다.
+프로젝트 ID를 생략하면 영문 프로젝트 이름에서 자동 생성합니다. 프로젝트 이름이
+한글이면 `--project-id`에 영문 소문자, 숫자, 밑줄(`_`)로 된 ID를 지정해야 합니다.
 
 ```bash
 glk init "Primal Rulebook"
@@ -689,7 +693,7 @@ glk status --project primal     # 특정 프로젝트 상세 상태
 glk ui
 ```
 
-대시보드는 현재 프로젝트 조회와 검수 화면 연결만 제공하는 미리보기 기능입니다. 프로젝트 생성, 원본 등록과 AI 작업 실행은 기존 CLI 명령을 사용합니다.
+대시보드에서 새 프로젝트를 만들고 전체 진행 상황을 조회하거나 준비된 검수 화면을 열 수 있습니다. 원본 등록과 AI 작업 실행은 아직 기존 CLI 명령을 사용합니다.
 
 ### `glk projects`의 진행 단계
 
