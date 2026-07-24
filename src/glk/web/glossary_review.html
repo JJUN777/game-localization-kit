@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GLK Glossary Review</title>
+  <style>
+    :root {
+      --ink: #182033;
+      --muted: #667085;
+      --paper: #f7f6f2;
+      --surface: #fff;
+      --line: #dedbd3;
+      --navy: #23395b;
+      --accent: #e8623c;
+      --accent-dark: #b93e20;
+      --success: #157347;
+      --success-bg: #e9f7ef;
+      --review: #956300;
+      --review-bg: #fff7dc;
+      --keep: #3859a6;
+      --keep-bg: #edf2ff;
+      --rejected: #69707d;
+      --rejected-bg: #f0f1f3;
+      --error: #bd2c27;
+      --error-bg: #fff0ef;
+      --shadow: 0 12px 32px rgba(31, 41, 55, .08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 3% -25%, #f4d8cb 0, transparent 34rem),
+        var(--paper);
+      font: 14px/1.5 Inter, Pretendard, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      min-height: 72px;
+      padding: 11px 22px;
+      color: white;
+      background: rgba(25, 39, 63, .97);
+      box-shadow: 0 4px 18px rgba(15, 23, 42, .18);
+    }
+    .brand { min-width: 230px; }
+    .eyebrow {
+      color: #f5a68f;
+      font-size: 10px;
+      font-weight: 850;
+      letter-spacing: .17em;
+      text-transform: uppercase;
+    }
+    h1 { margin: 1px 0 0; font-size: 19px; line-height: 1.2; }
+    .metrics { display: flex; flex: 1; gap: 7px; overflow-x: auto; }
+    .metric {
+      min-width: 69px;
+      padding: 6px 9px;
+      border: 1px solid rgba(255,255,255,.13);
+      border-radius: 9px;
+      background: rgba(255,255,255,.06);
+    }
+    .metric strong { display: block; font-size: 15px; }
+    .metric span { color: #bec9da; font-size: 10px; white-space: nowrap; }
+    .actions { display: flex; gap: 7px; }
+    .button {
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+    .button:disabled { cursor: not-allowed; opacity: .45; }
+    .button-secondary {
+      color: white;
+      border-color: rgba(255,255,255,.2);
+      background: rgba(255,255,255,.08);
+    }
+    .button-primary { color: white; background: var(--accent); }
+    .button-primary:hover { background: var(--accent-dark); }
+    .button-success { color: white; background: var(--success); }
+    main { padding: 20px 22px 72px; }
+    .intro {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin: 0 0 14px;
+    }
+    .intro h2 { margin: 0 0 3px; font-size: 23px; }
+    .intro p { margin: 0; color: var(--muted); }
+    .file-state {
+      padding: 6px 10px;
+      color: var(--navy);
+      border-radius: 999px;
+      background: #e8edf5;
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+    .toolbar {
+      position: sticky;
+      top: 72px;
+      z-index: 20;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      padding: 10px;
+      margin-bottom: 12px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: rgba(255,255,255,.94);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+    }
+    .control {
+      min-height: 36px;
+      padding: 7px 9px;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      outline: none;
+      background: white;
+    }
+    .control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #e8623c1c; }
+    .search { width: min(310px, 100%); }
+    .toolbar .spacer { flex: 1; }
+    .bulk { display: flex; gap: 6px; align-items: center; }
+    .selection-count { color: var(--muted); font-size: 12px; }
+    .button-table {
+      min-height: 36px;
+      padding: 7px 10px;
+      color: var(--navy);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+      font-weight: 700;
+    }
+    .button-table:hover { border-color: #aab4c5; background: #f8fafc; }
+    .table-shell {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      min-width: 1420px;
+      border-collapse: separate;
+      border-spacing: 0;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      padding: 10px 8px;
+      color: #4c5668;
+      border-bottom: 1px solid var(--line);
+      background: #f2f0eb;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: .04em;
+      white-space: nowrap;
+    }
+    td {
+      padding: 8px;
+      border-bottom: 1px solid #ece9e2;
+      vertical-align: top;
+      background: white;
+    }
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:hover td { background: #fffefa; }
+    tbody tr.status-review td:first-child { box-shadow: inset 4px 0 var(--review); }
+    tbody tr.status-approved td:first-child { box-shadow: inset 4px 0 var(--success); }
+    tbody tr.status-keep td:first-child { box-shadow: inset 4px 0 var(--keep); }
+    tbody tr.status-rejected td:first-child { box-shadow: inset 4px 0 var(--rejected); }
+    tbody tr.invalid td { background: var(--error-bg); }
+    .cell-input, .cell-select, .cell-note {
+      width: 100%;
+      padding: 7px 8px;
+      color: var(--ink);
+      border: 1px solid #d8d4cb;
+      border-radius: 7px;
+      outline: none;
+      background: #fffefa;
+    }
+    .cell-input:focus, .cell-select:focus, .cell-note:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px #e8623c1c;
+    }
+    .cell-input:disabled {
+      color: #7b818d;
+      border-color: transparent;
+      background: transparent;
+    }
+    .source {
+      min-width: 180px;
+      font-weight: 760;
+      overflow-wrap: anywhere;
+    }
+    .source .manual-label {
+      display: inline-block;
+      margin-top: 4px;
+      padding: 2px 6px;
+      color: #765000;
+      border-radius: 999px;
+      background: var(--review-bg);
+      font-size: 10px;
+    }
+    .translation { min-width: 190px; }
+    .status { min-width: 125px; }
+    .category { min-width: 130px; }
+    .evidence { min-width: 230px; max-width: 360px; }
+    .note { min-width: 190px; }
+    .meta {
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    details { margin-top: 5px; color: var(--muted); font-size: 12px; }
+    summary { cursor: pointer; color: var(--navy); font-weight: 700; }
+    .example {
+      max-height: 130px;
+      margin: 6px 0 0;
+      padding: 7px;
+      border-radius: 7px;
+      background: #f7f6f2;
+      white-space: pre-wrap;
+      overflow: auto;
+    }
+    .delete-button {
+      padding: 5px 7px;
+      color: var(--error);
+      border: 1px solid #efc3c0;
+      border-radius: 7px;
+      background: white;
+      font-size: 11px;
+    }
+    .empty {
+      padding: 58px 20px;
+      color: var(--muted);
+      text-align: center;
+    }
+    .option-line {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .toast {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      z-index: 50;
+      max-width: 480px;
+      padding: 12px 15px;
+      color: white;
+      border-radius: 10px;
+      background: var(--navy);
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(12px);
+      pointer-events: none;
+      transition: .2s ease;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.error { background: var(--error); }
+    @media (max-width: 960px) {
+      .header { flex-wrap: wrap; }
+      .brand { min-width: 0; flex: 1; }
+      .metrics { order: 3; width: 100%; }
+      .actions { width: 100%; }
+      .actions .button { flex: 1; }
+      main { padding: 16px 10px 60px; }
+      .toolbar { top: 124px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="brand">
+      <div class="eyebrow">Game Localization Kit</div>
+      <h1 id="project-name">Glossary Review</h1>
+    </div>
+    <div class="metrics" id="metrics"></div>
+    <div class="actions">
+      <button class="button button-secondary" id="save-button">TSV 저장</button>
+      <button class="button button-success" id="import-button">검증 및 termbase 생성</button>
+    </div>
+  </header>
+  <main>
+    <div class="intro">
+      <div>
+        <h2>용어 후보를 표처럼 검수하세요</h2>
+        <p>상태·번역어·분류·메모를 수정하면 기존 glossary_review.tsv에 그대로 저장됩니다.</p>
+      </div>
+      <span class="file-state" id="file-state">불러오는 중</span>
+    </div>
+    <section class="toolbar">
+      <input class="control search" id="search" type="search" placeholder="원문·번역·문맥·메모 검색">
+      <select class="control" id="status-filter" aria-label="상태 필터">
+        <option value="all">모든 상태</option>
+      </select>
+      <select class="control" id="category-filter" aria-label="분류 필터">
+        <option value="all">모든 분류</option>
+      </select>
+      <button class="button-table" id="add-button" type="button">+ 수동 용어</button>
+      <div class="spacer"></div>
+      <span class="selection-count" id="selection-count">0개 선택</span>
+      <div class="bulk">
+        <select class="control" id="bulk-status" aria-label="일괄 상태">
+          <option value="">상태 일괄 변경</option>
+        </select>
+        <button class="button-table" id="bulk-apply" type="button">적용</button>
+      </div>
+    </section>
+    <section class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th><input id="select-visible" type="checkbox" aria-label="표시된 행 모두 선택"></th>
+            <th>상태</th>
+            <th>원문 용어</th>
+            <th>번역어</th>
+            <th>분류</th>
+            <th>출현·문맥</th>
+            <th>메모</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td class="empty" colspan="8">검수 데이터를 불러오는 중입니다…</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <label class="option-line">
+      <input id="allow-missing" type="checkbox">
+      승인 원문에서 찾을 수 없는 수동 용어도 명시적으로 허용
+    </label>
+  </main>
+  <div class="toast" id="toast"></div>
+  <script>
+    "use strict";
+    const AUTH_TOKEN = __GLK_TOKEN_JSON__;
+    const STATUS_LABELS = {
+      review: "검토 필요",
+      approved: "승인",
+      keep: "원문 유지",
+      rejected: "제외"
+    };
+    const CATEGORY_LABELS = {
+      term: "일반 용어",
+      proper_noun: "고유명사",
+      ability: "능력명",
+      component: "구성품",
+      ui: "UI",
+      phrase: "문구"
+    };
+    const state = {
+      document: null,
+      dirty: false,
+      busy: false,
+      search: "",
+      statusFilter: "all",
+      categoryFilter: "all",
+      selected: new Set(),
+      manualSequence: 0
+    };
+    const $ = (selector) => document.querySelector(selector);
+
+    async function api(path, options = {}) {
+      const headers = Object.assign(
+        { "X-GLK-Token": AUTH_TOKEN },
+        options.body ? { "Content-Type": "application/json" } : {},
+        options.headers || {}
+      );
+      const response = await fetch(path, Object.assign({}, options, { headers }));
+      const payload = await response.json().catch(() => ({ message: "응답을 읽을 수 없습니다." }));
+      if (!response.ok) throw new Error(payload.message || `HTTP ${response.status}`);
+      return payload;
+    }
+
+    function make(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    function toast(message, error = false) {
+      const node = $("#toast");
+      node.textContent = message;
+      node.className = `toast show${error ? " error" : ""}`;
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => { node.className = "toast"; }, 3400);
+    }
+
+    function option(value, label, selected = false) {
+      const node = make("option", "", label);
+      node.value = value;
+      node.selected = selected;
+      return node;
+    }
+
+    function metric(value, label) {
+      const node = make("div", "metric");
+      node.append(make("strong", "", String(value)), make("span", "", label));
+      return node;
+    }
+
+    function summary() {
+      const result = {
+        rows: state.document.rows.length,
+        review: 0,
+        approved: 0,
+        keep: 0,
+        rejected: 0,
+        missing: 0
+      };
+      state.document.rows.forEach((row) => {
+        if (Object.hasOwn(result, row.status)) result[row.status] += 1;
+        if (row.status === "approved" && !row.translation.trim()) result.missing += 1;
+      });
+      return result;
+    }
+
+    function refreshSummary() {
+      const value = summary();
+      $("#metrics").replaceChildren(
+        metric(value.rows, "전체"),
+        metric(value.review, "검토 필요"),
+        metric(value.approved, "승인"),
+        metric(value.keep, "원문 유지"),
+        metric(value.rejected, "제외")
+      );
+      $("#file-state").textContent =
+        `${state.document.termbase_status}${state.dirty ? " · 저장 안 됨" : ""}`;
+      $("#selection-count").textContent = `${state.selected.size}개 선택`;
+      $("#save-button").disabled = state.busy || !state.dirty;
+      $("#import-button").disabled = state.busy;
+    }
+
+    function rowSearchText(row) {
+      return [
+        row.source_term,
+        row.translation,
+        row.category,
+        row.note,
+        row.variants,
+        row.locations,
+        row.example
+      ].join("\n").toLocaleLowerCase();
+    }
+
+    function visible(row) {
+      if (state.statusFilter !== "all" && row.status !== state.statusFilter) return false;
+      if (state.categoryFilter !== "all" && row.category !== state.categoryFilter) return false;
+      const query = state.search.trim().toLocaleLowerCase();
+      return !query || rowSearchText(row).includes(query);
+    }
+
+    function markDirty() {
+      state.dirty = true;
+      refreshSummary();
+    }
+
+    function applyStatusRule(row) {
+      if (row.status === "keep") row.translation = row.source_term;
+      if (row.status === "rejected") row.translation = "";
+    }
+
+    function buildSelect(values, labels, current, className) {
+      const select = make("select", className);
+      values.forEach((value) => {
+        select.append(option(value, labels[value] || value, value === current));
+      });
+      return select;
+    }
+
+    function renderRows() {
+      const tbody = $("#rows");
+      tbody.replaceChildren();
+      const shown = state.document.rows.filter(visible);
+      if (!shown.length) {
+        const row = make("tr");
+        const cell = make("td", "empty", "조건에 맞는 용어가 없습니다.");
+        cell.colSpan = 8;
+        row.append(cell);
+        tbody.append(row);
+        $("#select-visible").checked = false;
+        refreshSummary();
+        return;
+      }
+
+      shown.forEach((item) => {
+        const row = make("tr", `status-${item.status}`);
+        row.dataset.rowKey = item.row_key;
+        if (item.status === "approved" && !item.translation.trim()) row.classList.add("invalid");
+
+        const checkCell = make("td");
+        const checkbox = make("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = state.selected.has(item.row_key);
+        checkbox.setAttribute("aria-label", `${item.source_term || "수동 용어"} 선택`);
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) state.selected.add(item.row_key);
+          else state.selected.delete(item.row_key);
+          refreshSummary();
+        });
+        checkCell.append(checkbox);
+
+        const statusCell = make("td", "status");
+        const status = buildSelect(
+          state.document.statuses, STATUS_LABELS, item.status, "cell-select"
+        );
+        status.addEventListener("change", () => {
+          item.status = status.value;
+          applyStatusRule(item);
+          markDirty();
+          renderRows();
+        });
+        statusCell.append(status);
+
+        const sourceCell = make("td", "source");
+        if (item.manual) {
+          const input = make("input", "cell-input");
+          input.value = item.source_term;
+          input.placeholder = "추가할 원문 용어";
+          input.addEventListener("input", () => {
+            item.source_term = input.value;
+            if (item.status === "keep") item.translation = item.source_term;
+            markDirty();
+          });
+          sourceCell.append(input, make("span", "manual-label", "수동 추가"));
+        } else {
+          sourceCell.append(document.createTextNode(item.source_term));
+        }
+
+        const translationCell = make("td", "translation");
+        const translation = make("input", "cell-input");
+        translation.value = item.translation;
+        translation.placeholder =
+          item.status === "approved" ? "번역어 필수" : "번역어";
+        translation.disabled = item.status === "keep" || item.status === "rejected";
+        translation.addEventListener("input", () => {
+          item.translation = translation.value;
+          row.classList.toggle(
+            "invalid",
+            item.status === "approved" && !item.translation.trim()
+          );
+          markDirty();
+        });
+        translationCell.append(translation);
+
+        const categoryCell = make("td", "category");
+        const category = buildSelect(
+          state.document.categories, CATEGORY_LABELS, item.category, "cell-select"
+        );
+        category.addEventListener("change", () => {
+          item.category = category.value;
+          markDirty();
+        });
+        categoryCell.append(category);
+
+        const evidenceCell = make("td", "evidence");
+        const count = item.occurrences || (item.manual ? "저장 후 확인" : "0");
+        const location = item.locations ? ` · ${item.locations}` : "";
+        evidenceCell.append(make("div", "meta", `${count}회${location}`));
+        if (item.example || item.variants) {
+          const details = make("details");
+          const summaryNode = make("summary", "", "실제 문맥 펼치기");
+          const example = make(
+            "pre",
+            "example",
+            [item.variants ? `표기: ${item.variants}` : "", item.example]
+              .filter(Boolean).join("\n\n")
+          );
+          details.append(summaryNode, example);
+          evidenceCell.append(details);
+        }
+
+        const noteCell = make("td", "note");
+        const note = make("input", "cell-note");
+        note.value = item.note;
+        note.placeholder = "번역 원칙 또는 검토 메모";
+        note.addEventListener("input", () => {
+          item.note = note.value;
+          markDirty();
+        });
+        noteCell.append(note);
+
+        const actionCell = make("td");
+        if (item.manual) {
+          const remove = make("button", "delete-button", "삭제");
+          remove.type = "button";
+          remove.addEventListener("click", () => {
+            state.document.rows = state.document.rows.filter(
+              (candidate) => candidate.row_key !== item.row_key
+            );
+            state.selected.delete(item.row_key);
+            markDirty();
+            renderRows();
+          });
+          actionCell.append(remove);
+        }
+
+        row.append(
+          checkCell,
+          statusCell,
+          sourceCell,
+          translationCell,
+          categoryCell,
+          evidenceCell,
+          noteCell,
+          actionCell
+        );
+        tbody.append(row);
+      });
+      const visibleKeys = shown.map((row) => row.row_key);
+      $("#select-visible").checked =
+        visibleKeys.length > 0 && visibleKeys.every((key) => state.selected.has(key));
+      refreshSummary();
+    }
+
+    function initializeControls() {
+      const statusFilter = $("#status-filter");
+      const bulkStatus = $("#bulk-status");
+      state.document.statuses.forEach((value) => {
+        statusFilter.append(option(value, STATUS_LABELS[value]));
+        bulkStatus.append(option(value, STATUS_LABELS[value]));
+      });
+      const categoryFilter = $("#category-filter");
+      state.document.categories.forEach((value) => {
+        categoryFilter.append(option(value, CATEGORY_LABELS[value] || value));
+      });
+    }
+
+    function render() {
+      document.title = `${state.document.project.name} · GLK Glossary`;
+      $("#project-name").textContent = state.document.project.name;
+      renderRows();
+    }
+
+    function requestBody() {
+      return JSON.stringify({
+        review_sha256: state.document.review_sha256,
+        allow_missing_terms: $("#allow-missing").checked,
+        rows: state.document.rows.map((row) => ({
+          candidate_id: row.candidate_id,
+          status: row.status,
+          source_term: row.source_term,
+          translation: row.translation,
+          category: row.category,
+          note: row.note
+        }))
+      });
+    }
+
+    async function runAction(action) {
+      if (state.busy) return;
+      state.busy = true;
+      refreshSummary();
+      try {
+        const payload = await api(`/api/${action}`, {
+          method: "POST",
+          body: requestBody()
+        });
+        state.document = payload.document;
+        state.selected.clear();
+        state.dirty = false;
+        render();
+        if (action === "save") {
+          toast("glossary_review.tsv에 저장했습니다.");
+        } else if (payload.ok) {
+          toast(
+            `termbase를 생성했습니다. 활성 용어 ${payload.result.active_count}개, 제외 ${payload.result.rejected_count}개.`
+          );
+        } else {
+          toast(`TSV는 저장했지만 termbase를 만들지 못했습니다: ${payload.message}`, true);
+        }
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        state.busy = false;
+        refreshSummary();
+      }
+    }
+
+    $("#save-button").addEventListener("click", () => runAction("save"));
+    $("#import-button").addEventListener("click", () => runAction("import"));
+    $("#search").addEventListener("input", (event) => {
+      state.search = event.target.value;
+      renderRows();
+    });
+    $("#status-filter").addEventListener("change", (event) => {
+      state.statusFilter = event.target.value;
+      renderRows();
+    });
+    $("#category-filter").addEventListener("change", (event) => {
+      state.categoryFilter = event.target.value;
+      renderRows();
+    });
+    $("#select-visible").addEventListener("change", (event) => {
+      state.document.rows.filter(visible).forEach((row) => {
+        if (event.target.checked) state.selected.add(row.row_key);
+        else state.selected.delete(row.row_key);
+      });
+      renderRows();
+    });
+    $("#bulk-apply").addEventListener("click", () => {
+      const status = $("#bulk-status").value;
+      if (!status) {
+        toast("일괄 적용할 상태를 선택하세요.", true);
+        return;
+      }
+      let changed = 0;
+      state.document.rows.forEach((row) => {
+        if (!state.selected.has(row.row_key)) return;
+        row.status = status;
+        applyStatusRule(row);
+        changed += 1;
+      });
+      if (!changed) {
+        toast("먼저 변경할 행을 선택하세요.", true);
+        return;
+      }
+      markDirty();
+      renderRows();
+      toast(`${changed}개 용어를 '${STATUS_LABELS[status]}' 상태로 변경했습니다.`);
+    });
+    $("#add-button").addEventListener("click", () => {
+      const rowKey = `manual-browser-${Date.now()}-${state.manualSequence++}`;
+      state.document.rows.unshift({
+        row_key: rowKey,
+        candidate_id: "",
+        manual: true,
+        status: "review",
+        source_term: "",
+        translation: "",
+        category: "term",
+        note: "",
+        variants: "",
+        occurrences: "",
+        locations: "",
+        example: ""
+      });
+      state.statusFilter = "all";
+      state.categoryFilter = "all";
+      $("#status-filter").value = "all";
+      $("#category-filter").value = "all";
+      markDirty();
+      renderRows();
+      document.querySelector(`[data-row-key="${rowKey}"] .source input`)?.focus();
+    });
+    window.addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "s") {
+        event.preventDefault();
+        runAction("save");
+      }
+    });
+    window.addEventListener("beforeunload", (event) => {
+      if (state.dirty) event.preventDefault();
+    });
+
+    api("/api/review")
+      .then((documentValue) => {
+        state.document = documentValue;
+        state.document.rows.forEach((row) => {
+          if (row.status === "keep" && !row.translation) {
+            row.translation = row.source_term;
+          }
+        });
+        initializeControls();
+        render();
+      })
+      .catch((error) => {
+        $("#rows").innerHTML = "";
+        const row = make("tr");
+        const cell = make("td", "empty", error.message);
+        cell.colSpan = 8;
+        row.append(cell);
+        $("#rows").append(row);
+        toast(error.message, true);
+      });
+  </script>
+</body>
+</html>

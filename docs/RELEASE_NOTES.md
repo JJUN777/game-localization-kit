@@ -1,0 +1,168 @@
+# 릴리즈 노트
+
+## v1.0.0 — 2026-07-23
+
+Game Localization Kit의 첫 정식 릴리즈입니다.
+
+PDF 룰북 또는 이미지 폴더에서 원문을 가져오고, 사람이 원문과 번역을 검수한 뒤 최종 한국어 TXT를 만드는 전체 흐름을 하나의 `glk` CLI로 제공합니다.
+
+---
+
+## 핵심 요약
+
+```text
+입력:  PDF 룰북 1개 또는 이미지 폴더
+출력:  workspaces/<project_id>/05_output/*_kor.txt
+모델:  gemini-2.5-flash (기본)
+플랫폼: Windows, macOS
+```
+
+```bash
+pip install -e .
+glk version   # → glk 1.0.0
+```
+
+---
+
+## 주요 기능
+
+### 통합 CLI
+
+- Windows와 macOS에서 동일한 `glk` 명령
+- 프로젝트별 독립 workspace와 `01_input` ~ `05_output` 단계별 폴더 구조
+- 캐시·상태·내부 JSONL을 `.glk` 영역으로 분리
+- `01_input`을 프로젝트의 유일한 원본 저장소로 사용
+- 한쪽 입력 폴더에 원본이 있으면 `glk run`에서 자동 감지
+- `glk projects`로 전체 프로젝트 목록과 진행 단계 조회
+- 원문·용어·번역 검수를 `glk review source|glossary|translation`으로 통일
+
+### PDF 원문 획득
+
+- PDF 텍스트 fragment와 좌표 추출
+- 페이지별 읽기 순서 판정 (1단·2단·3단 사전 지정 불필요)
+- Gemini를 이용한 fragment 순서와 block 묶음 결정
+- fragment 집합 검증 실패 시 해당 페이지 최대 2회 재시도 (최초 포함 총 3회)
+- 재요청 실패 시 임의 보정 없이 partial 처리
+- 페이지별 캐시와 선택 페이지 처리
+
+### 이미지 폴더 OCR
+
+- PNG, JPG, JPEG, WebP 지원
+- 하위 폴더 재귀 탐색과 출력 구조 보존
+- 공통 `ocr_prompt.txt`와 이미지별 `파일명.prompt.txt`
+- 아이콘 30종 상세 prompt를 새 프로젝트에 자동 생성
+- 아이콘을 `{HP}`, `{DEF}` 같은 token으로 기록하는 규칙 지원
+
+### 원문 검수
+
+- PDF와 이미지 결과를 같은 SourceBlock 구조로 정규화
+- 자동 기준본 `draft.txt`와 사람이 수정하는 `review.txt` 분리
+- localhost 브라우저 화면에서 원본 이미지와 추출문을 나란히 비교
+- block 본문 수정, 순서 변경, 제외, 원본 bbox 지정 신규 block 추가
+- 숫자·아이콘 token·판독 불가 표시와 OCR 혼동 후보의 로컬 QA
+- marker, block 순서와 원문 hash 검증 후 최종 승인
+
+### 용어집
+
+- 승인 원문에서 로컬 규칙으로 반복 용어와 고유명사 후보 수집
+- 수량 접두사·기능어·중첩 후보를 정제하는 v2 규칙
+- `glk review glossary` localhost 검수 화면 (표 편집, 필터, 일괄 변경, 수동 추가)
+- TSV hash 충돌 방지와 자동 후보 삭제 방지
+- `approved`, `keep`, `rejected` 상태와 검증된 `termbase.json` 생성
+
+### 초벌 번역
+
+- 승인 원문 block ID를 유지하는 Gemini 번역
+- hard rule → termbase → 프로젝트 지침 우선순위
+- 현재 청크에 필요한 용어만 prompt에 포함
+- 숫자, token, HTML tag, 확정 용어 검증과 실패 시 재요청
+- 청크별 체크포인트와 `--resume`
+- 사람 검토본을 자동으로 덮어쓰지 않는 stale 처리
+
+### 번역 검수
+
+- localhost 원문·번역 비교 화면
+- block 검색, 오류·경고 필터, 번역 본문만 안전 저장
+- QA ERROR block만 Gemini로 선택 재번역
+- 정상 block과 초벌 draft 보존, revision 기록
+- QA 코드는 영문 유지, HTML·보고서의 사유는 한글과 실제 차이값 표시
+- 오류 0개일 때 최종 승인과 `05_output/*_kor.txt` 생성
+- 최종 TXT에서 page·source 경계 유지, block·GLK marker 제거
+
+---
+
+## 구조와 보안
+
+- 활성 코드와 문서를 `src/`, `tests/`, `docs/`로 정리
+- 이전 코드와 PoC 자료인 `legacy/` 제거
+- project workspace와 `.env`를 Git에서 제외
+- API 키는 `.env` 또는 환경변수로만 관리, 추적 파일에서 키 패턴 미검출 확인
+- localhost 검수 서버에 session token, Host·Origin 검사, 동시 편집 hash 검사 적용
+- 외부 CDN·script 미사용, 선택 재번역 때만 Gemini 호출
+
+---
+
+## 검증 결과
+
+### 자동 테스트
+
+- 전체 104개 테스트 통과
+- CLI 설치와 `glk version` 확인
+- PDF·이미지 원문 획득과 검수 흐름 회귀 검사
+- 용어 후보 생성·HTML 검수 저장·import 검증 회귀 검사
+- 번역 prompt, 청크 저장과 재개 회귀 검사
+- 원문·용어·번역 검수 서버의 저장·QA·승인, 원본 asset 제공과 요청 차단 검사
+- Git 추적 파일의 API 키 패턴 검사
+
+### End-to-end 검증
+
+| 프로젝트 | 입력 | 결과 |
+|---|---|---|
+| `primal_poc` | PDF 룰북 2페이지 (61 block, 2,742자) | 원문 추출 → QA → 검수 승인 → 용어 3개 확정 → 초벌 번역 → QA 통과 → 최종 TXT 생성 완료 |
+| `dragon_poc` | 카드 이미지 5장 (932×1270px, 아이콘 30종) | OCR → 검수 승인 → 용어 확정 → 번역 → 최종 TXT 생성 완료 |
+
+두 프로젝트 모두 `glk init` → `glk run` → 검수 → 용어 → 번역 → 최종 승인의 전체 흐름을 사람 개입 포함해서 완주했습니다.
+
+### 추가 확인
+
+- Markdown 링크와 코드 블록 정상 렌더링 확인
+- Git 추적 대상에 `legacy/`와 workspace가 없음을 확인
+- macOS zsh에서 설치·실행 확인
+- Windows PowerShell용 설치 명령과 크로스 플랫폼 경로 처리 테스트
+
+---
+
+## 설치
+
+Python 3.10 이상이 필요합니다.
+
+```bash
+# macOS/Linux
+cd game-localization-kit
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+glk version   # → glk 1.0.0
+
+# Windows PowerShell
+cd game-localization-kit
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e .
+glk version   # → glk 1.0.0
+```
+
+---
+
+## 알려진 제한사항
+
+| 제한 | 대안 |
+|---|---|
+| 설치형 실행 파일과 데스크톱 GUI 없음 | CLI + 브라우저 검수 화면 사용 |
+| 한국어 번역 전용 | 다른 언어 지원은 향후 검토 |
+| Gemini API만 지원 | 다른 LLM provider 미지원 |
+| 프로젝트당 PDF 1개 | 여러 PDF는 프로젝트를 나눠서 처리 |
+| 스캔 PDF 직접 처리 불가 | 페이지를 이미지로 변환 후 이미지 OCR 흐름 사용 |
+| 표·자유 배치의 읽기 순서 자동 복원 한계 | 원문 검수 단계에서 사람이 순서 조정 |
+
+자세한 사용 방법과 대안은 [README](../README.md)를 참고합니다.

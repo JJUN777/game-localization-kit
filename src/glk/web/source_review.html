@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GLK 원문 검수</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111317;
+      --panel: #1a1e25;
+      --panel2: #222832;
+      --line: #353d49;
+      --text: #edf2f7;
+      --muted: #9ba8b8;
+      --accent: #63d2b4;
+      --warn: #f7c873;
+      --danger: #ff7d8b;
+      --blue: #69a7ff;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
+    button, textarea, input { font: inherit; }
+    button {
+      border: 1px solid var(--line); border-radius: 8px; background: var(--panel2);
+      color: var(--text); padding: 8px 11px; cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: #176b5a; border-color: var(--accent); }
+    button.danger { color: var(--danger); }
+    header {
+      height: 62px; display: flex; align-items: center; gap: 12px; padding: 0 16px;
+      border-bottom: 1px solid var(--line); background: #15181e; position: sticky; top: 0; z-index: 20;
+    }
+    header h1 { font-size: 18px; margin: 0; }
+    .grow { flex: 1; }
+    .status { color: var(--muted); white-space: nowrap; }
+    .layout { display: grid; grid-template-columns: 210px minmax(400px, 1fr) minmax(420px, 0.9fr); height: calc(100vh - 62px); }
+    aside, main, section.editor { min-height: 0; overflow: auto; }
+    aside { border-right: 1px solid var(--line); padding: 12px; background: #15181e; }
+    .group {
+      width: 100%; text-align: left; margin-bottom: 7px; display: flex; justify-content: space-between;
+    }
+    .group span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .group.active { border-color: var(--accent); background: #1c3a35; }
+    main { padding: 14px; border-right: 1px solid var(--line); }
+    .viewer-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+    .canvas { position: relative; margin: auto; width: 100%; max-width: none; user-select: none; }
+    .canvas img { display: block; width: 100%; max-width: none; height: auto; border-radius: 4px; }
+    .overlay { position: absolute; inset: 0; cursor: crosshair; }
+    .box {
+      position: absolute; border: 2px solid rgba(99,210,180,.75); background: rgba(99,210,180,.10);
+      cursor: pointer; min-width: 3px; min-height: 3px;
+    }
+    .box.selected { border-color: var(--warn); background: rgba(247,200,115,.22); z-index: 3; }
+    .box.excluded { border-color: #7d8794; background: rgba(90,98,110,.16); opacity: .55; }
+    .box.issue { box-shadow: 0 0 0 2px var(--danger); }
+    .draw-box { position: absolute; border: 2px dashed var(--blue); background: rgba(105,167,255,.18); pointer-events: none; }
+    section.editor { padding: 14px; background: var(--panel); }
+    .summary { color: var(--muted); margin-bottom: 10px; }
+    .card {
+      border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 10px;
+      background: #171b21;
+    }
+    .card.selected { border-color: var(--warn); box-shadow: 0 0 0 1px var(--warn); }
+    .card.excluded { opacity: .6; }
+    .card-head { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+    .card-id { color: var(--muted); font: 11px ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tag { border-radius: 12px; padding: 2px 7px; font-size: 11px; background: #26303b; white-space: nowrap; }
+    .tag.manual { color: var(--blue); }
+    .tag.issue { color: var(--danger); }
+    textarea {
+      width: 100%; min-height: 100px; resize: vertical; border: 1px solid var(--line);
+      background: #101319; color: var(--text); border-radius: 7px; padding: 9px;
+    }
+    textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    .mini { padding: 4px 7px; font-size: 12px; }
+    .notice {
+      position: fixed; right: 18px; bottom: 18px; max-width: 460px; padding: 12px 15px;
+      border-radius: 9px; background: #26303b; border: 1px solid var(--line); z-index: 30;
+    }
+    .notice.error { border-color: var(--danger); color: #ffd4d8; }
+    .hidden { display: none !important; }
+    label.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+    @media (max-width: 1050px) {
+      .layout { grid-template-columns: 150px 1fr; }
+      section.editor { grid-column: 1 / -1; height: 55vh; border-top: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>원문 이미지 · 추출문 검수</h1>
+    <span id="project" class="status"></span>
+    <div class="grow"></div>
+    <label class="check"><input id="allowTokens" type="checkbox"> 아이콘 token 변경 허용</label>
+    <button id="save">저장</button>
+    <button id="validate">검증</button>
+    <button id="finalize" class="primary">최종 승인</button>
+  </header>
+  <div class="layout">
+    <aside>
+      <div id="groups"></div>
+    </aside>
+    <main>
+      <div class="viewer-tools">
+        <button id="addMissing">누락 문단 추가</button>
+        <button id="openPdf" class="hidden">원본 PDF 열기</button>
+        <label>확대 <input id="zoom" type="range" min="50" max="180" value="100"></label>
+        <span id="drawHint" class="status hidden">원본에서 누락 영역을 드래그하세요.</span>
+      </div>
+      <div id="canvas" class="canvas">
+        <img id="sourceImage" alt="원본 페이지">
+        <div id="overlay" class="overlay"></div>
+      </div>
+    </main>
+    <section class="editor">
+      <div id="summary" class="summary"></div>
+      <div id="cards"></div>
+    </section>
+  </div>
+  <div id="notice" class="notice hidden"></div>
+  <script>
+    const TOKEN = __GLK_TOKEN_JSON__;
+    let documentState = null;
+    let currentGroup = null;
+    let selectedId = null;
+    let drawMode = false;
+    let drawStart = null;
+    let drawElement = null;
+    let newCounter = 0;
+
+    const $ = (id) => document.getElementById(id);
+    const api = async (path, options = {}) => {
+      const response = await fetch(path, {
+        ...options,
+        headers: {"X-GLK-Token": TOKEN, ...(options.headers || {})}
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message || "요청에 실패했습니다.");
+      return body;
+    };
+    const notice = (message, error = false) => {
+      $("notice").textContent = message;
+      $("notice").className = `notice${error ? " error" : ""}`;
+      clearTimeout(notice.timer);
+      notice.timer = setTimeout(() => $("notice").classList.add("hidden"), 4200);
+    };
+    const groupBlocks = () => documentState.blocks.filter((b) => b.group_id === currentGroup);
+    const groupById = () => documentState.groups.find((g) => g.id === currentGroup);
+
+    function renderGroups() {
+      $("groups").innerHTML = "";
+      for (const group of documentState.groups) {
+        const count = documentState.blocks.filter((b) => b.group_id === group.id && !b.excluded).length;
+        const button = document.createElement("button");
+        button.className = `group${group.id === currentGroup ? " active" : ""}`;
+        button.title = group.label;
+        const label = document.createElement("span");
+        label.textContent = group.label;
+        const total = document.createElement("span");
+        total.textContent = count;
+        button.append(label, total);
+        button.onclick = () => { currentGroup = group.id; selectedId = null; render(); };
+        $("groups").appendChild(button);
+      }
+    }
+
+    function selectBlock(id) {
+      selectedId = id;
+      document.querySelectorAll("[data-card]").forEach((card) => {
+        card.classList.toggle("selected", card.dataset.card === id);
+      });
+      renderOverlay();
+      const card = document.querySelector(`[data-card="${CSS.escape(id)}"]`);
+      if (card) card.scrollIntoView({block: "nearest", behavior: "smooth"});
+    }
+
+    function renderOverlay() {
+      const overlay = $("overlay");
+      overlay.innerHTML = "";
+      for (const block of groupBlocks()) {
+        if (!block.bbox) continue;
+        const [x0,y0,x1,y1] = block.bbox;
+        const box = document.createElement("div");
+        box.className = `box${selectedId === block.id ? " selected" : ""}${block.excluded ? " excluded" : ""}${block.issues.length ? " issue" : ""}`;
+        box.style.left = `${x0/10}%`; box.style.top = `${y0/10}%`;
+        box.style.width = `${(x1-x0)/10}%`; box.style.height = `${(y1-y0)/10}%`;
+        box.title = block.text.slice(0, 100);
+        box.onclick = (event) => { event.stopPropagation(); selectBlock(block.id); };
+        overlay.appendChild(box);
+      }
+    }
+
+    function moveBlock(id, direction) {
+      const index = documentState.blocks.findIndex((b) => b.id === id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= documentState.blocks.length) return;
+      if (documentState.blocks[target].group_id !== currentGroup) return;
+      [documentState.blocks[index], documentState.blocks[target]] =
+        [documentState.blocks[target], documentState.blocks[index]];
+      render();
+    }
+
+    function deleteManual(id) {
+      documentState.blocks = documentState.blocks.filter((b) => b.id !== id);
+      if (selectedId === id) selectedId = null;
+      render();
+    }
+
+    function renderCards() {
+      const cards = $("cards");
+      cards.innerHTML = "";
+      for (const block of groupBlocks()) {
+        const card = document.createElement("div");
+        card.dataset.card = block.id;
+        card.className = `card${selectedId === block.id ? " selected" : ""}${block.excluded ? " excluded" : ""}`;
+        const head = document.createElement("div");
+        head.className = "card-head";
+        head.innerHTML = `
+          <span class="card-id" title="${block.id}">${block.id}</span>
+          ${block.manual ? '<span class="tag manual">수동 추가</span>' : ""}
+          ${block.issues.length ? `<span class="tag issue">QA ${block.issues.length}</span>` : ""}
+          <span class="grow"></span>`;
+        const up = document.createElement("button"); up.className = "mini"; up.textContent = "↑";
+        up.onclick = () => moveBlock(block.id, -1);
+        const down = document.createElement("button"); down.className = "mini"; down.textContent = "↓";
+        down.onclick = () => moveBlock(block.id, 1);
+        head.append(up, down);
+        if (block.manual) {
+          const del = document.createElement("button"); del.className = "mini danger"; del.textContent = "삭제";
+          del.onclick = () => deleteManual(block.id); head.appendChild(del);
+        } else {
+          const label = document.createElement("label"); label.className = "check";
+          const check = document.createElement("input"); check.type = "checkbox"; check.checked = block.excluded;
+          check.onchange = () => { block.excluded = check.checked; render(); };
+          label.append(check, document.createTextNode(" 제외")); head.appendChild(label);
+        }
+        const area = document.createElement("textarea");
+        area.value = block.text;
+        area.disabled = block.excluded;
+        area.onfocus = () => selectBlock(block.id);
+        area.oninput = () => { block.text = area.value; };
+        card.onclick = () => selectBlock(block.id);
+        card.append(head, area);
+        if (block.issues.length) {
+          const issue = document.createElement("div");
+          issue.className = "status";
+          issue.textContent = block.issues.map((i) => i.message || i.code).join(" · ");
+          card.appendChild(issue);
+        }
+        cards.appendChild(card);
+      }
+    }
+
+    function renderSource() {
+      const group = groupById();
+      if (!group) return;
+      const imageUrl = `${group.image_url}&token=${encodeURIComponent(TOKEN)}`;
+      if ($("sourceImage").getAttribute("src") !== imageUrl) {
+        $("sourceImage").src = imageUrl;
+      }
+      $("canvas").style.width = `${$("zoom").value}%`;
+      $("sourceImage").style.width = "100%";
+      $("openPdf").classList.toggle("hidden", !documentState.original_pdf_url);
+    }
+
+    function renderSummary() {
+      const s = {
+        blocks: documentState.blocks.length,
+        excluded: documentState.blocks.filter((b) => b.excluded).length,
+        manual: documentState.blocks.filter((b) => b.manual).length,
+        changed: documentState.blocks.filter((b) => b.manual || b.text !== b.raw_text).length,
+        issues: documentState.blocks.reduce((total, b) => total + b.issues.length, 0)
+      };
+      $("project").textContent = `${documentState.project_name} · ${documentState.review_status}`;
+      $("summary").textContent = `전체 ${s.blocks} · 제외 ${s.excluded} · 수동 ${s.manual} · 수정 ${s.changed} · QA ${s.issues}`;
+    }
+
+    function render() {
+      renderGroups(); renderSource(); renderCards(); renderOverlay(); renderSummary();
+    }
+
+    function normalizedPoint(event) {
+      const rect = $("sourceImage").getBoundingClientRect();
+      return [
+        Math.max(0, Math.min(1000, (event.clientX - rect.left) / rect.width * 1000)),
+        Math.max(0, Math.min(1000, (event.clientY - rect.top) / rect.height * 1000))
+      ];
+    }
+
+    $("addMissing").onclick = () => {
+      drawMode = true; $("drawHint").classList.remove("hidden");
+      notice("원본 이미지에서 누락된 문단 영역을 드래그하세요.");
+    };
+    $("overlay").onpointerdown = (event) => {
+      if (!drawMode) return;
+      event.preventDefault(); drawStart = normalizedPoint(event);
+      drawElement = document.createElement("div"); drawElement.className = "draw-box";
+      $("overlay").appendChild(drawElement);
+      $("overlay").setPointerCapture(event.pointerId);
+    };
+    $("overlay").onpointermove = (event) => {
+      if (!drawStart || !drawElement) return;
+      const point = normalizedPoint(event);
+      const x0 = Math.min(drawStart[0], point[0]), y0 = Math.min(drawStart[1], point[1]);
+      const x1 = Math.max(drawStart[0], point[0]), y1 = Math.max(drawStart[1], point[1]);
+      Object.assign(drawElement.style, {left:`${x0/10}%`,top:`${y0/10}%`,width:`${(x1-x0)/10}%`,height:`${(y1-y0)/10}%`});
+    };
+    $("overlay").onpointerup = (event) => {
+      if (!drawStart) return;
+      const end = normalizedPoint(event);
+      const bbox = [Math.min(drawStart[0],end[0]), Math.min(drawStart[1],end[1]), Math.max(drawStart[0],end[0]), Math.max(drawStart[1],end[1])];
+      drawStart = null; drawMode = false; drawElement = null; $("drawHint").classList.add("hidden");
+      if (bbox[2]-bbox[0] < 5 || bbox[3]-bbox[1] < 5) { renderOverlay(); notice("조금 더 큰 영역을 선택하세요.", true); return; }
+      const group = groupById();
+      const block = {
+        id: `new-${++newCounter}`, group_id: group.id, source_type: group.source_type,
+        source_file: group.source_file, page: group.page, block_type: "paragraph",
+        text: "", raw_text: "", bbox, manual: true, excluded: false, changed: true, issues: []
+      };
+      const groupItems = groupBlocks();
+      const anchor = selectedId ? documentState.blocks.findIndex((b) => b.id === selectedId) : -1;
+      const fallback = documentState.blocks.lastIndexOf(groupItems[groupItems.length-1]);
+      documentState.blocks.splice(anchor >= 0 ? anchor + 1 : fallback + 1, 0, block);
+      selectedId = block.id; render();
+      setTimeout(() => document.querySelector(`[data-card="${CSS.escape(block.id)}"] textarea`)?.focus(), 0);
+    };
+
+    function payload() {
+      return {
+        review_sha256: documentState.review_sha256,
+        allow_token_changes: $("allowTokens").checked,
+        blocks: documentState.blocks.map((b) => ({
+          id: b.id, text: b.text, excluded: b.excluded, source_type: b.source_type,
+          source_file: b.source_file, page: b.page, bbox: b.bbox
+        }))
+      };
+    }
+    async function mutate(path, label) {
+      try {
+        const result = await api(path, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload())});
+        documentState = result.document;
+        currentGroup = documentState.groups.some((g) => g.id === currentGroup) ? currentGroup : documentState.groups[0]?.id;
+        selectedId = null; render(); notice(label);
+      } catch (error) { notice(error.message, true); }
+    }
+    $("save").onclick = () => mutate("/api/save", "저장했습니다.");
+    $("validate").onclick = () => mutate("/api/validate", "검증을 통과했습니다.");
+    $("finalize").onclick = () => {
+      if (confirm("현재 원문을 최종 승인할까요?")) mutate("/api/finalize", "최종 원문을 승인했습니다.");
+    };
+    $("openPdf").onclick = () => window.open(`${documentState.original_pdf_url}?token=${encodeURIComponent(TOKEN)}`, "_blank", "noopener");
+    $("zoom").oninput = () => renderSource();
+    $("sourceImage").onload = renderOverlay;
+
+    (async () => {
+      try {
+        documentState = await api("/api/review");
+        currentGroup = documentState.groups[0]?.id || null;
+        render();
+      } catch (error) { notice(error.message, true); }
+    })();
+  </script>
+</body>
+</html>

@@ -16,8 +16,5 @@ dist/
 *.tmp
 *.meta.json
 
-# Personal runtime configuration and local archive
-00_config.json
-legacy/
-
+# Project workspaces
 workspaces/
