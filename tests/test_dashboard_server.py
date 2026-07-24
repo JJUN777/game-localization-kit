@@ -21,6 +21,7 @@ from glk.infrastructure.dashboard_server import (
     DashboardHttpServer,
     create_dashboard_server,
 )
+from tests.test_glossary_service import create_approved_project, sample_blocks
 from tests.test_source_review_service import make_block, write_blocks
 
 
@@ -35,6 +36,7 @@ class DashboardServerTests(unittest.TestCase):
         )
         self.environment_patch.start()
         self.source_job_calls: list[tuple[str, Path, str]] = []
+        self.glossary_job_calls: list[tuple[str, Path]] = []
         location = create_project(
             name="Dashboard Review",
             workspace_root=self.workspace_root,
@@ -51,6 +53,7 @@ class DashboardServerTests(unittest.TestCase):
             workspace_root=self.workspace_root,
             settings_root=self.settings_root,
             source_job_runner=self._run_source_job,
+            glossary_job_runner=self._run_glossary_job,
         )
         self.thread = threading.Thread(
             target=self.server.serve_forever,
@@ -80,6 +83,22 @@ class DashboardServerTests(unittest.TestCase):
             "ok": True,
             "status": "succeeded",
             "source_type": "pdf",
+        }
+
+    def _run_glossary_job(
+        self,
+        project_id: str,
+        workspace_root: str | Path,
+        progress: object,
+    ) -> dict[str, object]:
+        self.glossary_job_calls.append(
+            (project_id, Path(workspace_root))
+        )
+        progress("용어 후보를 생성하고 있습니다.", 1, 2)  # type: ignore[operator]
+        return {
+            "ok": True,
+            "status": "succeeded",
+            "glossary": {"candidate_count": 4},
         }
 
     def _request(
@@ -183,6 +202,8 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("편집 전 내용으로 되돌리기", html)
         self.assertIn("AI 설정", html)
         self.assertIn("원문 준비 시작", html)
+        self.assertIn("용어 후보 생성", html)
+        self.assertIn("Gemini API를 사용하지 않으며", html)
         self.assertIn("휴지통으로 이동", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
 
@@ -357,6 +378,57 @@ class DashboardServerTests(unittest.TestCase):
                 )
             ],
         )
+
+    def test_starts_and_reports_a_background_glossary_job(self) -> None:
+        status, not_approved = self._request(
+            "/api/jobs/glossary",
+            method="POST",
+            payload={"project_id": "dashboard_review"},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            not_approved["code"],
+            "GLOSSARY_JOB_START_FAILED",
+        )
+
+        create_approved_project(self.workspace_root, sample_blocks())
+
+        status, started = self._request(
+            "/api/jobs/glossary",
+            method="POST",
+            payload={"project_id": "glossary_project"},
+        )
+        self.assertEqual(status, 202)
+        self.assertEqual(started["job"]["project_id"], "glossary_project")
+
+        job: dict[str, object] | None = None
+        for _ in range(100):
+            status, jobs = self._request("/api/jobs")
+            self.assertEqual(status, 200)
+            matching = [
+                value
+                for value in jobs["glossary_jobs"]
+                if value["project_id"] == "glossary_project"
+            ]
+            if matching and matching[0]["status"] == "succeeded":
+                job = matching[0]
+                break
+            time.sleep(0.01)
+        self.assertIsNotNone(job)
+        self.assertEqual(job["result"]["glossary"]["candidate_count"], 4)  # type: ignore[index]
+        self.assertEqual(
+            self.glossary_job_calls,
+            [("glossary_project", self.workspace_root.resolve())],
+        )
+
+        status, dashboard = self._request("/api/dashboard")
+        self.assertEqual(status, 200)
+        glossary_project = next(
+            project
+            for project in dashboard["projects"]
+            if project["project_id"] == "glossary_project"
+        )
+        self.assertTrue(glossary_project["pipeline"]["final_source_approved"])
 
     def test_opens_ready_review_and_rejects_unknown_type(self) -> None:
         status, opened = self._request(

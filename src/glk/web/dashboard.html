@@ -555,23 +555,34 @@
       transform: translateY(-1px);
     }
 
-    .source-job-button {
+    .source-job-button,
+    .glossary-job-button {
       grid-column: 1 / -1;
       padding: 12px;
-      border: 1px solid var(--accent);
       border-radius: 10px;
       color: #fff;
-      background: var(--accent);
       font-size: 12px;
       font-weight: 850;
       transition: transform .15s ease, opacity .15s ease;
     }
 
-    .source-job-button:hover:not(:disabled) {
+    .source-job-button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+    }
+
+    .glossary-job-button {
+      border: 1px solid var(--green);
+      background: var(--green);
+    }
+
+    .source-job-button:hover:not(:disabled),
+    .glossary-job-button:hover:not(:disabled) {
       transform: translateY(-1px);
     }
 
-    .source-job-button:disabled {
+    .source-job-button:disabled,
+    .glossary-job-button:disabled {
       cursor: not-allowed;
       border-color: var(--line);
       color: #999d99;
@@ -1499,6 +1510,40 @@
     </form>
   </dialog>
 
+  <dialog id="glossaryJobDialog" aria-labelledby="glossaryJobDialogTitle">
+    <form class="modal-form" id="glossaryJobForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Local terminology job</p>
+          <h2 id="glossaryJobDialogTitle">용어 후보 생성</h2>
+        </div>
+        <button class="modal-close" id="glossaryJobDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <p class="source-note">
+        최종 승인된 원문에서 반복되는 이름과 게임 용어 후보를 수집해
+        검수용 TSV를 만듭니다. 이 작업은 Gemini API를 사용하지 않으며
+        비용이 발생하지 않습니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="glossaryJobProjectName"></strong>
+        <code id="glossaryJobProjectId"></code>
+      </div>
+      <p class="field-help" style="margin-top:14px">
+        생성이 끝나면 용어 검수 버튼이 활성화됩니다. 기존 검수 파일이
+        오래된 경우에는 사용자 편집을 보호하기 위해 자동으로 덮어쓰지 않습니다.
+      </p>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel" id="glossaryJobDialogCancel"
+          type="button">취소</button>
+        <button class="modal-button modal-submit" id="glossaryJobSubmit"
+          type="submit">용어 후보 생성 시작</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="deleteDialog" aria-labelledby="deleteDialogTitle">
     <form class="modal-form" id="deleteForm">
       <div class="modal-head">
@@ -1546,8 +1591,10 @@
     let aiSettings = null;
     let aiModelCatalog = null;
     let sourceJobs = new Map();
+    let glossaryJobs = new Map();
     let sourceJobPollTimer = null;
     let pendingSourceJobProject = null;
+    let pendingGlossaryJobProject = null;
     let pendingSourceProject = null;
     let pendingSourceFilesProject = null;
     let pendingOcrPromptProject = null;
@@ -1757,6 +1804,32 @@
       );
     }
 
+    function glossaryJobFor(projectId) {
+      return glossaryJobs.get(projectId) || null;
+    }
+
+    function activeGlossaryJob() {
+      return [...glossaryJobs.values()].find(
+        (job) => ["queued", "running"].includes(job.status),
+      ) || null;
+    }
+
+    function glossaryJobIsActive(projectId) {
+      const job = glossaryJobFor(projectId);
+      return Boolean(
+        job && ["queued", "running"].includes(job.status),
+      );
+    }
+
+    function activeBackgroundJob() {
+      return activeSourceJob() || activeGlossaryJob();
+    }
+
+    function projectJobIsActive(projectId) {
+      return sourceJobIsActive(projectId)
+        || glossaryJobIsActive(projectId);
+    }
+
     function sourceJobStatusLabel(status) {
       return {
         queued: "실행 대기",
@@ -1808,12 +1881,12 @@
       ) {
         return "";
       }
-      const active = activeSourceJob();
+      const active = activeBackgroundJob();
       if (sourceJobIsActive(project.project_id)) return "";
       if (active) {
         return `<button class="source-job-button" type="button" disabled
-          title="${escapeHtml(active.project_id)} 원문 준비 작업이 실행 중입니다.">
-          다른 원문 준비 작업 실행 중
+          title="${escapeHtml(active.project_id)} 백그라운드 작업이 실행 중입니다.">
+          다른 백그라운드 작업 실행 중
         </button>`;
       }
       if (!aiSettings?.api_key_configured) {
@@ -1836,8 +1909,80 @@
       </button>`;
     }
 
+    function glossaryJobStatus(project) {
+      const job = glossaryJobFor(project.project_id);
+      if (!job || job.status === "succeeded") return "";
+      const active = ["queued", "running"].includes(job.status);
+      const failed = ["failed", "interrupted"].includes(job.status);
+      if (!active && !failed) return "";
+      const progress = (
+        Number.isInteger(job.progress_current)
+        && Number.isInteger(job.progress_total)
+        && job.progress_total > 0
+      )
+        ? `<progress class="job-progress"
+            value="${Math.min(job.progress_current, job.progress_total)}"
+            max="${job.progress_total}"></progress>`
+        : "";
+      const error = job.error
+        ? `<p class="job-error">${escapeHtml(job.error)}</p>`
+        : "";
+      const label = {
+        queued: "용어 후보 생성 대기",
+        running: "용어 후보 생성 중",
+        failed: "용어 후보 생성 실패",
+        interrupted: "용어 후보 생성 중단",
+      }[job.status] || job.status;
+      return `<div class="job-status${failed ? " failed" : ""}">
+        <div class="job-status-head">
+          <span>${label}</span>
+          <span>로컬 작업</span>
+        </div>
+        ${progress}
+        <p class="job-status-message">
+          ${escapeHtml(job.progress_message || "")}
+        </p>
+        ${error}
+      </div>`;
+    }
+
+    function glossaryJobButton(project) {
+      if (
+        !project.pipeline.final_source_approved
+        || project.pipeline.glossary_status === "current"
+        || glossaryJobIsActive(project.project_id)
+      ) {
+        return "";
+      }
+      if (project.pipeline.glossary_status === "stale") {
+        return `<button class="glossary-job-button" type="button" disabled
+          title="기존 용어 검수 편집을 보호하기 위해 대시보드에서 덮어쓰지 않습니다.">
+          용어 후보 재생성은 CLI에서 확인
+        </button>`;
+      }
+      const active = activeBackgroundJob();
+      if (active) {
+        return `<button class="glossary-job-button" type="button" disabled
+          title="${escapeHtml(active.project_id)} 백그라운드 작업이 실행 중입니다.">
+          다른 백그라운드 작업 실행 중
+        </button>`;
+      }
+      const previous = glossaryJobFor(project.project_id);
+      const retry = ["failed", "interrupted"].includes(previous?.status);
+      return `<button class="glossary-job-button" type="button"
+        data-start-glossary-job="${escapeHtml(project.project_id)}">
+        용어 후보 생성${retry ? " 다시 시도" : " 시작"}
+      </button>`;
+    }
+
     function setSourceJobs(jobs) {
       sourceJobs = new Map(
+        jobs.map((job) => [job.project_id, job]),
+      );
+    }
+
+    function setGlossaryJobs(jobs) {
+      glossaryJobs = new Map(
         jobs.map((job) => [job.project_id, job]),
       );
     }
@@ -1845,32 +1990,55 @@
     function scheduleSourceJobPoll() {
       window.clearTimeout(sourceJobPollTimer);
       sourceJobPollTimer = null;
-      if (activeSourceJob()) {
+      if (activeBackgroundJob()) {
         sourceJobPollTimer = window.setTimeout(pollSourceJobs, 1000);
       }
     }
 
     async function pollSourceJobs() {
-      const previous = new Map(sourceJobs);
+      const previousSource = new Map(sourceJobs);
+      const previousGlossary = new Map(glossaryJobs);
       try {
         const result = await api("/api/jobs");
         setSourceJobs(result.jobs || []);
-        const completed = [...sourceJobs.values()].find((job) => {
-          const before = previous.get(job.project_id);
+        setGlossaryJobs(result.glossary_jobs || []);
+        const completedSource = [...sourceJobs.values()].find((job) => {
+          const before = previousSource.get(job.project_id);
           return (
             before
             && ["queued", "running"].includes(before.status)
             && !["queued", "running"].includes(job.status)
           );
         });
-        if (completed) {
+        const completedGlossary = [...glossaryJobs.values()].find((job) => {
+          const before = previousGlossary.get(job.project_id);
+          return (
+            before
+            && ["queued", "running"].includes(before.status)
+            && !["queued", "running"].includes(job.status)
+          );
+        });
+        if (completedSource || completedGlossary) {
           dashboard = await api("/api/dashboard");
-          const message = completed.status === "succeeded"
+        }
+        if (completedSource) {
+          const message = completedSource.status === "succeeded"
             ? "원문 검수 준비가 완료되었습니다."
-            : (completed.error || completed.progress_message);
+            : (completedSource.error || completedSource.progress_message);
           showToast(
             message,
-            completed.status !== "succeeded",
+            completedSource.status !== "succeeded",
+          );
+        }
+        if (completedGlossary) {
+          const count = completedGlossary.result
+            ?.glossary?.candidate_count;
+          const message = completedGlossary.status === "succeeded"
+            ? `용어 후보 ${Number.isInteger(count) ? `${count}개 ` : ""}생성이 완료되었습니다.`
+            : (completedGlossary.error || completedGlossary.progress_message);
+          showToast(
+            message,
+            completedGlossary.status !== "succeeded",
           );
         }
         render();
@@ -1929,6 +2097,53 @@
         render();
         scheduleSourceJobPoll();
         showToast("원문 준비 작업을 시작했습니다.");
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    function openGlossaryJobDialog(projectId) {
+      const project = dashboard?.projects.find(
+        (value) => value.project_id === projectId,
+      );
+      if (!project) {
+        showToast("프로젝트 정보를 찾지 못했습니다.", true);
+        return;
+      }
+      if (!project.pipeline.final_source_approved) {
+        showToast("먼저 원문을 최종 승인하세요.", true);
+        return;
+      }
+      pendingGlossaryJobProject = project;
+      byId("glossaryJobProjectName").textContent = project.name;
+      byId("glossaryJobProjectId").textContent = project.project_id;
+      byId("glossaryJobDialog").showModal();
+      byId("glossaryJobDialogCancel").focus();
+    }
+
+    function closeGlossaryJobDialog() {
+      byId("glossaryJobDialog").close();
+    }
+
+    async function startGlossaryJob(event) {
+      event.preventDefault();
+      if (!pendingGlossaryJobProject) return;
+      const submit = byId("glossaryJobSubmit");
+      submit.disabled = true;
+      try {
+        const result = await api("/api/jobs/glossary", {
+          method: "POST",
+          body: JSON.stringify({
+            project_id: pendingGlossaryJobProject.project_id,
+          }),
+        });
+        glossaryJobs.set(result.job.project_id, result.job);
+        closeGlossaryJobDialog();
+        render();
+        scheduleSourceJobPoll();
+        showToast("용어 후보 생성 작업을 시작했습니다.");
       } catch (error) {
         showToast(error.message, true);
       } finally {
@@ -2052,7 +2267,7 @@
 
     function projectCard(project) {
       const pathTitle = escapeHtml(project.path);
-      const jobLocked = sourceJobIsActive(project.project_id);
+      const jobLocked = projectJobIsActive(project.project_id);
       return `<article class="project-card">
         <div class="project-head">
           <div>
@@ -2066,7 +2281,7 @@
               data-project-name="${escapeHtml(project.name)}"
               aria-label="${escapeHtml(project.name)} 프로젝트 삭제"
               title="${jobLocked
-                ? "원문 준비 중에는 삭제할 수 없습니다."
+                ? "백그라운드 작업 중에는 삭제할 수 없습니다."
                 : "프로젝트 삭제"}"${jobLocked ? " disabled" : ""}>×</button>
           </div>
         </div>
@@ -2086,7 +2301,9 @@
         </div>
         <div class="actions">
           ${sourceJobStatus(project)}
+          ${glossaryJobStatus(project)}
           ${sourceJobButton(project)}
+          ${glossaryJobButton(project)}
           ${sourceRegistrationButton(project)}
           ${ocrPromptEditButton(project)}
           ${reviewButton(project, "source")}
@@ -2159,6 +2376,7 @@
         ]);
         dashboard = dashboardDocument;
         setSourceJobs(jobsDocument.jobs || []);
+        setGlossaryJobs(jobsDocument.glossary_jobs || []);
         render();
         scheduleSourceJobPoll();
         const time = new Intl.DateTimeFormat("ko-KR", {
@@ -2578,6 +2796,19 @@
       pendingSourceJobProject = null;
       byId("sourceJobSubmit").disabled = false;
     });
+    byId("glossaryJobDialogClose").addEventListener(
+      "click",
+      closeGlossaryJobDialog,
+    );
+    byId("glossaryJobDialogCancel").addEventListener(
+      "click",
+      closeGlossaryJobDialog,
+    );
+    byId("glossaryJobForm").addEventListener("submit", startGlossaryJob);
+    byId("glossaryJobDialog").addEventListener("close", () => {
+      pendingGlossaryJobProject = null;
+      byId("glossaryJobSubmit").disabled = false;
+    });
     byId("emptyCreateButton").addEventListener("click", openProjectDialog);
     byId("projectDialogClose").addEventListener("click", closeProjectDialog);
     byId("projectDialogCancel").addEventListener("click", closeProjectDialog);
@@ -2674,6 +2905,15 @@
       const jobButton = event.target.closest("[data-start-source-job]");
       if (jobButton) {
         openSourceJobDialog(jobButton.dataset.startSourceJob);
+        return;
+      }
+      const glossaryStartButton = event.target.closest(
+        "[data-start-glossary-job]",
+      );
+      if (glossaryStartButton) {
+        openGlossaryJobDialog(
+          glossaryStartButton.dataset.startGlossaryJob,
+        );
         return;
       }
       const promptButton = event.target.closest("[data-edit-ocr-prompt]");

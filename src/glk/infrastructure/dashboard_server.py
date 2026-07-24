@@ -32,6 +32,7 @@ from glk.application.dashboard_job_service import (
     DashboardJobConflict,
     DashboardJobError,
     DashboardJobManager,
+    GlossaryJobRunner,
     SourceJobRunner,
 )
 from glk.application.dashboard_service import get_dashboard_document
@@ -108,17 +109,15 @@ class DashboardHttpServer(ThreadingHTTPServer):
         workspace_root: str | Path,
         settings_root: str | Path,
         source_job_runner: SourceJobRunner | None = None,
+        glossary_job_runner: GlossaryJobRunner | None = None,
     ) -> None:
         super().__init__(server_address, handler_class)
         self.workspace_root = str(workspace_root)
         self.ai_settings = AiSettingsService(settings_root)
         self.job_manager = DashboardJobManager(
             workspace_root,
-            **(
-                {"runner": source_job_runner}
-                if source_job_runner is not None
-                else {}
-            ),
+            runner=source_job_runner,
+            glossary_runner=glossary_job_runner,
         )
         self.auth_token = secrets.token_urlsafe(32)
         self.mutation_lock = threading.Lock()
@@ -625,6 +624,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 {
                     "ok": True,
                     "jobs": self.server.job_manager.list_jobs(),
+                    "glossary_jobs": (
+                        self.server.job_manager.list_glossary_jobs()
+                    ),
                 },
             )
             return
@@ -667,6 +669,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "/api/projects",
                 "/api/review/open",
                 "/api/jobs/source",
+                "/api/jobs/glossary",
             }
             and not is_source_upload
         ):
@@ -700,6 +703,23 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                     job = self.server.job_manager.start_source_job(
                         project_id=project_id.strip(),
                         model=settings.model,
+                    )
+                self._send_json(
+                    HTTPStatus.ACCEPTED,
+                    {"ok": True, "job": job},
+                )
+                return
+            if path == "/api/jobs/glossary":
+                project_id = request.get("project_id")
+                if not isinstance(project_id, str) or not project_id.strip():
+                    raise DashboardJobError("project_id is required.")
+                if "/" in project_id or "\\" in project_id:
+                    raise DashboardJobError(
+                        "Project ID must not contain path separators."
+                    )
+                with self.server.mutation_lock:
+                    job = self.server.job_manager.start_glossary_job(
+                        project_id=project_id.strip(),
                     )
                 self._send_json(
                     HTTPStatus.ACCEPTED,
@@ -740,10 +760,15 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 )
             url = self.server.open_review(project_id, review_type)
         except DashboardJobConflict as error:
+            conflict_code = (
+                "GLOSSARY_JOB_CONFLICT"
+                if path == "/api/jobs/glossary"
+                else "SOURCE_JOB_CONFLICT"
+            )
             self._send_error_json(
                 HTTPStatus.CONFLICT,
                 error,
-                code="SOURCE_JOB_CONFLICT",
+                code=conflict_code,
             )
             return
         except (
@@ -759,6 +784,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 if path == "/api/projects"
                 else "SOURCE_JOB_START_FAILED"
                 if path == "/api/jobs/source"
+                else "GLOSSARY_JOB_START_FAILED"
+                if path == "/api/jobs/glossary"
                 else "INVALID_REQUEST"
             )
             self._send_error_json(HTTPStatus.BAD_REQUEST, error, code=code)
@@ -968,6 +995,7 @@ def create_dashboard_server(
     workspace_root: str | Path = "workspaces",
     settings_root: str | Path | None = None,
     source_job_runner: SourceJobRunner | None = None,
+    glossary_job_runner: GlossaryJobRunner | None = None,
     port: int = 0,
 ) -> DashboardHttpServer:
     if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
@@ -979,6 +1007,7 @@ def create_dashboard_server(
         workspace_root=workspace_root,
         settings_root=Path.cwd() if settings_root is None else settings_root,
         source_job_runner=source_job_runner,
+        glossary_job_runner=glossary_job_runner,
     )
 
 

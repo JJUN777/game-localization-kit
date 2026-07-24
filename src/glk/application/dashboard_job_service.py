@@ -13,8 +13,15 @@ from uuid import uuid4
 
 from glk.application._io import write_json_atomic
 from glk.application.extraction_service import extract_project_pdf
+from glk.application.glossary_service import (
+    GlossaryBuildError,
+    build_project_glossary_candidates,
+)
 from glk.application.image_ocr_service import ocr_project_images
-from glk.application.project_service import load_workspace_project_id
+from glk.application.project_service import (
+    inspect_project,
+    load_workspace_project_id,
+)
 from glk.application.segmentation_service import segment_project_source
 from glk.application.source_qa_service import run_project_source_qa
 from glk.domain.workspace import (
@@ -36,6 +43,10 @@ SourceJobRunner = Callable[
     [str, str | Path, str, JobProgress],
     dict[str, Any],
 ]
+GlossaryJobRunner = Callable[
+    [str, str | Path, JobProgress],
+    dict[str, Any],
+]
 
 
 class DashboardJobError(ValueError):
@@ -52,6 +63,25 @@ class DashboardSourceJob:
     project_id: str
     source_type: str
     model: str
+    status: str
+    progress_message: str
+    progress_current: int | None
+    progress_total: int | None
+    result: dict[str, Any] | None
+    error: str | None
+    created_at: str
+    started_at: str | None
+    finished_at: str | None
+    updated_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class DashboardGlossaryJob:
+    job_id: str
+    project_id: str
     status: str
     progress_message: str
     progress_current: int | None
@@ -314,19 +344,47 @@ def run_registered_source_pipeline(
     }
 
 
+def run_glossary_pipeline(
+    project_id: str,
+    workspace_root: str | Path,
+    progress: JobProgress,
+) -> dict[str, Any]:
+    """Build local glossary candidates from the approved source."""
+    progress("승인된 원문을 확인하고 있습니다.", 0, 2)
+    result = build_project_glossary_candidates(
+        project=project_id,
+        workspace_root=workspace_root,
+    )
+    if result.status == "stale":
+        raise GlossaryBuildError(
+            "기존 용어 검수 파일이 승인 원문과 일치하지 않습니다. "
+            "사용자 편집을 보호하기 위해 자동으로 덮어쓰지 않았습니다."
+        )
+    progress("용어 후보 검수 파일을 생성하고 있습니다.", 1, 2)
+    progress("용어 후보 생성이 완료되었습니다.", 2, 2)
+    return {
+        "ok": True,
+        "status": "succeeded",
+        "glossary": result.to_dict(),
+    }
+
+
 class DashboardJobManager:
-    """Own the single active source job and latest per-project records."""
+    """Own one active dashboard job and latest per-project records."""
 
     def __init__(
         self,
         workspace_root: str | Path,
         *,
-        runner: SourceJobRunner = run_registered_source_pipeline,
+        runner: SourceJobRunner | None = None,
+        glossary_runner: GlossaryJobRunner | None = None,
     ) -> None:
         self.workspace_root = Path(workspace_root).expanduser().resolve()
-        self._runner = runner
+        self._source_runner = runner or run_registered_source_pipeline
+        self._glossary_runner = glossary_runner or run_glossary_pipeline
         self._lock = threading.RLock()
         self._jobs: dict[str, DashboardSourceJob] = {}
+        self._glossary_jobs: dict[str, DashboardGlossaryJob] = {}
         self._closed = False
         self._load_records()
 
@@ -339,6 +397,19 @@ class DashboardJobManager:
 
     def _persist(self, job: DashboardSourceJob) -> None:
         write_json_atomic(self._state_path(job.project_id), job.to_dict())
+
+    def _glossary_state_path(self, project_id: str) -> Path:
+        location = load_workspace_project_id(
+            project_id,
+            self.workspace_root,
+        )
+        return WorkspacePaths(location.path).dashboard_glossary_job_state
+
+    def _persist_glossary(self, job: DashboardGlossaryJob) -> None:
+        write_json_atomic(
+            self._glossary_state_path(job.project_id),
+            job.to_dict(),
+        )
 
     def _upgrade_acquisition_failure(
         self,
@@ -402,25 +473,56 @@ class DashboardJobManager:
         ):
             try:
                 value = json.loads(state_path.read_text(encoding="utf-8"))
-                job = DashboardSourceJob(**value)
+                source_job = DashboardSourceJob(**value)
                 changed = False
-                if job.status in ACTIVE_JOB_STATUSES:
+                if source_job.status in ACTIVE_JOB_STATUSES:
                     now = _utc_now()
-                    job.status = "interrupted"
-                    job.progress_message = (
+                    source_job.status = "interrupted"
+                    source_job.progress_message = (
                         "이전 대시보드가 종료되어 작업 상태를 확인할 수 없습니다."
                     )
-                    job.error = "Dashboard process stopped before job completion."
-                    job.finished_at = now
-                    job.updated_at = now
+                    source_job.error = (
+                        "Dashboard process stopped before job completion."
+                    )
+                    source_job.finished_at = now
+                    source_job.updated_at = now
                     changed = True
-                if self._upgrade_acquisition_failure(job):
+                if self._upgrade_acquisition_failure(source_job):
                     changed = True
                 if changed:
-                    write_json_atomic(state_path, job.to_dict())
-                if job.status not in TERMINAL_JOB_STATUSES:
+                    write_json_atomic(state_path, source_job.to_dict())
+                if source_job.status not in TERMINAL_JOB_STATUSES:
                     continue
-                self._jobs[job.project_id] = job
+                self._jobs[source_job.project_id] = source_job
+            except (
+                OSError,
+                UnicodeError,
+                json.JSONDecodeError,
+                TypeError,
+                ValueError,
+            ):
+                continue
+        for state_path in self.workspace_root.glob(
+            "*/.glk/state/dashboard_glossary_job.json"
+        ):
+            try:
+                value = json.loads(state_path.read_text(encoding="utf-8"))
+                glossary_job = DashboardGlossaryJob(**value)
+                if glossary_job.status in ACTIVE_JOB_STATUSES:
+                    now = _utc_now()
+                    glossary_job.status = "interrupted"
+                    glossary_job.progress_message = (
+                        "이전 대시보드가 종료되어 작업 상태를 확인할 수 없습니다."
+                    )
+                    glossary_job.error = (
+                        "Dashboard process stopped before job completion."
+                    )
+                    glossary_job.finished_at = now
+                    glossary_job.updated_at = now
+                    write_json_atomic(state_path, glossary_job.to_dict())
+                if glossary_job.status not in TERMINAL_JOB_STATUSES:
+                    continue
+                self._glossary_jobs[glossary_job.project_id] = glossary_job
             except (
                 OSError,
                 UnicodeError,
@@ -430,8 +532,10 @@ class DashboardJobManager:
             ):
                 continue
 
-    def _active_job(self) -> DashboardSourceJob | None:
-        return next(
+    def _active_job(
+        self,
+    ) -> DashboardSourceJob | DashboardGlossaryJob | None:
+        source_job = next(
             (
                 job
                 for job in self._jobs.values()
@@ -439,16 +543,41 @@ class DashboardJobManager:
             ),
             None,
         )
+        if source_job is not None:
+            return source_job
+        return next(
+            (
+                job
+                for job in self._glossary_jobs.values()
+                if job.status in ACTIVE_JOB_STATUSES
+            ),
+            None,
+        )
 
     def is_project_active(self, project_id: str) -> bool:
         with self._lock:
-            job = self._jobs.get(project_id)
-            return bool(job and job.status in ACTIVE_JOB_STATUSES)
+            jobs = (
+                self._jobs.get(project_id),
+                self._glossary_jobs.get(project_id),
+            )
+            return any(
+                job is not None and job.status in ACTIVE_JOB_STATUSES
+                for job in jobs
+            )
 
     def list_jobs(self) -> list[dict[str, Any]]:
         with self._lock:
             jobs = sorted(
                 self._jobs.values(),
+                key=lambda job: job.created_at,
+                reverse=True,
+            )
+            return [job.to_dict() for job in jobs]
+
+    def list_glossary_jobs(self) -> list[dict[str, Any]]:
+        with self._lock:
+            jobs = sorted(
+                self._glossary_jobs.values(),
                 key=lambda job: job.created_at,
                 reverse=True,
             )
@@ -471,10 +600,10 @@ class DashboardJobManager:
             if active is not None:
                 if active.project_id == project_id:
                     raise DashboardJobConflict(
-                        "This project already has a source job running."
+                        "This project already has a background job running."
                     )
                 raise DashboardJobConflict(
-                    "Another project source job is already running."
+                    "Another project background job is already running."
                 )
             now = _utc_now()
             job = DashboardSourceJob(
@@ -495,16 +624,79 @@ class DashboardJobManager:
             )
             self._jobs[project_id] = job
             self._persist(job)
+            queued_job = job.to_dict()
             thread = threading.Thread(
-                target=self._execute,
+                target=self._execute_source,
                 args=(job.job_id, project_id),
                 name=f"glk-source-job-{project_id}",
                 daemon=True,
             )
             thread.start()
-            return job.to_dict()
+            return queued_job
 
-    def _execute(self, job_id: str, project_id: str) -> None:
+    def start_glossary_job(
+        self,
+        *,
+        project_id: str,
+    ) -> dict[str, Any]:
+        location = load_workspace_project_id(
+            project_id,
+            self.workspace_root,
+        )
+        pipeline = inspect_project(location.path)["pipeline"]
+        if pipeline["human_review"] != "approved":
+            raise DashboardJobError(
+                "Approve the current source before building glossary candidates."
+            )
+        if pipeline["glossary_status"] == "current":
+            raise DashboardJobError(
+                "Glossary candidates are already current."
+            )
+        if pipeline["glossary_status"] == "stale":
+            raise DashboardJobError(
+                "Existing glossary edits are stale and cannot be overwritten "
+                "from the dashboard."
+            )
+        with self._lock:
+            if self._closed:
+                raise DashboardJobError("Dashboard job manager is closed.")
+            active = self._active_job()
+            if active is not None:
+                if active.project_id == project_id:
+                    raise DashboardJobConflict(
+                        "This project already has a background job running."
+                    )
+                raise DashboardJobConflict(
+                    "Another project background job is already running."
+                )
+            now = _utc_now()
+            job = DashboardGlossaryJob(
+                job_id=uuid4().hex,
+                project_id=project_id,
+                status="queued",
+                progress_message="용어 후보 생성을 준비하고 있습니다.",
+                progress_current=0,
+                progress_total=2,
+                result=None,
+                error=None,
+                created_at=now,
+                started_at=None,
+                finished_at=None,
+                updated_at=now,
+            )
+            self._glossary_jobs[project_id] = job
+            self._persist_glossary(job)
+            queued_job = job.to_dict()
+            thread = threading.Thread(
+                target=self._execute_glossary,
+                args=(job.job_id, project_id),
+                name=f"glk-glossary-job-{project_id}",
+                daemon=True,
+            )
+            thread.start()
+            return queued_job
+
+    def _execute_source(self, job_id: str, project_id: str) -> None:
         with self._lock:
             job = self._jobs.get(project_id)
             if job is None or job.job_id != job_id:
@@ -534,7 +726,7 @@ class DashboardJobManager:
                 self._persist(current_job)
 
         try:
-            result = self._runner(
+            result = self._source_runner(
                 project_id,
                 self.workspace_root,
                 job.model,
@@ -583,6 +775,78 @@ class DashboardJobManager:
             else:
                 current_job.progress_message = "원문 준비 작업에 실패했습니다."
             self._persist(current_job)
+
+    def _execute_glossary(self, job_id: str, project_id: str) -> None:
+        with self._lock:
+            job = self._glossary_jobs.get(project_id)
+            if job is None or job.job_id != job_id:
+                return
+            now = _utc_now()
+            job.status = "running"
+            job.started_at = now
+            job.updated_at = now
+            job.progress_message = "용어 후보 생성을 시작했습니다."
+            self._persist_glossary(job)
+
+        def report(
+            message: str,
+            current: int | None,
+            total: int | None,
+        ) -> None:
+            with self._lock:
+                current_job = self._glossary_jobs.get(project_id)
+                if current_job is None or current_job.job_id != job_id:
+                    return
+                current_job.progress_message = message
+                if current is not None:
+                    current_job.progress_current = current
+                if total is not None:
+                    current_job.progress_total = total
+                current_job.updated_at = _utc_now()
+                self._persist_glossary(current_job)
+
+        try:
+            result = self._glossary_runner(
+                project_id,
+                self.workspace_root,
+                report,
+            )
+            status = str(result.get("status") or "")
+            if status not in {"succeeded", "failed"}:
+                raise DashboardJobError(
+                    "Glossary job runner returned an invalid terminal status."
+                )
+            error_value = result.get("error")
+            error = (
+                str(error_value)
+                if status == "failed" and error_value
+                else (
+                    "용어 후보 생성에 실패했습니다. 다시 시도하세요."
+                    if status == "failed"
+                    else None
+                )
+            )
+        except Exception as caught:
+            result = None
+            status = "failed"
+            error = str(caught) or caught.__class__.__name__
+
+        with self._lock:
+            current_job = self._glossary_jobs.get(project_id)
+            if current_job is None or current_job.job_id != job_id:
+                return
+            now = _utc_now()
+            current_job.status = status
+            current_job.result = result
+            current_job.error = error
+            current_job.finished_at = now
+            current_job.updated_at = now
+            if status == "succeeded":
+                current_job.progress_message = "용어 후보 생성이 완료되었습니다."
+                current_job.progress_current = current_job.progress_total
+            else:
+                current_job.progress_message = "용어 후보 생성에 실패했습니다."
+            self._persist_glossary(current_job)
 
     def close(self) -> None:
         with self._lock:

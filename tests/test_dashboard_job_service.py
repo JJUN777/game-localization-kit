@@ -10,12 +10,15 @@ from unittest.mock import patch
 
 from glk.application.dashboard_job_service import (
     DashboardJobConflict,
+    DashboardJobError,
     DashboardJobManager,
+    run_glossary_pipeline,
     run_registered_source_pipeline,
 )
 from glk.application.project_service import create_project
 from glk.application.source_registration_service import register_project_pdf
 from glk.domain.workspace import WorkspacePaths
+from tests.test_glossary_service import create_approved_project, sample_blocks
 
 
 class DashboardJobManagerTests(unittest.TestCase):
@@ -385,6 +388,147 @@ class DashboardJobManagerTests(unittest.TestCase):
             state["progress_message"],
             "원문 준비 작업에 실패했습니다.",
         )
+        manager.close()
+
+    def test_runs_and_persists_a_successful_glossary_job(self) -> None:
+        create_approved_project(self.workspace_root, sample_blocks())
+        completed = threading.Event()
+
+        def glossary_runner(
+            project_id: str,
+            workspace_root: str | Path,
+            progress: object,
+        ) -> dict[str, object]:
+            self.assertEqual(project_id, "glossary_project")
+            self.assertEqual(Path(workspace_root), self.workspace_root.resolve())
+            progress("용어 후보를 생성하고 있습니다.", 1, 2)  # type: ignore[operator]
+            completed.set()
+            return {
+                "ok": True,
+                "status": "succeeded",
+                "glossary": {"candidate_count": 4},
+            }
+
+        manager = DashboardJobManager(
+            self.workspace_root,
+            glossary_runner=glossary_runner,
+        )
+        started = manager.start_glossary_job(project_id="glossary_project")
+
+        self.assertEqual(started["status"], "queued")
+        self.assertTrue(completed.wait(timeout=2))
+        state_path = WorkspacePaths(
+            self.workspace_root / "glossary_project"
+        ).dashboard_glossary_job_state
+        for _ in range(100):
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            if state["status"] == "succeeded":
+                break
+            threading.Event().wait(0.01)
+
+        self.assertEqual(state["status"], "succeeded")
+        self.assertEqual(state["result"]["glossary"]["candidate_count"], 4)
+        self.assertEqual(
+            manager.list_glossary_jobs()[0]["project_id"],
+            "glossary_project",
+        )
+        manager.close()
+
+    def test_glossary_pipeline_builds_candidates_without_a_model(self) -> None:
+        project_path = create_approved_project(
+            self.workspace_root,
+            sample_blocks(),
+        )
+        messages: list[str] = []
+
+        result = run_glossary_pipeline(
+            "glossary_project",
+            self.workspace_root,
+            lambda message, current, total: messages.append(message),
+        )
+
+        self.assertEqual(result["status"], "succeeded")
+        self.assertGreater(
+            result["glossary"]["candidate_count"],  # type: ignore[index]
+            0,
+        )
+        self.assertTrue(
+            (project_path / "03_terminology/glossary_review.tsv").is_file()
+        )
+        self.assertIn("용어 후보 생성이 완료되었습니다.", messages)
+
+    def test_rejects_glossary_job_before_source_approval(self) -> None:
+        manager = DashboardJobManager(self.workspace_root)
+
+        with self.assertRaises(DashboardJobError):
+            manager.start_glossary_job(project_id="background_job")
+
+        manager.close()
+
+    def test_glossary_job_blocks_other_background_jobs(self) -> None:
+        create_approved_project(self.workspace_root, sample_blocks())
+        running = threading.Event()
+        release = threading.Event()
+
+        def glossary_runner(
+            project_id: str,
+            workspace_root: str | Path,
+            progress: object,
+        ) -> dict[str, object]:
+            running.set()
+            release.wait(timeout=2)
+            return {"ok": True, "status": "succeeded"}
+
+        manager = DashboardJobManager(
+            self.workspace_root,
+            glossary_runner=glossary_runner,
+        )
+        manager.start_glossary_job(project_id="glossary_project")
+        self.assertTrue(running.wait(timeout=2))
+
+        with self.assertRaises(DashboardJobConflict):
+            manager.start_source_job(
+                project_id="background_job",
+                model="gemini-test",
+            )
+
+        release.set()
+        manager.close()
+
+    def test_marks_a_previous_glossary_job_as_interrupted(self) -> None:
+        project_path = create_approved_project(
+            self.workspace_root,
+            sample_blocks(),
+        )
+        state_path = WorkspacePaths(
+            project_path
+        ).dashboard_glossary_job_state
+        state_path.write_text(
+            json.dumps(
+                {
+                    "job_id": "old-glossary-job",
+                    "project_id": "glossary_project",
+                    "status": "running",
+                    "progress_message": "running",
+                    "progress_current": 1,
+                    "progress_total": 2,
+                    "result": None,
+                    "error": None,
+                    "created_at": "2026-07-25T00:00:00Z",
+                    "started_at": "2026-07-25T00:00:01Z",
+                    "finished_at": None,
+                    "updated_at": "2026-07-25T00:00:01Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        manager = DashboardJobManager(self.workspace_root)
+
+        job = manager.list_glossary_jobs()[0]
+        self.assertEqual(job["status"], "interrupted")
+        self.assertIsNotNone(job["finished_at"])
+        self.assertIn("종료", job["progress_message"])
         manager.close()
 
 
