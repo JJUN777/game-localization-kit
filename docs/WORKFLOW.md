@@ -299,6 +299,10 @@ glk review finalize --project primal --allow-token-changes
 최종 결과: `02_source/final.txt`와 `.glk/segments/approved_source.jsonl`
 
 후속 단계는 hash까지 유효한 `approved_source.jsonl`만 입력으로 허용합니다.
+대시보드에서 연 원문 검수 화면은 최종 승인 성공 뒤 완료 모달을 표시합니다.
+`대시보드로 돌아가기`를 선택하면 대시보드를 새로 열어 승인 상태를 다시 읽고,
+`이 화면에 머물기`를 선택하면 현재 검수 화면을 유지합니다. CLI에서 검수
+화면을 직접 연 경우에는 대시보드 복귀 버튼을 표시하지 않습니다.
 
 ### 원문 변경 감지와 stale
 

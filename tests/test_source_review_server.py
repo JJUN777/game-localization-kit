@@ -117,6 +117,9 @@ class SourceReviewServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("원문 이미지 · 추출문 검수", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
+        self.assertNotIn("__GLK_RETURN_URL_JSON__", html)
+        self.assertIn("const RETURN_URL = null;", html)
+        self.assertIn("원문 승인이 완료되었습니다", html)
 
         status, payload = self._request("/api/review", authorized=False)
         self.assertEqual(status, 403)
@@ -237,6 +240,34 @@ class SourceReviewServerTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_injects_only_a_local_return_url(self) -> None:
+        return_url = "http://127.0.0.1:8765/"
+        server = create_source_review_server(
+            project="visual_source",
+            workspace_root=self.workspace_root,
+            return_url=return_url,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen(server.review_url, timeout=3) as response:
+                html = response.read().decode("utf-8")
+            self.assertIn(
+                f"const RETURN_URL = {json.dumps(return_url)};",
+                html,
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        with self.assertRaisesRegex(ValueError, "local HTTP URL"):
+            create_source_review_server(
+                project="visual_source",
+                workspace_root=self.workspace_root,
+                return_url="https://attacker.example/",
+            )
 
 
 if __name__ == "__main__":

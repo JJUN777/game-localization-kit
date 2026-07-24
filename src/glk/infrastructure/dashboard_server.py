@@ -153,16 +153,24 @@ class DashboardHttpServer(ThreadingHTTPServer):
                 existing[0].server_close()
                 self._review_servers.pop(key, None)
 
-            factories = {
-                "source": create_source_review_server,
-                "glossary": create_glossary_review_server,
-                "translation": create_translation_review_server,
-            }
-            review_server = factories[review_type](
-                project=location.path,
-                workspace_root=self.workspace_root,
-                port=0,
-            )
+            review_server: ThreadingHTTPServer
+            if review_type == "source":
+                review_server = create_source_review_server(
+                    project=location.path,
+                    workspace_root=self.workspace_root,
+                    port=0,
+                    return_url=self.dashboard_url,
+                )
+            else:
+                factories = {
+                    "glossary": create_glossary_review_server,
+                    "translation": create_translation_review_server,
+                }
+                review_server = factories[review_type](
+                    project=location.path,
+                    workspace_root=self.workspace_root,
+                    port=0,
+                )
             review_thread = threading.Thread(
                 target=review_server.serve_forever,
                 name=f"glk-{review_type}-review-{project_id}",

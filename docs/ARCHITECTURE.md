@@ -266,6 +266,7 @@ ID·순서·숫자·token·HTML·용어 검증
 
 - `127.0.0.1`에만 bind하고 외부 interface 노출 불가
 - 요청별 임의 session token과 Host·Origin 검사
+- 대시보드가 원문 검수 서버에 전달하는 복귀 URL은 localhost HTTP만 허용
 - AI 설정 응답에서 API 키 값을 제외하고 설정 여부만 제공
 - `.env`를 Git에서 제외하고 POSIX 저장 권한을 `0600`으로 제한
 - 원문 준비 job을 단일 daemon worker에서 실행하고 active job 중복 시작 차단

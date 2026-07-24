@@ -41,6 +41,22 @@ _SECURITY_HEADERS = {
 }
 
 
+def _validate_return_url(return_url: str | None) -> str | None:
+    if return_url is None:
+        return None
+    parsed = urlsplit(return_url)
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"127.0.0.1", "localhost"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Source review return URL must be a local HTTP URL.")
+    return return_url
+
+
 class SourceReviewHttpServer(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -56,7 +72,9 @@ class SourceReviewHttpServer(ThreadingHTTPServer):
         *,
         project: str | Path,
         workspace_root: str | Path,
+        return_url: str | None = None,
     ) -> None:
+        self.return_url = _validate_return_url(return_url)
         super().__init__(server_address, handler_class)
         self.project = str(project)
         self.workspace_root = str(workspace_root)
@@ -218,6 +236,8 @@ class _SourceReviewHandler(BaseHTTPRequestHandler):
             )
             html = template.replace(
                 "__GLK_TOKEN_JSON__", json.dumps(self.server.auth_token)
+            ).replace(
+                "__GLK_RETURN_URL_JSON__", json.dumps(self.server.return_url)
             ).encode("utf-8")
             self._send_bytes(HTTPStatus.OK, html, "text/html; charset=utf-8")
             return
@@ -333,6 +353,7 @@ def create_source_review_server(
     project: str | Path,
     workspace_root: str | Path = "workspaces",
     port: int = 0,
+    return_url: str | None = None,
 ) -> SourceReviewHttpServer:
     get_project_source_review_document(
         project=project, workspace_root=workspace_root
@@ -342,6 +363,7 @@ def create_source_review_server(
         _SourceReviewHandler,
         project=project,
         workspace_root=workspace_root,
+        return_url=return_url,
     )
 
 
