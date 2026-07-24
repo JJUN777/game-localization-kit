@@ -17,6 +17,7 @@
 5. 모든 후속 데이터는 안정적인 block ID로 원본 파일·페이지·좌표까지 역추적할 수 있어야 한다.
 6. 최종 승인 파일과 저장된 hash가 모두 일치할 때만 후속 단계를 실행한다.
 7. CLI와 향후 GUI는 같은 application service를 사용한다.
+8. Windows와 macOS의 최소·최신 지원 Python 조합을 CI에서 계속 검증한다.
 
 ---
 
@@ -43,6 +44,8 @@ flowchart LR
 CLI의 통합 명령(`glk run`)과 개별 명령은 application service를 공유합니다. `glk run`은 별도 추출 구현을 갖지 않고 PDF의 `extract_project_pdf()` 또는 이미지의 `ocr_project_images()`를 호출한 뒤 segmentation과 QA service를 연결합니다.
 
 CLI와 localhost 검수 서버에서 사용자에게 반환하는 실패 응답은 `error_response.py`를 공유합니다. 응답은 자동 처리와 검색에 쓰는 안정적인 `code`, 사용자에게 표시하는 한글 `message`, 내부 예외와 경로 같은 진단 정보인 `detail`로 구성합니다. 브라우저는 `message`를 표시하고 `detail`은 문제 진단용으로 보존합니다.
+
+`.github/workflows/ci.yml`은 push, pull request, 수동 실행 때 Windows와 macOS에서 Python 3.10·3.14 조합을 검사합니다. 각 작업은 패키지 설치, 의존성 무결성, 전체 unittest, `glk` entry point를 확인하며 Gemini API 키나 실제 모델 호출은 사용하지 않습니다.
 
 ---
 
