@@ -168,7 +168,9 @@ class SourceReviewServerTests(unittest.TestCase):
             payload={"review_sha256": original_hash, "blocks": blocks},
         )
         self.assertEqual(status, 409)
-        self.assertIn("changed after", conflict["message"])
+        self.assertEqual(conflict["code"], "REVIEW_CONFLICT")
+        self.assertIn("새로고침", conflict["message"])
+        self.assertIn("changed after", conflict["detail"])
 
         status, validated = self._request(
             "/api/validate",

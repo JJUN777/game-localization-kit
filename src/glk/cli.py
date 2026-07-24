@@ -45,6 +45,7 @@ from glk.application.translation_review_service import (
 )
 from glk.domain.project import ProjectError
 from glk.domain.workspace import IMAGE_SOURCE_ROOT, WorkspacePaths, is_pdf_source_file
+from glk.error_response import make_error_response
 from glk.infrastructure.gemini_layout import GeminiConfigurationError
 from glk.infrastructure.glossary_review_server import serve_glossary_review
 from glk.infrastructure.source_review_server import serve_source_review
@@ -77,15 +78,13 @@ def _run_version(_: argparse.Namespace) -> int:
 
 
 def _print_error(args: argparse.Namespace, code: str, message: str) -> int:
+    error = make_error_response(code, message)
     if getattr(args, "json", False):
-        print(
-            json.dumps(
-                {"ok": False, "code": code, "message": message},
-                ensure_ascii=False,
-            )
-        )
+        print(json.dumps(error.to_dict(), ensure_ascii=False))
     else:
-        print(f"Error: {message}", file=sys.stderr)
+        print(f"오류 [{error.code}]: {error.message}", file=sys.stderr)
+        if getattr(args, "verbose", False) and error.detail:
+            print(f"상세: {error.detail}", file=sys.stderr)
     return EXIT_ERROR
 
 

@@ -42,6 +42,8 @@ flowchart LR
 
 CLI의 통합 명령(`glk run`)과 개별 명령은 application service를 공유합니다. `glk run`은 별도 추출 구현을 갖지 않고 PDF의 `extract_project_pdf()` 또는 이미지의 `ocr_project_images()`를 호출한 뒤 segmentation과 QA service를 연결합니다.
 
+CLI와 localhost 검수 서버에서 사용자에게 반환하는 실패 응답은 `error_response.py`를 공유합니다. 응답은 자동 처리와 검색에 쓰는 안정적인 `code`, 사용자에게 표시하는 한글 `message`, 내부 예외와 경로 같은 진단 정보인 `detail`로 구성합니다. 브라우저는 `message`를 표시하고 `detail`은 문제 진단용으로 보존합니다.
+
 ---
 
 ## 프로젝트 manifest

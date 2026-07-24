@@ -23,6 +23,7 @@ from glk.application.glossary_service import (
     GlossaryImportError,
     import_project_glossary,
 )
+from glk.error_response import make_error_response, make_http_error_response
 
 
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
@@ -111,7 +112,10 @@ class _GlossaryReviewHandler(BaseHTTPRequestHandler):
         )
 
     def _send_error_json(self, status: HTTPStatus, message: str) -> None:
-        self._send_json(status, {"ok": False, "message": message})
+        self._send_json(
+            status,
+            make_http_error_response(status, message).to_dict(),
+        )
 
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
@@ -207,11 +211,11 @@ class _GlossaryReviewHandler(BaseHTTPRequestHandler):
                             ),
                         )
                     except GlossaryImportError as error:
-                        response = {
-                            "ok": False,
-                            "message": str(error),
-                            "document": document,
-                        }
+                        response = make_error_response(
+                            "GLOSSARY_IMPORT_FAILED",
+                            error,
+                        ).to_dict()
+                        response["document"] = document
                     else:
                         response = {
                             "ok": True,

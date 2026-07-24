@@ -23,6 +23,7 @@ from glk.application.source_review_service import (
     save_project_source_review,
 )
 from glk.domain.workspace import WorkspacePaths, is_pdf_source_file
+from glk.error_response import make_http_error_response
 
 
 _MAX_REQUEST_BYTES = 16 * 1024 * 1024
@@ -124,7 +125,10 @@ class _SourceReviewHandler(BaseHTTPRequestHandler):
         )
 
     def _send_error_json(self, status: HTTPStatus, message: str) -> None:
-        self._send_json(status, {"ok": False, "message": message})
+        self._send_json(
+            status,
+            make_http_error_response(status, message).to_dict(),
+        )
 
     def _send_file(self, path: Path, content_type: str | None = None) -> None:
         if not path.is_file():

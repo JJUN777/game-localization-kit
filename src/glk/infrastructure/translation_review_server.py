@@ -23,6 +23,7 @@ from glk.application.translation_review_service import (
 )
 from glk.application.translation_retry_service import retry_failed_translations
 from glk.application.translation_types import TranslationError
+from glk.error_response import make_http_error_response
 from glk.infrastructure.gemini_layout import GeminiConfigurationError
 
 
@@ -117,7 +118,10 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
         self._send_bytes(status, data, "application/json; charset=utf-8")
 
     def _send_error_json(self, status: HTTPStatus, message: str) -> None:
-        self._send_json(status, {"ok": False, "message": message})
+        self._send_json(
+            status,
+            make_http_error_response(status, message).to_dict(),
+        )
 
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
