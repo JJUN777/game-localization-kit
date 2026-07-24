@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Game Localization Kit Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #18201f;
+      --muted: #66706e;
+      --paper: #f4f1e9;
+      --surface: #fffdf8;
+      --line: #ded9cd;
+      --accent: #cf4b2f;
+      --accent-dark: #a93120;
+      --green: #28735a;
+      --amber: #a96e16;
+      --shadow: 0 20px 60px rgb(43 35 25 / 9%);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 0%, rgb(207 75 47 / 9%), transparent 32rem),
+        radial-gradient(circle at 90% 8%, rgb(40 115 90 / 8%), transparent 28rem),
+        var(--paper);
+      font-family: Inter, Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+
+    .shell {
+      width: min(1280px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 34px 0 72px;
+    }
+
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 28px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 10px;
+      color: var(--accent-dark);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: 0 0 0 5px rgb(40 115 90 / 11%);
+    }
+
+    h1 {
+      margin: 0;
+      font-family: "Avenir Next", Inter, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      font-size: clamp(34px, 5vw, 58px);
+      line-height: .98;
+      letter-spacing: -.055em;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      max-width: 620px;
+      margin: 13px 0 0;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .refresh-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    #lastUpdated {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+    }
+
+    .refresh {
+      min-width: 98px;
+      padding: 11px 16px;
+      border: 1px solid var(--ink);
+      border-radius: 999px;
+      color: var(--surface);
+      background: var(--ink);
+      font-weight: 750;
+      transition: transform .15s ease, opacity .15s ease;
+    }
+
+    .refresh:hover { transform: translateY(-1px); }
+    .refresh:disabled { cursor: wait; opacity: .55; }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .summary-card {
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgb(255 253 248 / 78%);
+      backdrop-filter: blur(8px);
+    }
+
+    .summary-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .summary-value {
+      display: block;
+      margin-top: 6px;
+      font-family: "Avenir Next", Inter, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      font-size: 36px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -.045em;
+      line-height: 1;
+    }
+
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .search {
+      width: min(390px, 100%);
+      padding: 11px 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      outline: 0;
+      color: var(--ink);
+      background: #fff;
+    }
+
+    .search:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgb(207 75 47 / 12%);
+    }
+
+    .filters { display: flex; gap: 7px; }
+
+    .filter {
+      padding: 9px 13px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .filter:hover { color: var(--ink); }
+    .filter.active {
+      border-color: var(--line);
+      color: var(--ink);
+      background: var(--paper);
+    }
+
+    .warning {
+      display: none;
+      margin-top: 16px;
+      padding: 13px 16px;
+      border: 1px solid rgb(169 110 22 / 30%);
+      border-radius: 12px;
+      color: #6e450c;
+      background: #fff6df;
+      font-size: 13px;
+    }
+
+    .project-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .project-card {
+      position: relative;
+      overflow: hidden;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--surface);
+      box-shadow: 0 14px 40px rgb(43 35 25 / 6%);
+    }
+
+    .project-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 4px;
+      background: linear-gradient(90deg, var(--accent), #e6a34b);
+    }
+
+    .project-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .project-name {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: -.02em;
+    }
+
+    .project-id {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .source-badge {
+      padding: 6px 9px;
+      border-radius: 999px;
+      color: var(--green);
+      background: rgb(40 115 90 / 10%);
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .stage-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .stage {
+      color: var(--accent-dark);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .progress-value {
+      color: var(--muted);
+      font-family: "Avenir Next", Inter, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .progress-track {
+      overflow: hidden;
+      height: 7px;
+      margin-top: 9px;
+      border-radius: 999px;
+      background: #e9e5dc;
+    }
+
+    .progress-bar {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), #df963c);
+      transition: width .35s ease;
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 7px;
+      margin: 20px 0;
+    }
+
+    .pipeline-step {
+      min-width: 0;
+      padding: 10px 5px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      color: var(--muted);
+      background: #faf8f2;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 750;
+    }
+
+    .pipeline-step.done {
+      border-color: rgb(40 115 90 / 25%);
+      color: var(--green);
+      background: rgb(40 115 90 / 7%);
+    }
+
+    .pipeline-step.attention {
+      border-color: rgb(169 110 22 / 28%);
+      color: var(--amber);
+      background: rgb(169 110 22 / 8%);
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      padding-top: 17px;
+      border-top: 1px solid var(--line);
+    }
+
+    .review-button {
+      min-width: 0;
+      padding: 10px 8px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--ink);
+      background: #fff;
+      font-size: 12px;
+      font-weight: 780;
+      transition: border-color .15s ease, transform .15s ease;
+    }
+
+    .review-button:hover:not(:disabled) {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+
+    .review-button:disabled {
+      cursor: not-allowed;
+      color: #a8aaa6;
+      background: #f4f2ed;
+    }
+
+    .path {
+      overflow: hidden;
+      margin-top: 14px;
+      color: #919692;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .empty {
+      display: none;
+      margin-top: 18px;
+      padding: 72px 24px;
+      border: 1px dashed #c9c2b5;
+      border-radius: 22px;
+      background: rgb(255 253 248 / 55%);
+      text-align: center;
+    }
+
+    .empty-mark {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 16px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      color: var(--accent);
+      background: var(--surface);
+      font: 28px/46px Georgia, serif;
+    }
+
+    .empty h2 { margin: 0 0 8px; font-size: 18px; }
+    .empty p { margin: 0; color: var(--muted); line-height: 1.6; }
+    .empty code { color: var(--accent-dark); }
+
+    .toast {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      z-index: 10;
+      max-width: min(430px, calc(100% - 48px));
+      padding: 14px 17px;
+      border-radius: 12px;
+      color: #fff;
+      background: var(--ink);
+      box-shadow: 0 15px 45px rgb(0 0 0 / 24%);
+      opacity: 0;
+      transform: translateY(12px);
+      pointer-events: none;
+      transition: opacity .2s ease, transform .2s ease;
+    }
+
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.error { background: #8e2b1d; }
+
+    @media (max-width: 820px) {
+      .shell { width: min(100% - 24px, 680px); padding-top: 24px; }
+      header { align-items: flex-start; flex-direction: column; }
+      .refresh-wrap { width: 100%; justify-content: space-between; }
+      #lastUpdated { text-align: left; }
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+      .toolbar { align-items: stretch; flex-direction: column; }
+      .search { width: 100%; }
+      .filters { overflow-x: auto; }
+      .project-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 460px) {
+      h1 { font-size: 36px; }
+      .summary-card { padding: 15px; }
+      .project-card { padding: 18px; }
+      .actions { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="eyebrow"><span class="live-dot"></span> Local dashboard</div>
+        <h1>Game Localization Kit Dashboard</h1>
+        <p class="subtitle">
+          현재 작업 단계와 검수 준비 상태를 확인하고, 필요한 검수 화면으로 바로 이동합니다.
+        </p>
+      </div>
+      <div class="refresh-wrap">
+        <span id="lastUpdated">불러오는 중…</span>
+        <button class="refresh" id="refreshButton" type="button">새로고침</button>
+      </div>
+    </header>
+
+    <section class="summary-grid" aria-label="프로젝트 요약">
+      <article class="summary-card">
+        <span class="summary-label">전체 프로젝트</span>
+        <strong class="summary-value" id="summaryProjects">—</strong>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">진행 중</span>
+        <strong class="summary-value" id="summaryProgress">—</strong>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">완료</span>
+        <strong class="summary-value" id="summaryCompleted">—</strong>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">확인 필요</span>
+        <strong class="summary-value" id="summaryAttention">—</strong>
+      </article>
+    </section>
+
+    <section class="toolbar" aria-label="프로젝트 검색 및 필터">
+      <input class="search" id="searchInput" type="search"
+        placeholder="프로젝트 이름 또는 ID 검색" autocomplete="off">
+      <div class="filters" role="group" aria-label="상태 필터">
+        <button class="filter active" type="button" data-filter="all">전체</button>
+        <button class="filter" type="button" data-filter="progress">진행 중</button>
+        <button class="filter" type="button" data-filter="completed">완료</button>
+        <button class="filter" type="button" data-filter="attention">확인 필요</button>
+      </div>
+    </section>
+
+    <aside class="warning" id="warningBanner" role="status"></aside>
+    <section class="project-grid" id="projectGrid" aria-live="polite"></section>
+    <section class="empty" id="emptyState">
+      <div class="empty-mark">+</div>
+      <h2 id="emptyTitle">아직 프로젝트가 없습니다</h2>
+      <p id="emptyText"><code>glk init "프로젝트 이름"</code>으로 첫 프로젝트를 만들어 보세요.</p>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script>
+    "use strict";
+
+    const AUTH_TOKEN = __GLK_TOKEN_JSON__;
+    const reviewLabels = {
+      source: "원문 검수",
+      glossary: "용어 검수",
+      translation: "번역 검수",
+    };
+    let dashboard = null;
+    let activeFilter = "all";
+    let toastTimer = null;
+
+    const byId = (id) => document.getElementById(id);
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: {
+          "X-GLK-Token": AUTH_TOKEN,
+          ...(options.body ? {"Content-Type": "application/json"} : {}),
+          ...(options.headers || {}),
+        },
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.message || "요청을 처리하지 못했습니다.");
+      }
+      return payload;
+    }
+
+    function showToast(message, isError = false) {
+      const toast = byId("toast");
+      toast.textContent = message;
+      toast.className = `toast show${isError ? " error" : ""}`;
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => {
+        toast.className = "toast";
+      }, 3500);
+    }
+
+    function sourceTypeLabel(type) {
+      if (type === "images") return "Images";
+      if (type === "pdf") return "PDF";
+      return "대기";
+    }
+
+    function stepState(project, key) {
+      const p = project.pipeline;
+      if (key === "source") {
+        return p.final_source_approved ? "done" :
+          (p.source_acquired || p.review_source_ready ? "attention" : "");
+      }
+      if (key === "review") {
+        return p.final_source_approved ? "done" :
+          (p.human_review === "pending" || p.human_review === "stale" ? "attention" : "");
+      }
+      if (key === "glossary") {
+        return p.termbase_status === "current" ? "done" :
+          (p.glossary_status !== "not_ready" ? "attention" : "");
+      }
+      return p.final_translation_approved ? "done" :
+        (p.translation_status !== "not_ready" ? "attention" : "");
+    }
+
+    function projectNeedsAttention(project) {
+      return project.stage === "translation_qa_failed" || !project.workspace_ready;
+    }
+
+    function matchesFilter(project) {
+      if (activeFilter === "completed") {
+        return project.pipeline.final_translation_approved;
+      }
+      if (activeFilter === "progress") {
+        return !project.pipeline.final_translation_approved;
+      }
+      if (activeFilter === "attention") {
+        return projectNeedsAttention(project);
+      }
+      return true;
+    }
+
+    function reviewButton(project, type) {
+      const review = project.reviews[type];
+      const disabled = review.enabled ? "" : " disabled";
+      return `<button class="review-button" type="button"
+        data-project="${escapeHtml(project.project_id)}"
+        data-review="${type}" title="${escapeHtml(review.reason)}"${disabled}>
+        ${reviewLabels[type]}
+      </button>`;
+    }
+
+    function projectCard(project) {
+      const pathTitle = escapeHtml(project.path);
+      return `<article class="project-card">
+        <div class="project-head">
+          <div>
+            <h2 class="project-name">${escapeHtml(project.name)}</h2>
+            <span class="project-id">${escapeHtml(project.project_id)}</span>
+          </div>
+          <span class="source-badge">${sourceTypeLabel(project.source_type)}</span>
+        </div>
+        <div class="stage-row">
+          <span class="stage">${escapeHtml(project.stage_label)}</span>
+          <span class="progress-value">${project.progress}%</span>
+        </div>
+        <div class="progress-track" aria-label="진행률 ${project.progress}%">
+          <div class="progress-bar" style="width:${project.progress}%"></div>
+        </div>
+        <div class="pipeline" aria-label="작업 단계">
+          <span class="pipeline-step ${stepState(project, "source")}">원문 추출</span>
+          <span class="pipeline-step ${stepState(project, "review")}">원문 검수</span>
+          <span class="pipeline-step ${stepState(project, "glossary")}">용어 정리</span>
+          <span class="pipeline-step ${stepState(project, "translation")}">번역 검수</span>
+        </div>
+        <div class="actions">
+          ${reviewButton(project, "source")}
+          ${reviewButton(project, "glossary")}
+          ${reviewButton(project, "translation")}
+        </div>
+        <div class="path" title="${pathTitle}">${pathTitle}</div>
+      </article>`;
+    }
+
+    function render() {
+      if (!dashboard) return;
+      const query = byId("searchInput").value.trim().toLocaleLowerCase("ko");
+      const projects = dashboard.projects.filter((project) => {
+        const haystack = `${project.name} ${project.project_id}`.toLocaleLowerCase("ko");
+        return haystack.includes(query) && matchesFilter(project);
+      });
+
+      const summary = dashboard.summary;
+      byId("summaryProjects").textContent = summary.projects;
+      byId("summaryProgress").textContent = summary.in_progress;
+      byId("summaryCompleted").textContent = summary.completed;
+      byId("summaryAttention").textContent = summary.needs_attention;
+
+      const warning = byId("warningBanner");
+      if (dashboard.warnings.length) {
+        warning.textContent =
+          `읽지 못한 프로젝트 폴더가 ${dashboard.warnings.length}개 있습니다. ` +
+          "터미널의 glk projects 결과에서 세부 내용을 확인하세요.";
+        warning.style.display = "block";
+      } else {
+        warning.style.display = "none";
+      }
+
+      byId("projectGrid").innerHTML = projects.map(projectCard).join("");
+      const empty = byId("emptyState");
+      empty.style.display = projects.length ? "none" : "block";
+      if (!dashboard.projects.length) {
+        byId("emptyTitle").textContent = "아직 프로젝트가 없습니다";
+        byId("emptyText").innerHTML =
+          "<code>glk init &quot;프로젝트 이름&quot;</code>으로 첫 프로젝트를 만들어 보세요.";
+      } else {
+        byId("emptyTitle").textContent = "조건에 맞는 프로젝트가 없습니다";
+        byId("emptyText").textContent = "검색어나 상태 필터를 바꿔보세요.";
+      }
+    }
+
+    async function refresh(silent = false) {
+      const button = byId("refreshButton");
+      button.disabled = true;
+      try {
+        dashboard = await api("/api/dashboard");
+        render();
+        const time = new Intl.DateTimeFormat("ko-KR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }).format(new Date());
+        byId("lastUpdated").textContent = `${time} 기준`;
+        if (!silent) showToast("프로젝트 상태를 새로 불러왔습니다.");
+      } catch (error) {
+        byId("lastUpdated").textContent = "연결을 확인해 주세요";
+        showToast(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function openReview(projectId, reviewType) {
+      try {
+        const result = await api("/api/review/open", {
+          method: "POST",
+          body: JSON.stringify({
+            project_id: projectId,
+            review_type: reviewType,
+          }),
+        });
+        window.location.assign(result.url);
+      } catch (error) {
+        showToast(error.message, true);
+        await refresh(true);
+      }
+    }
+
+    byId("refreshButton").addEventListener("click", () => refresh(false));
+    byId("searchInput").addEventListener("input", render);
+    document.querySelector(".filters").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-filter]");
+      if (!button) return;
+      activeFilter = button.dataset.filter;
+      document.querySelectorAll(".filter").forEach((value) => {
+        value.classList.toggle("active", value === button);
+      });
+      render();
+    });
+    byId("projectGrid").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-review]");
+      if (!button || button.disabled) return;
+      openReview(button.dataset.project, button.dataset.review);
+    });
+
+    refresh(true);
+  </script>
+</body>
+</html>

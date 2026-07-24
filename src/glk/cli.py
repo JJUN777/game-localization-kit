@@ -46,6 +46,7 @@ from glk.application.translation_review_service import (
 from glk.domain.project import ProjectError
 from glk.domain.workspace import IMAGE_SOURCE_ROOT, WorkspacePaths, is_pdf_source_file
 from glk.error_response import make_error_response
+from glk.infrastructure.dashboard_server import DashboardError, serve_dashboard
 from glk.infrastructure.gemini_layout import GeminiConfigurationError
 from glk.infrastructure.glossary_review_server import serve_glossary_review
 from glk.infrastructure.source_review_server import serve_source_review
@@ -978,6 +979,18 @@ def _run_source_review_web(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_dashboard(args: argparse.Namespace) -> int:
+    try:
+        serve_dashboard(
+            workspace_root=args.workspace_root,
+            port=args.port,
+            open_browser=not args.no_open,
+        )
+    except (DashboardError, ProjectError, OSError, ValueError) as error:
+        return _print_error(args, "DASHBOARD_SERVER_FAILED", str(error))
+    return 0
+
+
 def _run_retry(args: argparse.Namespace) -> int:
     try:
         result = retry_failed_translations(
@@ -1044,6 +1057,27 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--dry-run", action="store_true", help="Show what would be created")
     init_parser.add_argument("--json", action="store_true", help="Print machine-readable output")
     init_parser.set_defaults(handler=_run_init)
+
+    ui_parser = subparsers.add_parser(
+        "ui", help="Open the local project dashboard"
+    )
+    ui_parser.add_argument(
+        "--workspace-root",
+        default="workspaces",
+        help="Parent directory for project workspaces",
+    )
+    ui_parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="Local port; 0 selects an available port",
+    )
+    ui_parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Do not open the default browser",
+    )
+    ui_parser.set_defaults(handler=_run_dashboard)
 
     run_parser = subparsers.add_parser(
         "run", help="Acquire source, prepare review TXT, and run local QA"

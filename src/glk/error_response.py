@@ -10,6 +10,7 @@ _CODE_MESSAGES = {
     "PROJECT_INIT_FAILED": "프로젝트를 생성하지 못했습니다.",
     "PROJECT_STATUS_FAILED": "프로젝트 상태를 확인하지 못했습니다.",
     "PROJECT_LIST_FAILED": "프로젝트 목록을 불러오지 못했습니다.",
+    "DASHBOARD_SERVER_FAILED": "통합 대시보드를 열지 못했습니다.",
     "EXTRACTION_FAILED": "PDF 원문 추출에 실패했습니다.",
     "IMAGE_OCR_FAILED": "이미지 OCR에 실패했습니다.",
     "RUN_INPUT_FAILED": "처리할 원문 입력을 결정하지 못했습니다.",

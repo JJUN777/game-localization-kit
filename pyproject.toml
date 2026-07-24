@@ -40,10 +40,12 @@ follow_imports = "skip"
 files = [
   "src/glk/error_response.py",
   "src/glk/application/review_types.py",
+  "src/glk/application/dashboard_service.py",
   "src/glk/application/source_review_service.py",
   "src/glk/application/glossary_review_service.py",
   "src/glk/application/translation_review_service.py",
   "src/glk/infrastructure/source_review_server.py",
   "src/glk/infrastructure/glossary_review_server.py",
   "src/glk/infrastructure/translation_review_server.py",
+  "src/glk/infrastructure/dashboard_server.py",
 ]

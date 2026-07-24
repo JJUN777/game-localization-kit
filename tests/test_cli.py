@@ -42,6 +42,28 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertRegex(output.getvalue(), r"^glk \d+\.\d+\.\d+\n$")
 
+    def test_ui_command_starts_local_dashboard(self) -> None:
+        with patch("glk.cli.serve_dashboard") as serve:
+            exit_code = main(
+                [
+                    "ui",
+                    "--workspace-root",
+                    "custom-workspaces",
+                    "--port",
+                    "8765",
+                    "--no-open",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            serve.call_args.kwargs,
+            {
+                "workspace_root": "custom-workspaces",
+                "port": 8765,
+                "open_browser": False,
+            },
+        )
+
     def test_projects_command_lists_workspace_as_json(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"

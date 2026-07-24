@@ -683,6 +683,14 @@ glk projects                    # 전체 프로젝트 목록
 glk status --project primal     # 특정 프로젝트 상세 상태
 ```
 
+프로젝트가 여러 개라면 로컬 대시보드에서 전체 진행 상황을 보고 준비된 검수 화면을 바로 열 수도 있습니다.
+
+```bash
+glk ui
+```
+
+대시보드는 현재 프로젝트 조회와 검수 화면 연결만 제공하는 미리보기 기능입니다. 프로젝트 생성, 원본 등록과 AI 작업 실행은 기존 CLI 명령을 사용합니다.
+
 ### `glk projects`의 진행 단계
 
 `glk projects`는 각 프로젝트가 전체 흐름에서 어디까지 진행했는지를 보여줍니다.
@@ -722,6 +730,7 @@ glk status --project primal     # 특정 프로젝트 상세 상태
 
 | 명령 | 용도 |
 |---|---|
+| `glk ui` | 전체 프로젝트 로컬 대시보드 |
 | `glk init` | 프로젝트 workspace 생성 |
 | `glk run` | 원문 획득부터 원문 QA까지 통합 실행 |
 | `glk review source` | 브라우저 원문 검수 화면 |

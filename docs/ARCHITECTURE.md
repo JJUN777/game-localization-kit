@@ -39,7 +39,7 @@ flowchart LR
 | Application | 프로젝트 단위 use case, 캐시, 원자적 출력, 단계 연결 | 각 `*_service`, 공통 `_io`, `_hashing`, `_translation_context`, `translation_types` |
 | Domain | 외부 SDK와 파일 포맷에 독립적인 모델·검증 | `project.py`, `source_block.py`, `source_qa.py`, `translation_segment.py`, `translation_qa.py`, `approved_translation.py` |
 | Extraction | PDF layout과 이미지 OCR 결과 처리 계약 | `layout.py`, `image_ocr.py` |
-| Infrastructure | 외부 모델 adapter와 로컬 검수 서버 | `gemini_layout.py`, `gemini_ocr.py`, `gemini_translation.py`, `source_review_server.py`, `glossary_review_server.py`, `translation_review_server.py` |
+| Infrastructure | 외부 모델 adapter와 로컬 대시보드·검수 서버 | `gemini_layout.py`, `gemini_ocr.py`, `gemini_translation.py`, `dashboard_server.py`, `source_review_server.py`, `glossary_review_server.py`, `translation_review_server.py` |
 
 CLI의 통합 명령(`glk run`)과 개별 명령은 application service를 공유합니다. `glk run`은 별도 추출 구현을 갖지 않고 PDF의 `extract_project_pdf()` 또는 이미지의 `ocr_project_images()`를 호출한 뒤 segmentation과 QA service를 연결합니다.
 
@@ -243,9 +243,11 @@ ID·순서·숫자·token·HTML·용어 검증
 
 ---
 
-## 로컬 HTML 검수 서버 보안
+## 로컬 대시보드와 HTML 검수 서버 보안
 
-세 검수 서버(`source`, `glossary`, `translation`)가 공유하는 보안 경계:
+`glk ui` 대시보드는 `dashboard_service`가 만든 읽기 전용 프로젝트 상태를 표시하고, 준비된 기존 `source`, `glossary`, `translation` 검수 서버를 필요할 때 실행합니다. 대시보드에서 연 검수 서버는 같은 프로젝트와 종류에 대해 재사용하며 대시보드 종료 시 함께 종료합니다.
+
+대시보드와 세 검수 서버가 공유하는 보안 경계:
 
 - `127.0.0.1`에만 bind하고 외부 interface 노출 불가
 - 요청별 임의 session token과 Host·Origin 검사
@@ -274,6 +276,6 @@ UI는 workspace 파일을 직접 다루지 않고 기존 application service를 
 다음 단계도 기존 경계를 유지합니다.
 
 - 의미·문체 QA: 결정적 로컬 QA와 분리된 선택적 LLM 보조 단계
-- GUI: workspace 파일을 직접 조작하지 않고 application service 호출
+- GUI: workspace 파일을 직접 조작하지 않고 application service 호출. 장시간 작업은 HTTP 요청 thread와 분리된 job 계층을 거쳐 실행
 
 사용자 흐름과 제한사항이 바뀌면 [README](../README.md)와 [전체 작업 흐름](WORKFLOW.md)을 함께 갱신합니다.
