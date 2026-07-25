@@ -12,7 +12,7 @@ from dotenv import dotenv_values
 
 from glk.application._io import write_text_atomic
 from glk.config import resolve_settings_root
-from glk.infrastructure.gemini_layout import DEFAULT_MODEL
+from glk.infrastructure.gemini_common import DEFAULT_MODEL
 
 
 _MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")

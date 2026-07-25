@@ -213,18 +213,20 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
 - [ ] `ARCH-003` dashboard HTTP 경로 분석과 인증을 라우팅 계층으로 분리한다.
 - [ ] `ARCH-004` `translate_project`, `import_project_glossary`,
   `_inspect_pipeline_status` 등 대형 함수를 책임별로 분리한다.
-- [ ] `ARCH-005` 세 Gemini provider의 공통 동작을 기반 모듈로 추출한다.
+- [x] `ARCH-005` 세 Gemini provider의 공통 동작을 기반 모듈로 추출한다.
   - 재시도 루프, 환경 설정 로딩, SDK 오류 판정과 timeout 정책을 공통 관리한다.
   - layout, OCR, translation 고유 책임은 prompt·schema·응답 변환으로 제한한다.
   - `AI-001`~`AI-003`에서 도입한 공통 정책을 provider 전체 구조로 확장한다.
-  - 진행 메모: timeout, SDK 재시도 비활성화, 상태 코드 판정과 재시도 루프는
-    `gemini_common.py`로 추출했다. 환경 로딩과 provider 생성 골격은 남아 있다.
+  - `GeminiProviderBase`가 API 키 검증, 모델 결정, SDK client 생성,
+    `from_environment`와 공통 재시도 실행을 담당한다.
+  - 검증: 세 provider의 공통 환경 생성·누락 키 오류·timeout 설정 회귀 테스트와
+    공통 기반 및 세 provider의 mypy 검사를 통과한다.
 - [ ] `API-001` 결과 객체의 `ok` 의미를 통일하거나 상수 필드를 제거한다.
 - [ ] `SECURITY-001` 세션 토큰 비교에 `secrets.compare_digest`를 사용한다.
 - [ ] `QUALITY-001` ruff를 작은 규칙 집합부터 도입하고 포맷 변경은 별도 커밋으로
   분리한다.
 - [ ] `QUALITY-002` mypy 대상을 도메인 계층부터 점진적으로 확대한다.
-  - 현재 설정된 16개 파일은 통과한다.
+  - 현재 설정된 21개 파일은 통과한다.
   - application/domain/extraction 35개 파일로 확대하면 7개 파일에서
     22개 오류가 확인되므로 한 번에 strict로 전환하지 않는다.
   - 오류가 0개인 파일부터 검사 대상에 편입하고, 나머지는 파일 단위로 오류를

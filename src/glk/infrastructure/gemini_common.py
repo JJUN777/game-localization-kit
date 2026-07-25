@@ -5,19 +5,55 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import math
+import os
 import random
 import time
 from typing import Callable, TypeVar
 
+from dotenv import load_dotenv
+from google import genai
 from google.genai import errors, types
 
+from glk.config import resolve_settings_root
 
+
+DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_REQUEST_TIMEOUT_MS = 180_000
 DEFAULT_RATE_LIMIT_DELAY_SECONDS = 60.0
 MAX_RETRY_DELAY_SECONDS = 300.0
 _RETRYABLE_CLIENT_STATUS_CODES = frozenset({408, 429})
 
 ResultT = TypeVar("ResultT")
+ProviderT = TypeVar("ProviderT", bound="GeminiProviderBase")
+
+
+class GeminiConfigurationError(ValueError):
+    """Raised when Gemini credentials or model settings are unavailable."""
+
+
+def load_gemini_environment(
+    settings_root: str | os.PathLike[str] | None = None,
+) -> None:
+    """Load Gemini settings from the same stable root used by the dashboard."""
+    load_dotenv(
+        resolve_settings_root(settings_root) / ".env",
+        override=False,
+    )
+
+
+def _configured_model_name(model_name: str | None) -> str:
+    if model_name and model_name.strip():
+        return model_name.strip()
+    environment_model = os.getenv("GEMINI_MODEL", "").strip()
+    if environment_model:
+        return environment_model
+    return DEFAULT_MODEL
+
+
+def resolve_model_name(model_name: str | None = None) -> str:
+    """Resolve an explicit, configured, or default Gemini model name."""
+    load_gemini_environment()
+    return _configured_model_name(model_name)
 
 
 def gemini_http_options(
@@ -161,3 +197,52 @@ def run_with_gemini_retry(
             )
             sleep_for(delay)
     raise RuntimeError("Gemini retry loop ended unexpectedly.")
+
+
+class GeminiProviderBase:
+    """Shared configuration, client creation, and retry shell for providers."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model_name: str,
+        max_retries: int = 3,
+        base_delay: float = 2,
+        request_timeout_ms: int = DEFAULT_REQUEST_TIMEOUT_MS,
+    ) -> None:
+        if not api_key.strip():
+            raise GeminiConfigurationError("GEMINI_API_KEY is not configured.")
+        self.model_name = model_name
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.request_timeout_ms = request_timeout_ms
+        self.client = genai.Client(
+            api_key=api_key,
+            http_options=gemini_http_options(request_timeout_ms),
+        )
+
+    @classmethod
+    def from_environment(
+        cls: type[ProviderT],
+        model_name: str | None = None,
+    ) -> ProviderT:
+        """Create one provider from the shared settings location."""
+        load_gemini_environment()
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if not api_key:
+            raise GeminiConfigurationError(
+                "GEMINI_API_KEY is not set. Add it to .env or export it in the shell."
+            )
+        return cls(
+            api_key=api_key,
+            model_name=_configured_model_name(model_name),
+        )
+
+    def run_request(self, operation: Callable[[], ResultT]) -> ResultT:
+        """Run one provider request with the shared retry policy."""
+        return run_with_gemini_retry(
+            operation,
+            max_attempts=self.max_retries,
+            base_delay=self.base_delay,
+        )

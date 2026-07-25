@@ -47,7 +47,7 @@ from glk.domain.project import ProjectError
 from glk.domain.workspace import IMAGE_SOURCE_ROOT, WorkspacePaths, is_pdf_source_file
 from glk.error_response import make_error_response
 from glk.infrastructure.dashboard_server import DashboardError, serve_dashboard
-from glk.infrastructure.gemini_layout import GeminiConfigurationError
+from glk.infrastructure.gemini_common import GeminiConfigurationError
 from glk.infrastructure.glossary_review_server import serve_glossary_review
 from glk.infrastructure.source_review_server import serve_source_review
 from glk.infrastructure.translation_review_server import serve_translation_review

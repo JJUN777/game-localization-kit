@@ -11,7 +11,7 @@ from glk.application.ai_settings_service import (
     AiSettingsError,
     AiSettingsService,
 )
-from glk.infrastructure.gemini_layout import DEFAULT_MODEL
+from glk.infrastructure.gemini_common import DEFAULT_MODEL
 
 
 class AiSettingsServiceTests(unittest.TestCase):

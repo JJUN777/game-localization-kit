@@ -756,6 +756,18 @@ git diff --check
 - atomic replace와 새 append 파일은 지원 운영체제에서 부모 디렉터리까지 fsync합니다.
 - 전체 231개 테스트, 설정된 17개 Python 파일 mypy, Python bytecode 컴파일과 `git diff --check`를 통과했습니다.
 
+### 2026-07-25 — Gemini provider 공통 기반 통합
+
+- `GeminiProviderBase`가 API 키 검증, 모델 선택, SDK client·timeout 구성,
+  `from_environment`와 재시도 실행을 공통 관리합니다.
+- layout, 이미지 OCR, translation provider에는 작업별 prompt·schema·응답 변환만
+  남겨 환경 로딩과 생성자 골격의 3중 복제를 제거했습니다.
+- 내부 서비스·CLI·검수 서버도 설정 오류와 기본 모델을 `gemini_common.py`에서
+  가져오도록 기준 import를 통일했습니다.
+- 공통 환경 생성, API 키 누락과 세 provider timeout 회귀 테스트를 보강했습니다.
+- 전체 233개 테스트, 설정된 21개 Python 파일 mypy, Python bytecode 컴파일과
+  `git diff --check`를 통과했습니다.
+
 ---
 
 ## 다른 컴퓨터에서 작업 재개

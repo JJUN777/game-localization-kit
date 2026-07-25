@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from glk.config import resolve_settings_root
-from glk.infrastructure.gemini_layout import load_gemini_environment
+from glk.infrastructure.gemini_common import load_gemini_environment
 
 
 class SettingsPathTests(unittest.TestCase):
@@ -84,10 +84,10 @@ class SettingsPathTests(unittest.TestCase):
         root = Path.cwd().resolve() / "stable/settings"
         with (
             patch(
-                "glk.infrastructure.gemini_layout.resolve_settings_root",
+                "glk.infrastructure.gemini_common.resolve_settings_root",
                 return_value=root,
             ) as resolve,
-            patch("glk.infrastructure.gemini_layout.load_dotenv") as load,
+            patch("glk.infrastructure.gemini_common.load_dotenv") as load,
         ):
             load_gemini_environment()
 

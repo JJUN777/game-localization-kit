@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from glk.application.ai_model_catalog import load_gemini_model_catalog
-from glk.infrastructure.gemini_layout import DEFAULT_MODEL
+from glk.infrastructure.gemini_common import DEFAULT_MODEL
 
 
 class GeminiModelCatalogTests(unittest.TestCase):

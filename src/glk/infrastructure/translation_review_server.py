@@ -29,7 +29,7 @@ from glk.application.translation_retry_job_service import (
 )
 from glk.application.translation_types import TranslationError
 from glk.error_response import make_http_error_response
-from glk.infrastructure.gemini_layout import GeminiConfigurationError
+from glk.infrastructure.gemini_common import GeminiConfigurationError
 
 
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024

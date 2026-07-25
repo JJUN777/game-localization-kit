@@ -10,6 +10,7 @@ from google.genai import errors
 
 from glk.infrastructure.gemini_common import (
     DEFAULT_REQUEST_TIMEOUT_MS,
+    GeminiConfigurationError,
     gemini_http_options,
     gemini_retry_delay,
     is_retryable_gemini_error,
@@ -168,22 +169,15 @@ class GeminiCommonPolicyTests(unittest.TestCase):
 
     def test_all_providers_apply_the_same_client_timeout(self) -> None:
         providers = (
-            (
-                "glk.infrastructure.gemini_layout.genai.Client",
-                GeminiLayoutProvider,
-            ),
-            (
-                "glk.infrastructure.gemini_ocr.genai.Client",
-                GeminiImageOcrProvider,
-            ),
-            (
-                "glk.infrastructure.gemini_translation.genai.Client",
-                GeminiTranslationProvider,
-            ),
+            GeminiLayoutProvider,
+            GeminiImageOcrProvider,
+            GeminiTranslationProvider,
         )
-        for target, provider_type in providers:
+        for provider_type in providers:
             with self.subTest(provider=provider_type.__name__):
-                with patch(target) as client:
+                with patch(
+                    "glk.infrastructure.gemini_common.genai.Client"
+                ) as client:
                     provider = provider_type(
                         api_key="test-key",
                         model_name="test-model",
@@ -194,6 +188,49 @@ class GeminiCommonPolicyTests(unittest.TestCase):
                 self.assertEqual(provider.request_timeout_ms, 12_345)
                 self.assertEqual(options.timeout, 12_345)
                 self.assertEqual(options.retry_options.attempts, 1)
+
+    def test_all_providers_use_the_shared_environment_factory(self) -> None:
+        providers = (
+            GeminiLayoutProvider,
+            GeminiImageOcrProvider,
+            GeminiTranslationProvider,
+        )
+        for provider_type in providers:
+            with self.subTest(provider=provider_type.__name__):
+                with (
+                    patch(
+                        "glk.infrastructure.gemini_common.load_gemini_environment"
+                    ) as load,
+                    patch.dict(
+                        "os.environ",
+                        {
+                            "GEMINI_API_KEY": " environment-key ",
+                            "GEMINI_MODEL": " environment-model ",
+                        },
+                        clear=True,
+                    ),
+                    patch(
+                        "glk.infrastructure.gemini_common.genai.Client"
+                    ) as client,
+                ):
+                    provider = provider_type.from_environment()
+
+                load.assert_called_once_with()
+                client.assert_called_once()
+                self.assertEqual(provider.model_name, "environment-model")
+
+    def test_shared_environment_factory_rejects_missing_api_key(self) -> None:
+        with (
+            patch(
+                "glk.infrastructure.gemini_common.load_gemini_environment"
+            ),
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            with self.assertRaisesRegex(
+                GeminiConfigurationError,
+                "GEMINI_API_KEY is not set",
+            ):
+                GeminiLayoutProvider.from_environment()
 
 
 if __name__ == "__main__":

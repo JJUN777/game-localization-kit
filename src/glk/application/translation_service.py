@@ -39,7 +39,7 @@ from glk.domain.translation_segment import (
 )
 from glk.domain.translation_qa import check_translation_contract
 from glk.domain.workspace import WorkspacePaths
-from glk.infrastructure.gemini_layout import resolve_model_name
+from glk.infrastructure.gemini_common import resolve_model_name
 from glk.infrastructure.gemini_translation import GeminiTranslationProvider
 
 
