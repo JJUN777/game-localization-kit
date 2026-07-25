@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from PIL import Image
@@ -18,6 +19,9 @@ from glk.application.glossary_service import build_project_glossary_candidates
 from glk.application.project_service import create_project
 from glk.application.source_registration_service import register_project_pdf
 from glk.application.source_review_service import prepare_project_source_review
+from glk.application.translation_review_service import (
+    finalize_project_translation_review,
+)
 from glk.application.translation_service import translate_project
 from glk.infrastructure.dashboard_server import (
     DashboardHttpServer,
@@ -246,6 +250,8 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("초벌 번역 시작", html)
         self.assertIn("번역 문체·표현 지침", html)
         self.assertIn("청크마다 API를 호출", html)
+        self.assertIn("최종 번역 결과", html)
+        self.assertIn("data-download-output", html)
         self.assertIn("휴지통으로 이동", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
 
@@ -654,6 +660,57 @@ class DashboardServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 400)
         self.assertEqual(escaped["code"], "INVALID_REQUEST")
+
+    def test_downloads_only_a_current_approved_output(self) -> None:
+        blocks = translation_sample_blocks()
+        create_translation_project(self.workspace_root, blocks)
+        translate_project(
+            project="translation_project",
+            workspace_root=self.workspace_root,
+            provider=SequenceProvider([valid_response(blocks)]),
+        )
+        finalize_project_translation_review(
+            project="translation_project",
+            workspace_root=self.workspace_root,
+        )
+        query = urlencode(
+            {
+                "project_id": "translation_project",
+                "path": "05_output/rulebook_kor.txt",
+            }
+        )
+
+        status, unauthorized = self._request(
+            f"/api/output?{query}",
+            authorized=False,
+        )
+        self.assertEqual(status, 403)
+        self.assertFalse(unauthorized["ok"])
+
+        request = Request(
+            f"{self.server.origin}/api/output?{query}",
+            headers={"X-GLK-Token": self.server.auth_token},
+        )
+        with urlopen(request, timeout=3) as response:
+            data = response.read()
+            content_disposition = response.headers["Content-Disposition"]
+            self.assertEqual(response.status, 200)
+            self.assertEqual(
+                response.headers.get_content_type(),
+                "application/octet-stream",
+            )
+        self.assertIn("전투", data.decode("utf-8"))
+        self.assertIn("rulebook_kor.txt", content_disposition)
+
+        escaped_query = urlencode(
+            {
+                "project_id": "translation_project",
+                "path": "../project.json",
+            }
+        )
+        status, escaped = self._request(f"/api/output?{escaped_query}")
+        self.assertEqual(status, 400)
+        self.assertEqual(escaped["code"], "OUTPUT_DOWNLOAD_FAILED")
 
     def test_creates_project_and_rejects_duplicate_id(self) -> None:
         status, created = self._request(

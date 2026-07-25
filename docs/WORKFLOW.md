@@ -525,6 +525,10 @@ glk translation finalize --project primal
 | `05_output/<이미지 파일명>_kor.txt` | 원본 하위 폴더를 보존한 이미지별 승인 번역본 |
 | `05_output/combined_kor.txt` | source 경계와 구분선을 유지한 이미지 프로젝트 통합본 |
 
+`glk ui`에서는 현재 승인 상태와 SHA-256이 일치하는 결과만 프로젝트 카드에
+표시하고 다운로드합니다. PDF 프로젝트는 최종 TXT 한 개를, 이미지 프로젝트는
+이미지별 TXT와 `combined_kor.txt`를 각각 제공합니다.
+
 ### Stale 처리
 
 재번역으로 review가 stale이 되면 기존 사람 수정은 자동으로 덮어쓰지 않습니다.

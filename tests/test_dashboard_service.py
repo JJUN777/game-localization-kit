@@ -1,14 +1,29 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import tempfile
 import unittest
 from pathlib import Path
 
-from glk.application.dashboard_service import get_dashboard_document
+from glk.application.dashboard_service import (
+    DashboardOutputError,
+    get_dashboard_document,
+    get_project_dashboard_output,
+)
 from glk.application.project_service import create_project
 from glk.application.source_registration_service import (
     register_project_images,
     register_project_pdf,
+)
+from glk.application.translation_review_service import (
+    finalize_project_translation_review,
+)
+from glk.application.translation_service import translate_project
+from tests.test_translation_service import (
+    SequenceProvider,
+    create_translation_project,
+    sample_blocks,
+    valid_response,
 )
 
 
@@ -120,6 +135,99 @@ class DashboardServiceTests(unittest.TestCase):
             after = get_dashboard_document(workspace_root)["projects"][0]
             self.assertFalse(after["ocr_prompt_edit"]["allowed"])
             self.assertIn("시작되어", after["ocr_prompt_edit"]["reason"])
+
+    def test_lists_and_resolves_only_a_current_approved_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace_root = Path(temporary) / "workspaces"
+            blocks = sample_blocks()
+            project_path = create_translation_project(
+                workspace_root,
+                blocks,
+            )
+            translate_project(
+                project="translation_project",
+                workspace_root=workspace_root,
+                provider=SequenceProvider([valid_response(blocks)]),
+            )
+            finalize_project_translation_review(
+                project="translation_project",
+                workspace_root=workspace_root,
+            )
+
+            project = get_dashboard_document(workspace_root)["projects"][0]
+
+            self.assertEqual(
+                [output["path"] for output in project["outputs"]],
+                ["05_output/rulebook_kor.txt"],
+            )
+            self.assertEqual(
+                project["outputs"][0]["download_name"],
+                "rulebook_kor.txt",
+            )
+            output = get_project_dashboard_output(
+                project_id="translation_project",
+                output_path="05_output/rulebook_kor.txt",
+                workspace_root=workspace_root,
+            )
+            self.assertEqual(output.path, project_path / output.relative_path)
+            self.assertGreater(output.size_bytes, 0)
+
+            output.path.write_text("tampered", encoding="utf-8")
+            with self.assertRaisesRegex(
+                DashboardOutputError,
+                "현재 승인된",
+            ):
+                get_project_dashboard_output(
+                    project_id="translation_project",
+                    output_path="05_output/rulebook_kor.txt",
+                    workspace_root=workspace_root,
+                )
+
+    def test_lists_combined_and_per_image_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace_root = Path(temporary) / "workspaces"
+            pdf_blocks = sample_blocks()
+            blocks = [
+                replace(
+                    pdf_blocks[0],
+                    source_type="image",
+                    source_file="01_input/images/cards/card-01.png",
+                    page=None,
+                ),
+                replace(
+                    pdf_blocks[1],
+                    source_type="image",
+                    source_file="01_input/images/cards/card-01.png",
+                    page=None,
+                ),
+                replace(
+                    pdf_blocks[2],
+                    source_type="image",
+                    source_file="01_input/images/boards/board-02.png",
+                    page=None,
+                ),
+            ]
+            create_translation_project(workspace_root, blocks)
+            translate_project(
+                project="translation_project",
+                workspace_root=workspace_root,
+                provider=SequenceProvider([valid_response(blocks)]),
+            )
+            finalize_project_translation_review(
+                project="translation_project",
+                workspace_root=workspace_root,
+            )
+
+            project = get_dashboard_document(workspace_root)["projects"][0]
+
+            self.assertEqual(
+                [output["name"] for output in project["outputs"]],
+                [
+                    "combined_kor.txt",
+                    "boards/board-02_kor.txt",
+                    "cards/card-01_kor.txt",
+                ],
+            )
 
 
 if __name__ == "__main__":

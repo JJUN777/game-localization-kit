@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
 
-from glk.application.project_service import inspect_project, list_projects
+from glk.application._hashing import sha256_file_if_exists
+from glk.application.project_service import (
+    inspect_project,
+    list_projects,
+    load_workspace_project_id,
+)
 from glk.application.source_registration_service import discover_source_images
 from glk.application.translation_types import DEFAULT_PROJECT_INSTRUCTIONS
 from glk.domain.workspace import WorkspacePaths, is_pdf_source_file
@@ -46,6 +53,117 @@ class ReviewAvailability:
 
     def to_dict(self) -> dict[str, Any]:
         return {"enabled": self.enabled, "reason": self.reason}
+
+
+class DashboardOutputError(ValueError):
+    """Raised when a dashboard output cannot be downloaded safely."""
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardOutput:
+    path: Path
+    relative_path: str
+    name: str
+    download_name: str
+    size_bytes: int
+    sha256: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "path": self.relative_path,
+            "name": self.name,
+            "download_name": self.download_name,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+        }
+
+
+def _approved_outputs(project_path: Path) -> tuple[DashboardOutput, ...]:
+    paths = WorkspacePaths(project_path)
+    try:
+        state = json.loads(
+            paths.translation_review_state.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise DashboardOutputError(
+            "최종 번역 승인 상태를 읽을 수 없습니다."
+        ) from error
+    final_files = state.get("final_files") if isinstance(state, dict) else None
+    if (
+        not isinstance(state, dict)
+        or state.get("status") != "approved"
+        or not isinstance(final_files, dict)
+    ):
+        raise DashboardOutputError("최종 승인된 번역 결과가 없습니다.")
+
+    output_root = (project_path / "05_output").resolve()
+    outputs: list[DashboardOutput] = []
+    for relative, expected_hash in final_files.items():
+        if not isinstance(relative, str) or not isinstance(expected_hash, str):
+            raise DashboardOutputError("최종 번역 파일 정보가 올바르지 않습니다.")
+        relative_path = PurePosixPath(relative)
+        if (
+            relative_path.is_absolute()
+            or ".." in relative_path.parts
+            or relative_path.parts[:1] != ("05_output",)
+            or len(relative_path.parts) < 2
+        ):
+            raise DashboardOutputError("최종 번역 파일 경로가 올바르지 않습니다.")
+        candidate = (project_path / Path(*relative_path.parts)).resolve()
+        try:
+            candidate.relative_to(output_root)
+        except ValueError as error:
+            raise DashboardOutputError(
+                "최종 번역 파일이 출력 폴더 밖에 있습니다."
+            ) from error
+        if (
+            not candidate.is_file()
+            or sha256_file_if_exists(candidate) != expected_hash
+        ):
+            raise DashboardOutputError(
+                "최종 번역 파일이 승인 이후 변경되었습니다."
+            )
+        name = PurePosixPath(*relative_path.parts[1:]).as_posix()
+        outputs.append(
+            DashboardOutput(
+                path=candidate,
+                relative_path=relative_path.as_posix(),
+                name=name,
+                download_name=relative_path.name,
+                size_bytes=candidate.stat().st_size,
+                sha256=expected_hash,
+            )
+        )
+    if not outputs:
+        raise DashboardOutputError("최종 승인된 번역 결과가 없습니다.")
+    return tuple(
+        sorted(
+            outputs,
+            key=lambda output: (
+                output.name != "combined_kor.txt",
+                output.name.casefold(),
+            ),
+        )
+    )
+
+
+def get_project_dashboard_output(
+    *,
+    project_id: str,
+    output_path: str,
+    workspace_root: str | Path = "workspaces",
+) -> DashboardOutput:
+    """Resolve one current approved output selected from the dashboard."""
+    if not isinstance(output_path, str) or not output_path:
+        raise DashboardOutputError("다운로드할 결과 파일을 선택하세요.")
+    location = load_workspace_project_id(project_id, workspace_root)
+    status = inspect_project(location.path)
+    if not status["pipeline"]["final_translation_approved"]:
+        raise DashboardOutputError("현재 승인된 최종 번역 결과가 없습니다.")
+    for output in _approved_outputs(location.path):
+        if output.relative_path == output_path:
+            return output
+    raise DashboardOutputError("다운로드할 결과 파일을 찾지 못했습니다.")
 
 
 def _review_availability(pipeline: dict[str, Any]) -> dict[str, ReviewAvailability]:
@@ -146,6 +264,12 @@ def _project_translation_prompt(summary: Any) -> dict[str, Any]:
 def _project_document(summary: Any, status: dict[str, Any]) -> dict[str, Any]:
     pipeline = status["pipeline"]
     reviews = _review_availability(pipeline)
+    outputs: tuple[DashboardOutput, ...] = ()
+    if pipeline["final_translation_approved"]:
+        try:
+            outputs = _approved_outputs(Path(summary.path))
+        except DashboardOutputError:
+            outputs = ()
     replacement_allowed = bool(
         summary.source_type
         and not pipeline["source_processing_started"]
@@ -174,6 +298,7 @@ def _project_document(summary: Any, status: dict[str, Any]) -> dict[str, Any]:
         "source_files": _project_source_files(summary, status),
         "ocr_prompt": _project_ocr_prompt(summary),
         "translation_prompt": _project_translation_prompt(summary),
+        "outputs": [output.to_dict() for output in outputs],
         "stage": summary.stage,
         "stage_label": _STAGE_LABELS.get(summary.stage, summary.stage),
         "progress": _STAGE_PROGRESS.get(summary.stage, 0),

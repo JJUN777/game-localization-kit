@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from email import policy
 from email.parser import BytesParser
+import hashlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -16,7 +17,7 @@ from socketserver import TCPServer
 import tempfile
 import threading
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 import webbrowser
 
 from glk.application._io import write_bytes_atomic
@@ -36,7 +37,11 @@ from glk.application.dashboard_job_service import (
     SourceJobRunner,
     TranslationJobRunner,
 )
-from glk.application.dashboard_service import get_dashboard_document
+from glk.application.dashboard_service import (
+    DashboardOutputError,
+    get_dashboard_document,
+    get_project_dashboard_output,
+)
 from glk.application.project_service import (
     ProjectNotFoundError,
     create_project as create_project_workspace,
@@ -230,11 +235,15 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         status: HTTPStatus,
         data: bytes,
         content_type: str,
+        *,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         for name, value in _SECURITY_HEADERS.items():
+            self.send_header(name, value)
+        for name, value in (extra_headers or {}).items():
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
@@ -575,7 +584,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         )
 
     def do_GET(self) -> None:
-        path = urlsplit(self.path).path
+        parsed_url = urlsplit(self.path)
+        path = parsed_url.path
         if path == "/favicon.ico":
             self._send_bytes(HTTPStatus.NO_CONTENT, b"", "image/x-icon")
             return
@@ -666,6 +676,57 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     "settings": settings.to_dict(),
                     "model_catalog": model_catalog,
+                },
+            )
+            return
+        if path == "/api/output":
+            if not self._api_authorized():
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                )
+                return
+            try:
+                query = parse_qs(
+                    parsed_url.query,
+                    keep_blank_values=True,
+                    strict_parsing=True,
+                )
+                if (
+                    set(query) != {"project_id", "path"}
+                    or len(query["project_id"]) != 1
+                    or len(query["path"]) != 1
+                ):
+                    raise DashboardOutputError(
+                        "프로젝트와 결과 파일을 정확히 하나씩 선택하세요."
+                    )
+                output = get_project_dashboard_output(
+                    project_id=query["project_id"][0],
+                    output_path=query["path"][0],
+                    workspace_root=self.server.workspace_root,
+                )
+                data = output.path.read_bytes()
+                if hashlib.sha256(data).hexdigest() != output.sha256:
+                    raise DashboardOutputError(
+                        "최종 번역 파일이 승인 이후 변경되었습니다."
+                    )
+            except (DashboardOutputError, OSError, ValueError) as error:
+                self._send_error_json(
+                    HTTPStatus.BAD_REQUEST,
+                    error,
+                    code="OUTPUT_DOWNLOAD_FAILED",
+                )
+                return
+            encoded_name = quote(output.download_name, safe="")
+            self._send_bytes(
+                HTTPStatus.OK,
+                data,
+                "application/octet-stream",
+                extra_headers={
+                    "Content-Disposition": (
+                        "attachment; filename=\"translation.txt\"; "
+                        f"filename*=UTF-8''{encoded_name}"
+                    ),
                 },
             )
             return

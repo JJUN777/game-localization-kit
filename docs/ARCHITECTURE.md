@@ -260,7 +260,7 @@ ID·순서·숫자·token·HTML·용어 검증
 
 ## 로컬 대시보드와 HTML 검수 서버 보안
 
-`glk ui` 대시보드는 `dashboard_service`가 만든 읽기 전용 프로젝트 상태를 표시하고, 준비된 기존 `source`, `glossary`, `translation` 검수 서버를 필요할 때 실행합니다. 프로젝트 생성과 삭제 요청은 application service의 규칙을 재사용합니다. PDF·이미지 최초 등록은 `source_registration_service`가 CLI와 GUI에 같은 복사·manifest 규칙을 제공하며 AI 작업은 실행하지 않습니다. `dashboard_job_service`는 등록 원본의 acquisition·segmentation·source QA, 승인 원문 기반 용어 후보 생성과 termbase 기반 초벌 번역을 HTTP 요청과 분리된 단일 active worker 정책으로 실행합니다. 최신 실행 상태는 각각 `.glk/state/dashboard_source_job.json`, `.glk/state/dashboard_glossary_job.json`, `.glk/state/dashboard_translation_job.json`에 저장합니다. 용어 후보 생성은 기존 `glossary_service`의 로컬 규칙만 재사용하며 Gemini API를 호출하지 않습니다. 초벌 번역은 기존 `translation_service`의 청크 저장과 resume 규칙을 재사용하고, partial 상태에서는 저장된 prompt를 변경하지 않습니다. `ai_settings_service`는 저장소 최상위 `.env`의 Gemini 키와 모델만 원자적으로 갱신하며 다른 항목과 주석을 보존합니다. `ai_model_catalog`는 패키지의 `data/gemini_models.json`을 검증해 드롭다운 모델 ID와 설명을 제공합니다. API 응답에는 키 값이 아니라 설정 여부와 적용 출처만 포함합니다. 삭제할 때는 정규화된 ID, workspace 바로 아래 경로와 manifest ID를 다시 확인한 뒤 검증된 프로젝트 폴더만 `send2trash`로 운영체제 휴지통에 이동합니다. 대시보드에서 연 검수 서버는 같은 프로젝트와 종류에 대해 재사용하며 대시보드 종료 시 함께 종료합니다.
+`glk ui` 대시보드는 `dashboard_service`가 만든 읽기 전용 프로젝트 상태를 표시하고, 준비된 기존 `source`, `glossary`, `translation` 검수 서버를 필요할 때 실행합니다. 프로젝트 생성과 삭제 요청은 application service의 규칙을 재사용합니다. PDF·이미지 최초 등록은 `source_registration_service`가 CLI와 GUI에 같은 복사·manifest 규칙을 제공하며 AI 작업은 실행하지 않습니다. `dashboard_job_service`는 등록 원본의 acquisition·segmentation·source QA, 승인 원문 기반 용어 후보 생성과 termbase 기반 초벌 번역을 HTTP 요청과 분리된 단일 active worker 정책으로 실행합니다. 최신 실행 상태는 각각 `.glk/state/dashboard_source_job.json`, `.glk/state/dashboard_glossary_job.json`, `.glk/state/dashboard_translation_job.json`에 저장합니다. 용어 후보 생성은 기존 `glossary_service`의 로컬 규칙만 재사용하며 Gemini API를 호출하지 않습니다. 초벌 번역은 기존 `translation_service`의 청크 저장과 resume 규칙을 재사용하고, partial 상태에서는 저장된 prompt를 변경하지 않습니다. 최종 번역이 current이면 승인 state의 `final_files`를 다시 검사해 다운로드 가능한 출력 목록을 read model에 포함합니다. `ai_settings_service`는 저장소 최상위 `.env`의 Gemini 키와 모델만 원자적으로 갱신하며 다른 항목과 주석을 보존합니다. `ai_model_catalog`는 패키지의 `data/gemini_models.json`을 검증해 드롭다운 모델 ID와 설명을 제공합니다. API 응답에는 키 값이 아니라 설정 여부와 적용 출처만 포함합니다. 삭제할 때는 정규화된 ID, workspace 바로 아래 경로와 manifest ID를 다시 확인한 뒤 검증된 프로젝트 폴더만 `send2trash`로 운영체제 휴지통에 이동합니다. 대시보드에서 연 검수 서버는 같은 프로젝트와 종류에 대해 재사용하며 대시보드 종료 시 함께 종료합니다.
 
 대시보드와 세 검수 서버가 공유하는 보안 경계:
 
@@ -272,6 +272,8 @@ ID·순서·숫자·token·HTML·용어 검증
 - 원문 준비·용어 후보 생성·초벌 번역 job 중 하나만 active 상태로 실행하고 중복 시작 차단
 - job 실행 중 같은 프로젝트의 원본·OCR prompt·삭제 mutation 차단
 - 용어 후보 생성은 최종 승인된 원문만 허용하고 stale TSV는 자동 덮어쓰기 차단
+- 결과 다운로드는 workspace 바로 아래 프로젝트의 승인된 `05_output` 경로만
+  허용하고 승인 SHA-256과 전송 직전 파일 hash를 다시 확인
 - 일부 원본 실패와 전체 원본 실패를 구분하고 provider 오류는 모델·인증·권한·
   사용량·네트워크 유형별 안전한 사용자 안내로 변환
 - 원본 multipart 요청의 전체 크기·파일 개수·파일명·확장자와 이미지 OCR
