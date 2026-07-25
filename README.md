@@ -859,5 +859,6 @@ glk review translation --project primal --no-open --port 8765
 | [용어집 검토 사양](docs/GLOSSARY.md) | 고급 사용자 | TSV 컬럼, status, import 검증 규칙 |
 | [아키텍처](docs/ARCHITECTURE.md) | 개발자 | 코드 계층, 데이터 모델, 승인 구조 |
 | [릴리즈 노트](docs/RELEASE_NOTES.md) | 모든 사용자 | 버전별 변경사항, 검증 결과, 알려진 제한 |
+| [테스트용 원본 샘플](docs/samples/README.md) | 모든 사용자 | PDF 추출·이미지 OCR 수동 확인용 입력 파일 |
 
 처음 사용할 때는 이 README만으로 충분합니다. 세부 규칙이 필요할 때만 `docs/` 문서를 확인합니다.
