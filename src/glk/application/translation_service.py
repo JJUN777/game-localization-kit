@@ -168,6 +168,8 @@ def _relevant_terms(
     source = "\n".join(block.effective_text for block in blocks)
     relevant: list[dict[str, Any]] = []
     for entry in entries:
+        if entry.get("status") not in {"approved", "keep"}:
+            continue
         if any(_contains_term(source, variant) for variant in _entry_variants(entry)):
             relevant.append(
                 {

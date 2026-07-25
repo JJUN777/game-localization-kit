@@ -105,7 +105,7 @@ def check_translation_contract(
                         ),
                     )
                 )
-        elif not any(
+        elif entry["status"] == "keep" and not any(
             _contains_target_text(translated_text, variant)
             for variant in matching_variants
         ):

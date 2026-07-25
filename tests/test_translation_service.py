@@ -26,6 +26,7 @@ from glk.application.translation_review_service import (
 from glk.application.translation_retry_service import retry_failed_translations
 from glk.domain.approved_translation import ApprovedTranslationSegment
 from glk.domain.source_block import SOURCE_BLOCK_SCHEMA_VERSION, SourceBlock
+from glk.domain.translation_qa import check_translation_contract
 from glk.domain.translation_segment import TranslationSegment
 from glk.domain.workspace import IMAGE_SOURCE_ROOT, WorkspacePaths
 
@@ -264,6 +265,53 @@ class TranslationFoundationTests(unittest.TestCase):
         self.assertLess(prompt.index("[NON-OVERRIDABLE"), prompt.index("사냥꾼"))
         self.assertLess(prompt.index("사냥꾼"), prompt.index("Hunter를 헌터"))
         self.assertNotIn("미사용 용어", prompt)
+
+    def test_rejected_terms_are_not_prompted_or_validated_as_keep(self) -> None:
+        blocks = (make_block(1, "Each player draws five cards."),)
+        entries = [
+            {
+                "source_term": "player",
+                "translation": "player",
+                "status": "keep",
+                "variants": ["player", "players"],
+                "note": "keep-marker",
+            },
+            {
+                "source_term": "cards",
+                "translation": "",
+                "status": "rejected",
+                "variants": ["card", "cards"],
+                "note": "rejected-marker",
+            },
+        ]
+
+        prompt = compile_translation_prompt(
+            blocks=blocks,
+            termbase_entries=entries,
+            project_instructions="Translate naturally.",
+        )
+
+        self.assertIn("keep-marker", prompt)
+        self.assertNotIn("rejected-marker", prompt)
+        self.assertEqual(
+            check_translation_contract(
+                source_text=blocks[0].effective_text,
+                translated_text="Each player는 카드 다섯 장을 뽑습니다.",
+                termbase_entries=entries,
+            ),
+            [],
+        )
+        self.assertEqual(
+            [
+                issue.code
+                for issue in check_translation_contract(
+                    source_text=blocks[0].effective_text,
+                    translated_text="각 플레이어는 카드 다섯 장을 뽑습니다.",
+                    termbase_entries=entries,
+                )
+            ],
+            ["keep_term_changed"],
+        )
 
     def test_translates_blocks_validates_terms_and_creates_review_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
