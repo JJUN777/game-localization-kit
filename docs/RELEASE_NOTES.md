@@ -30,7 +30,8 @@ job·파일 저장·오류 처리의 안정성을 보강했습니다. 아직 새
 - `docs/GUI.md`: 대시보드와 세 검수 화면의 단일 사용 가이드
 - `docs/WORKFLOW.md`: CLI, 파일과 상태 전이 기준
 - `docs/ARCHITECTURE.md`: 코드·데이터·보안 경계
-- `docs/IMPROVEMENTS.md`: 현재 개선 상태와 후속 항목
+- `docs/IMPROVEMENTS.md`: 현재 안정화 작업과 완료 내역
+- `docs/BACKLOG.md`: 나중에 검토할 제품 기능·실측·정책 항목
 - `DASHBOARD_WORK_HISTORY.md`: 현재 사양과 분리한 과거 구현 기록
 
 ### 현재 검증 기준

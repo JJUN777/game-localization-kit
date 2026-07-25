@@ -243,7 +243,8 @@ block 순서와 텍스트를 수정하세요. 이미지 OCR 지침은 처리 시
 | [아키텍처](docs/ARCHITECTURE.md) | 코드 계층, 데이터 모델, 승인·보안 경계 |
 | [Gemini 모델 목록 관리](docs/GEMINI_MODELS.md) | GUI 드롭다운 모델 목록 갱신 |
 | [LLM 사용량과 비용](docs/COSTS.md) | 전송 데이터, 비용 기준과 측정 한계 |
-| [개선 작업 추적](docs/IMPROVEMENTS.md) | 완료·보류·후속 개선 항목 |
+| [개선 작업 추적](docs/IMPROVEMENTS.md) | 현재 안정화 작업과 완료 내역 |
+| [후속 작업 백로그](docs/BACKLOG.md) | 나중에 검토할 제품 기능·실측·정책 항목 |
 | [릴리즈 노트](docs/RELEASE_NOTES.md) | 버전별 변경사항 |
 | [대시보드 작업 이력](DASHBOARD_WORK_HISTORY.md) | 구현 과정의 과거 기록 |
 
