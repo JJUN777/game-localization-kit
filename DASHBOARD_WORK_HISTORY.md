@@ -624,6 +624,7 @@ git diff --check
 - prompt 변경 전·후 내용과 hash는 `translation_prompt_change_*.json`에 기록하며 재번역 성공 뒤에만 새 draft로 검수본을 초기화합니다.
 - 전체 177 tests, Python 3.10 문법 73 files, 설정된 16개 Python 파일 mypy, 4개 HTML의 inline JavaScript 문법과 의존성 검사를 통과했습니다.
 - Orca 내장 브라우저에서 번역 완료 임시 프로젝트의 prompt를 저장해 stale 전환과 완료 안내를 확인하고, 전체 재번역 확인창에 저장 prompt·모델·revisions 보관 및 검수 초기화 안내가 표시되는 것을 검증했습니다. Gemini API와 사용자 프로젝트는 사용하지 않았고 브라우저 콘솔 오류는 없었습니다.
+- Windows Python 3.14에서 background job 상태 파일을 저장 도중 직접 읽던 테스트의 파일 잠금 경쟁을 수정했습니다. 관리자에서 terminal 상태와 원자적 저장 완료를 확인한 뒤 상태 파일을 검증하며, 관련 테스트 100회 반복과 전체 177 tests를 통과했습니다.
 
 ---
 

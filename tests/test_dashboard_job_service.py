@@ -380,11 +380,12 @@ class DashboardJobManagerTests(unittest.TestCase):
             self.location.path
         ).dashboard_source_job_state
         for _ in range(100):
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-            if state["status"] == "failed":
+            job = manager.list_jobs()[0]
+            if job["status"] == "failed":
                 break
             threading.Event().wait(0.01)
 
+        state = json.loads(state_path.read_text(encoding="utf-8"))
         self.assertEqual(state["status"], "failed")
         self.assertEqual(
             state["error"],
@@ -427,11 +428,12 @@ class DashboardJobManagerTests(unittest.TestCase):
             self.workspace_root / "glossary_project"
         ).dashboard_glossary_job_state
         for _ in range(100):
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-            if state["status"] == "succeeded":
+            job = manager.list_glossary_jobs()[0]
+            if job["status"] == "succeeded":
                 break
             threading.Event().wait(0.01)
 
+        state = json.loads(state_path.read_text(encoding="utf-8"))
         self.assertEqual(state["status"], "succeeded")
         self.assertEqual(state["result"]["glossary"]["candidate_count"], 4)
         self.assertEqual(
@@ -586,10 +588,11 @@ class DashboardJobManagerTests(unittest.TestCase):
             project_path
         ).dashboard_translation_job_state
         for _ in range(100):
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-            if state["status"] == "succeeded":
+            job = manager.list_translation_jobs()[0]
+            if job["status"] == "succeeded":
                 break
             threading.Event().wait(0.01)
+        state = json.loads(state_path.read_text(encoding="utf-8"))
         self.assertEqual(state["status"], "succeeded")
         self.assertEqual(
             state["result"]["translation"]["completed_blocks"],
