@@ -294,6 +294,14 @@ translation provider는 각 작업의 prompt·응답 schema·결과 검증만 �
 - CSP 헤더 적용
 - 선택 재번역 때만 서버가 Gemini API 호출
 
+이 경계의 구현은 `infrastructure/local_http.py`에 모여 있습니다.
+`LocalHttpServer`는 localhost bind·origin·session token·mutation lock을,
+`LocalHttpRequestHandler`는 Host·Origin·token 인증, CSP를 포함한 공통 보안
+헤더와 JSON 요청·응답 처리를 제공합니다. 원문 검수만 화면에서 생성한 blob
+이미지를 표시해야 하므로 `img-src`의 `blob:` 허용을 명시적으로 추가합니다.
+네 server factory는 공통 port 검증을 거쳐 bool과 0~65535 범위 밖 값을
+동일하게 거부합니다.
+
 UI는 workspace 파일을 직접 다루지 않고 기존 application service를 호출합니다.
 `PATCH /api/projects/{project_id}/ocr-prompt`도 이미지 원본 등록 여부와 OCR
 시작 상태를 application service에서 다시 검사한 뒤 `ocr_prompt.txt`만

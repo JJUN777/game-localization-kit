@@ -58,6 +58,7 @@ files = [
   "src/glk/infrastructure/gemini_layout.py",
   "src/glk/infrastructure/gemini_ocr.py",
   "src/glk/infrastructure/gemini_translation.py",
+  "src/glk/infrastructure/local_http.py",
   "src/glk/infrastructure/source_review_server.py",
   "src/glk/infrastructure/glossary_review_server.py",
   "src/glk/infrastructure/translation_review_server.py",

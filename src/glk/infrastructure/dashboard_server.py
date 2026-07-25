@@ -6,14 +6,12 @@ from email import policy
 from email.parser import BytesParser
 import hashlib
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from importlib import resources
 import json
 from pathlib import Path
 import re
-import secrets
 from send2trash import send2trash
-from socketserver import TCPServer
 import tempfile
 import threading
 from typing import Any
@@ -65,9 +63,14 @@ from glk.application.translation_prompt_service import (
     save_project_translation_prompt,
 )
 from glk.config import resolve_settings_root
-from glk.error_response import localized_detail_message, make_http_error_response
+from glk.error_response import localized_detail_message
 from glk.infrastructure.glossary_review_server import (
     create_glossary_review_server,
+)
+from glk.infrastructure.local_http import (
+    LocalHttpRequestHandler,
+    LocalHttpServer,
+    validate_local_port,
 )
 from glk.infrastructure.source_review_server import create_source_review_server
 from glk.infrastructure.translation_review_server import (
@@ -92,31 +95,11 @@ _WINDOWS_RESERVED_NAMES = {
     *(f"COM{number}" for number in range(1, 10)),
     *(f"LPT{number}" for number in range(1, 10)),
 }
-_SECURITY_HEADERS = {
-    "Cache-Control": "no-store",
-    "Content-Security-Policy": (
-        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-        "connect-src 'self'; img-src 'self' data:; base-uri 'none'; "
-        "form-action 'none'; frame-ancestors 'none'"
-    ),
-    "Referrer-Policy": "no-referrer",
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-}
-
-
 class DashboardError(ValueError):
     """Raised when the local dashboard cannot be started or used."""
 
 
-class DashboardHttpServer(ThreadingHTTPServer):
-    daemon_threads = True
-
-    def server_bind(self) -> None:
-        TCPServer.server_bind(self)
-        self.server_name = "localhost"
-        self.server_port = self.server_address[1]
-
+class DashboardHttpServer(LocalHttpServer):
     def __init__(
         self,
         server_address: tuple[str, int],
@@ -137,22 +120,14 @@ class DashboardHttpServer(ThreadingHTTPServer):
             glossary_runner=glossary_job_runner,
             translation_runner=translation_job_runner,
         )
-        self.auth_token = secrets.token_urlsafe(32)
-        self.mutation_lock = threading.Lock()
         self._review_lock = threading.Lock()
         self._review_servers: dict[
-            tuple[str, str], tuple[ThreadingHTTPServer, threading.Thread]
+            tuple[str, str], tuple[LocalHttpServer, threading.Thread]
         ] = {}
 
     @property
-    def origin(self) -> str:
-        host, port = self.server_address[:2]
-        host_text = host.decode("ascii") if isinstance(host, bytes) else host
-        return f"http://{host_text}:{port}"
-
-    @property
     def dashboard_url(self) -> str:
-        return self.origin + "/"
+        return self.root_url
 
     def open_review(self, project_id: str, review_type: str) -> str:
         if review_type not in _REVIEW_TYPES:
@@ -170,7 +145,7 @@ class DashboardHttpServer(ThreadingHTTPServer):
                 existing[0].server_close()
                 self._review_servers.pop(key, None)
 
-            review_server: ThreadingHTTPServer
+            review_server: LocalHttpServer
             if review_type == "source":
                 review_server = create_source_review_server(
                     project=location.path,
@@ -216,95 +191,9 @@ class DashboardHttpServer(ThreadingHTTPServer):
         super().server_close()
 
 
-class _DashboardHandler(BaseHTTPRequestHandler):
+class _DashboardHandler(LocalHttpRequestHandler):
     server: DashboardHttpServer
-
-    def log_message(self, format: str, *args: Any) -> None:
-        return
-
-    def _host_is_local(self) -> bool:
-        host = self.headers.get("Host", "").split(":", 1)[0].casefold()
-        return host in {"127.0.0.1", "localhost"}
-
-    def _origin_allowed(self) -> bool:
-        origin = self.headers.get("Origin")
-        return not origin or origin in {
-            self.server.origin,
-            self.server.origin.replace("127.0.0.1", "localhost"),
-        }
-
-    def _api_authorized(self) -> bool:
-        supplied_token = self.headers.get("X-GLK-Token")
-        return (
-            self._host_is_local()
-            and self._origin_allowed()
-            and isinstance(supplied_token, str)
-            and secrets.compare_digest(supplied_token, self.server.auth_token)
-        )
-
-    def _send_bytes(
-        self,
-        status: HTTPStatus,
-        data: bytes,
-        content_type: str,
-        *,
-        extra_headers: dict[str, str] | None = None,
-    ) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        for name, value in _SECURITY_HEADERS.items():
-            self.send_header(name, value)
-        for name, value in (extra_headers or {}).items():
-            self.send_header(name, value)
-        self.end_headers()
-        self.wfile.write(data)
-
-    def _send_json(self, status: HTTPStatus, value: Any) -> None:
-        data = (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8")
-        self._send_bytes(status, data, "application/json; charset=utf-8")
-
-    def _send_error_json(
-        self,
-        status: HTTPStatus,
-        detail: str | BaseException,
-        *,
-        code: str | None = None,
-        message: str | None = None,
-    ) -> None:
-        self._send_json(
-            status,
-            make_http_error_response(
-                status,
-                detail,
-                code=code,
-                message=message,
-            ).to_dict(),
-        )
-
-    def _read_request_json(
-        self,
-        *,
-        max_bytes: int = _MAX_REQUEST_BYTES,
-    ) -> dict[str, Any]:
-        content_type = self.headers.get("Content-Type", "")
-        if not content_type.casefold().startswith("application/json"):
-            raise DashboardError("Content-Type must be application/json.")
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError as error:
-            raise DashboardError("Invalid Content-Length.") from error
-        if length <= 0 or length > max_bytes:
-            raise DashboardError("Request body size is invalid.")
-        try:
-            value = json.loads(self.rfile.read(length).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise DashboardError(
-                "Request body must be valid UTF-8 JSON."
-            ) from error
-        if not isinstance(value, dict):
-            raise DashboardError("Request body must be a JSON object.")
-        return value
+    request_error_type = DashboardError
 
     def _read_source_upload(
         self,
@@ -808,7 +697,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._handle_source_upload(path, replace=False)
             return
         try:
-            request = self._read_request_json()
+            request = self._read_request_json(max_bytes=_MAX_REQUEST_BYTES)
             if path == "/api/jobs/source":
                 project_id = request.get("project_id")
                 if not isinstance(project_id, str) or not project_id.strip():
@@ -966,7 +855,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 )
                 return
             try:
-                request = self._read_request_json()
+                request = self._read_request_json(max_bytes=_MAX_REQUEST_BYTES)
                 api_key = request.get("api_key")
                 model = request.get("model")
                 if api_key is not None and not isinstance(api_key, str):
@@ -1242,8 +1131,7 @@ def create_dashboard_server(
     translation_job_runner: TranslationJobRunner | None = None,
     port: int = 0,
 ) -> DashboardHttpServer:
-    if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
-        raise DashboardError("port must be between 0 and 65535.")
+    validate_local_port(port, error_type=DashboardError)
     get_dashboard_document(workspace_root)
     return DashboardHttpServer(
         ("127.0.0.1", port),

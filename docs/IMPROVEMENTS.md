@@ -206,8 +206,16 @@
 P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다. 대규모 일괄
 리팩터링은 기능 흐름이 안정된 뒤 별도 커밋으로 진행합니다.
 
-- [ ] `ARCH-001` 네 localhost 서버의 인증, 보안 헤더, JSON 입출력과 포트
+- [x] `ARCH-001` 네 localhost 서버의 인증, 보안 헤더, JSON 입출력과 포트
   검증을 공통 기반으로 추출한다.
+  - `LocalHttpServer`가 localhost bind, origin, session token과 mutation lock을
+    제공한다.
+  - `LocalHttpRequestHandler`가 Host·Origin·token 인증, 보안 헤더, JSON
+    응답·오류·요청 파싱을 제공한다.
+  - source 화면의 blob 이미지 CSP 허용만 명시적 변형으로 관리하고, 네 server
+    factory가 동일한 port 검증을 사용한다.
+  - 검증: 공통 상속·CSP 변형·port·복귀 URL·JSON 오류 타입 단위 테스트와
+    네 서버 통합 테스트를 통과한다.
 - [ ] `ARCH-002` source·glossary·translation job의 저장·조회·실행 골격을
   파라미터화한다.
 - [ ] `ARCH-003` dashboard HTTP 경로 분석과 인증을 라우팅 계층으로 분리한다.
@@ -230,7 +238,7 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
 - [ ] `QUALITY-001` ruff를 작은 규칙 집합부터 도입하고 포맷 변경은 별도 커밋으로
   분리한다.
 - [ ] `QUALITY-002` mypy 대상을 도메인 계층부터 점진적으로 확대한다.
-  - 현재 설정된 21개 파일은 통과한다.
+  - 현재 설정된 22개 파일은 통과한다.
   - application/domain/extraction 35개 파일로 확대하면 7개 파일에서
     22개 오류가 확인되므로 한 번에 strict로 전환하지 않는다.
   - 오류가 0개인 파일부터 검사 대상에 편입하고, 나머지는 파일 단위로 오류를

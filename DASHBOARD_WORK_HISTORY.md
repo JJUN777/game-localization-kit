@@ -778,6 +778,21 @@ git diff --check
 - 전체 235개 테스트, 설정된 21개 Python 파일 mypy, Python bytecode 컴파일과
   `git diff --check`를 통과했습니다.
 
+### 2026-07-25 — localhost HTTP 서버 공통 기반 통합
+
+- dashboard, source, glossary, translation 서버가 공통 `LocalHttpServer`와
+  `LocalHttpRequestHandler`를 사용하도록 변경했습니다.
+- localhost bind·origin·session token·mutation lock과 Host·Origin·token 인증,
+  보안 헤더, JSON 응답·오류·요청 파싱의 4중 복제를 제거했습니다.
+- 세 검수 서버의 localhost 복귀 URL 검증과 네 server factory의 port 검증을
+  공통화했으며, 누락돼 있던 source server의 port 검증도 적용했습니다.
+- source 검수의 blob 이미지 CSP만 명시적 변형으로 유지하고 다른 보안 헤더는
+  모든 로컬 화면이 같은 정의를 사용합니다.
+- 기존 네 서버 통합 테스트와 공통 상속·CSP·port·복귀 URL·JSON parser 단위
+  테스트를 통과했습니다.
+- 전체 241개 테스트, 설정된 22개 Python 파일 mypy, Python bytecode 컴파일과
+  `git diff --check`를 통과했습니다.
+
 ---
 
 ## 다른 컴퓨터에서 작업 재개

@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from importlib import resources
 import json
 from pathlib import Path
-import secrets
-from socketserver import TCPServer
-import threading
 from typing import Any
 from urllib.parse import urlsplit
 import webbrowser
@@ -26,48 +23,19 @@ from glk.application.glossary_service import (
 from glk.error_response import (
     localized_detail_message,
     make_error_response,
-    make_http_error_response,
+)
+from glk.infrastructure.local_http import (
+    LocalHttpRequestHandler,
+    LocalHttpServer,
+    validate_local_port,
+    validate_local_return_url,
 )
 
 
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
-_SECURITY_HEADERS = {
-    "Cache-Control": "no-store",
-    "Content-Security-Policy": (
-        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-        "connect-src 'self'; img-src 'self' data:; base-uri 'none'; "
-        "form-action 'none'; frame-ancestors 'none'"
-    ),
-    "Referrer-Policy": "no-referrer",
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-}
 
 
-def _validate_return_url(return_url: str | None) -> str | None:
-    if return_url is None:
-        return None
-    parsed = urlsplit(return_url)
-    if (
-        parsed.scheme != "http"
-        or parsed.hostname not in {"127.0.0.1", "localhost"}
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise ValueError("Glossary review return URL must be a local HTTP URL.")
-    return return_url
-
-
-class GlossaryReviewHttpServer(ThreadingHTTPServer):
-    daemon_threads = True
-
-    def server_bind(self) -> None:
-        TCPServer.server_bind(self)
-        self.server_name = "localhost"
-        self.server_port = self.server_address[1]
-
+class GlossaryReviewHttpServer(LocalHttpServer):
     def __init__(
         self,
         server_address: tuple[str, int],
@@ -77,72 +45,22 @@ class GlossaryReviewHttpServer(ThreadingHTTPServer):
         workspace_root: str | Path,
         return_url: str | None = None,
     ) -> None:
-        self.return_url = _validate_return_url(return_url)
+        self.return_url = validate_local_return_url(
+            return_url,
+            label="Glossary review",
+        )
         super().__init__(server_address, handler_class)
         self.project = str(project)
         self.workspace_root = str(workspace_root)
-        self.auth_token = secrets.token_urlsafe(32)
-        self.mutation_lock = threading.Lock()
-
-    @property
-    def origin(self) -> str:
-        host, port = self.server_address[:2]
-        host_text = host.decode("ascii") if isinstance(host, bytes) else host
-        return f"http://{host_text}:{port}"
 
     @property
     def review_url(self) -> str:
-        return self.origin + "/"
+        return self.root_url
 
 
-class _GlossaryReviewHandler(BaseHTTPRequestHandler):
+class _GlossaryReviewHandler(LocalHttpRequestHandler):
     server: GlossaryReviewHttpServer
-
-    def log_message(self, format: str, *args: Any) -> None:
-        return
-
-    def _host_is_local(self) -> bool:
-        host = self.headers.get("Host", "").split(":", 1)[0].casefold()
-        return host in {"127.0.0.1", "localhost"}
-
-    def _api_authorized(self) -> bool:
-        if not self._host_is_local():
-            return False
-        supplied_token = self.headers.get("X-GLK-Token")
-        if not isinstance(supplied_token, str) or not secrets.compare_digest(
-            supplied_token,
-            self.server.auth_token,
-        ):
-            return False
-        origin = self.headers.get("Origin")
-        return not origin or origin in {
-            self.server.origin,
-            self.server.origin.replace("127.0.0.1", "localhost"),
-        }
-
-    def _send_bytes(
-        self, status: HTTPStatus, data: bytes, content_type: str
-    ) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        for name, value in _SECURITY_HEADERS.items():
-            self.send_header(name, value)
-        self.end_headers()
-        self.wfile.write(data)
-
-    def _send_json(self, status: HTTPStatus, value: Any) -> None:
-        self._send_bytes(
-            status,
-            (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8"),
-            "application/json; charset=utf-8",
-        )
-
-    def _send_error_json(self, status: HTTPStatus, message: str) -> None:
-        self._send_json(
-            status,
-            make_http_error_response(status, message).to_dict(),
-        )
+    request_error_type = GlossaryReviewError
 
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
@@ -181,26 +99,6 @@ class _GlossaryReviewHandler(BaseHTTPRequestHandler):
             return
         self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
 
-    def _read_request_json(self) -> dict[str, Any]:
-        content_type = self.headers.get("Content-Type", "")
-        if not content_type.casefold().startswith("application/json"):
-            raise GlossaryReviewError("Content-Type must be application/json.")
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError as error:
-            raise GlossaryReviewError("Invalid Content-Length.") from error
-        if length <= 0 or length > _MAX_REQUEST_BYTES:
-            raise GlossaryReviewError("Request body size is invalid.")
-        try:
-            value = json.loads(self.rfile.read(length).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise GlossaryReviewError(
-                "Request body must be valid UTF-8 JSON."
-            ) from error
-        if not isinstance(value, dict):
-            raise GlossaryReviewError("Request body must be a JSON object.")
-        return value
-
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
         if path not in {"/api/save", "/api/import"}:
@@ -210,7 +108,7 @@ class _GlossaryReviewHandler(BaseHTTPRequestHandler):
             self._send_error_json(HTTPStatus.FORBIDDEN, "Invalid review session.")
             return
         try:
-            body = self._read_request_json()
+            body = self._read_request_json(max_bytes=_MAX_REQUEST_BYTES)
             review_hash = body.get("review_sha256")
             rows = body.get("rows")
             if not isinstance(review_hash, str):
@@ -275,8 +173,7 @@ def create_glossary_review_server(
     port: int = 0,
     return_url: str | None = None,
 ) -> GlossaryReviewHttpServer:
-    if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
-        raise GlossaryReviewError("port must be between 0 and 65535.")
+    validate_local_port(port, error_type=GlossaryReviewError)
     get_project_glossary_review_document(
         project=project,
         workspace_root=workspace_root,

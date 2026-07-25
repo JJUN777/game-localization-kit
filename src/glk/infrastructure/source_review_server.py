@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from importlib import resources
 import json
 import mimetypes
 from pathlib import Path
-import secrets
-from socketserver import TCPServer
-import threading
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
@@ -24,47 +21,20 @@ from glk.application.source_review_service import (
     save_project_source_review,
 )
 from glk.domain.workspace import WorkspacePaths, is_pdf_source_file
-from glk.error_response import make_http_error_response
+from glk.infrastructure.local_http import (
+    LocalHttpRequestHandler,
+    LocalHttpServer,
+    local_security_headers,
+    validate_local_port,
+    validate_local_return_url,
+)
 
 
 _MAX_REQUEST_BYTES = 16 * 1024 * 1024
-_SECURITY_HEADERS = {
-    "Cache-Control": "no-store",
-    "Content-Security-Policy": (
-        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-        "connect-src 'self'; img-src 'self' blob: data:; base-uri 'none'; "
-        "form-action 'none'; frame-ancestors 'none'"
-    ),
-    "Referrer-Policy": "no-referrer",
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-}
+_SOURCE_SECURITY_HEADERS = local_security_headers(allow_blob_images=True)
 
 
-def _validate_return_url(return_url: str | None) -> str | None:
-    if return_url is None:
-        return None
-    parsed = urlsplit(return_url)
-    if (
-        parsed.scheme != "http"
-        or parsed.hostname not in {"127.0.0.1", "localhost"}
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise ValueError("Source review return URL must be a local HTTP URL.")
-    return return_url
-
-
-class SourceReviewHttpServer(ThreadingHTTPServer):
-    daemon_threads = True
-
-    def server_bind(self) -> None:
-        TCPServer.server_bind(self)
-        self.server_name = "localhost"
-        self.server_port = self.server_address[1]
-
+class SourceReviewHttpServer(LocalHttpServer):
     def __init__(
         self,
         server_address: tuple[str, int],
@@ -74,83 +44,30 @@ class SourceReviewHttpServer(ThreadingHTTPServer):
         workspace_root: str | Path,
         return_url: str | None = None,
     ) -> None:
-        self.return_url = _validate_return_url(return_url)
+        self.return_url = validate_local_return_url(
+            return_url,
+            label="Source review",
+        )
         super().__init__(server_address, handler_class)
         self.project = str(project)
         self.workspace_root = str(workspace_root)
-        self.auth_token = secrets.token_urlsafe(32)
-        self.mutation_lock = threading.Lock()
-
-    @property
-    def origin(self) -> str:
-        host, port = self.server_address[:2]
-        host_text = host.decode("ascii") if isinstance(host, bytes) else host
-        return f"http://{host_text}:{port}"
 
     @property
     def review_url(self) -> str:
-        return self.origin + "/"
+        return self.root_url
 
 
-class _SourceReviewHandler(BaseHTTPRequestHandler):
+class _SourceReviewHandler(LocalHttpRequestHandler):
     server: SourceReviewHttpServer
-
-    def log_message(self, format: str, *args: Any) -> None:
-        return
-
-    def _host_is_local(self) -> bool:
-        host = self.headers.get("Host", "").split(":", 1)[0].casefold()
-        return host in {"127.0.0.1", "localhost"}
-
-    def _origin_allowed(self) -> bool:
-        origin = self.headers.get("Origin")
-        return not origin or origin in {
-            self.server.origin,
-            self.server.origin.replace("127.0.0.1", "localhost"),
-        }
-
-    def _api_authorized(self) -> bool:
-        supplied_token = self.headers.get("X-GLK-Token")
-        return (
-            self._host_is_local()
-            and self._origin_allowed()
-            and isinstance(supplied_token, str)
-            and secrets.compare_digest(supplied_token, self.server.auth_token)
-        )
+    request_error_type = SourceReviewError
+    security_headers = _SOURCE_SECURITY_HEADERS
 
     def _asset_authorized(self, query: dict[str, list[str]]) -> bool:
         supplied_token = query.get("token", [""])[0]
         return (
             self._host_is_local()
             and self._origin_allowed()
-            and secrets.compare_digest(supplied_token, self.server.auth_token)
-        )
-
-    def _headers(self, content_type: str, length: int) -> None:
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(length))
-        for name, value in _SECURITY_HEADERS.items():
-            self.send_header(name, value)
-
-    def _send_bytes(
-        self, status: HTTPStatus, data: bytes, content_type: str
-    ) -> None:
-        self.send_response(status)
-        self._headers(content_type, len(data))
-        self.end_headers()
-        self.wfile.write(data)
-
-    def _send_json(self, status: HTTPStatus, value: Any) -> None:
-        self._send_bytes(
-            status,
-            (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8"),
-            "application/json; charset=utf-8",
-        )
-
-    def _send_error_json(self, status: HTTPStatus, message: str) -> None:
-        self._send_json(
-            status,
-            make_http_error_response(status, message).to_dict(),
+            and self._token_matches(supplied_token)
         )
 
     def _send_file(self, path: Path, content_type: str | None = None) -> None:
@@ -171,17 +88,24 @@ class _SourceReviewHandler(BaseHTTPRequestHandler):
                     raise ValueError
                 status = HTTPStatus.PARTIAL_CONTENT
             except ValueError:
-                self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
-                self.send_header("Content-Range", f"bytes */{file_size}")
-                self.end_headers()
+                self._send_bytes(
+                    HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
+                    b"",
+                    "application/octet-stream",
+                    extra_headers={"Content-Range": f"bytes */{file_size}"},
+                )
                 return
         length = end - start + 1
         guessed = content_type or mimetypes.guess_type(path.name)[0]
         self.send_response(status)
-        self._headers(guessed or "application/octet-stream", length)
-        self.send_header("Accept-Ranges", "bytes")
+        extra_headers = {"Accept-Ranges": "bytes"}
         if status == HTTPStatus.PARTIAL_CONTENT:
-            self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
+            extra_headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        self._send_standard_headers(
+            guessed or "application/octet-stream",
+            length,
+            extra_headers=extra_headers,
+        )
         self.end_headers()
         with path.open("rb") as file:
             file.seek(start)
@@ -281,24 +205,6 @@ class _SourceReviewHandler(BaseHTTPRequestHandler):
             return
         self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
 
-    def _read_request_json(self) -> dict[str, Any]:
-        content_type = self.headers.get("Content-Type", "")
-        if not content_type.casefold().startswith("application/json"):
-            raise SourceReviewError("Content-Type must be application/json.")
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError as error:
-            raise SourceReviewError("Invalid Content-Length.") from error
-        if length <= 0 or length > _MAX_REQUEST_BYTES:
-            raise SourceReviewError("Request body size is invalid.")
-        try:
-            value = json.loads(self.rfile.read(length).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise SourceReviewError("Request body must be valid UTF-8 JSON.") from error
-        if not isinstance(value, dict):
-            raise SourceReviewError("Request body must be a JSON object.")
-        return value
-
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
         if path not in {"/api/save", "/api/validate", "/api/finalize"}:
@@ -308,7 +214,7 @@ class _SourceReviewHandler(BaseHTTPRequestHandler):
             self._send_error_json(HTTPStatus.FORBIDDEN, "Invalid review session.")
             return
         try:
-            body = self._read_request_json()
+            body = self._read_request_json(max_bytes=_MAX_REQUEST_BYTES)
             review_hash = body.get("review_sha256")
             blocks = body.get("blocks")
             allow_token_changes = body.get("allow_token_changes", False)
@@ -358,6 +264,7 @@ def create_source_review_server(
     port: int = 0,
     return_url: str | None = None,
 ) -> SourceReviewHttpServer:
+    validate_local_port(port, error_type=SourceReviewError)
     get_project_source_review_document(
         project=project, workspace_root=workspace_root
     )
