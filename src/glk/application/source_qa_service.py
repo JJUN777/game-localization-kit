@@ -10,7 +10,9 @@ from pathlib import Path
 import re
 from typing import Any
 
+from glk.application._cache import invalid_cache, read_json_object
 from glk.application._hashing import sha256_bytes as _sha256_bytes
+from glk.application._hashing import sha256_file_if_exists as _sha256_file
 from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.application.project_service import load_project
@@ -416,28 +418,30 @@ def run_project_source_qa(
             dry_run=True,
         )
 
-    if (
-        not force
-        and state_path.is_file()
-        and output_path.is_file()
-        and human_report_path.is_file()
-    ):
+    if not force:
+        state = read_json_object(state_path)
         try:
-            state = json.loads(state_path.read_text(encoding="utf-8"))
+            output_hash = _sha256_file(output_path) if state is not None else None
+            human_report_hash = (
+                _sha256_file(human_report_path) if state is not None else None
+            )
             if (
-                state.get("status") == "complete"
-                and state.get("version") == SOURCE_QA_VERSION
-                and state.get("input_sha256") == input_hash
-                and state.get("output_sha256")
-                == _sha256_bytes(output_path.read_bytes())
-                and state.get("human_report_sha256")
-                == _sha256_bytes(human_report_path.read_bytes())
+                state is not None
+                and output_hash is not None
+                and human_report_hash is not None
+                and (
+                    state.get("status") == "complete"
+                    and state.get("version") == SOURCE_QA_VERSION
+                    and state.get("input_sha256") == input_hash
+                    and state.get("output_sha256") == output_hash
+                    and state.get("human_report_sha256") == human_report_hash
+                )
             ):
                 return _result_from_state(
                     state, location.path, output_path, human_report_path
                 )
-        except (KeyError, OSError, json.JSONDecodeError, TypeError, ValueError):
-            pass
+        except (KeyError, TypeError, ValueError) as error:
+            raise invalid_cache(state_path, "invalid source QA state") from error
 
     report = {
         "schema_version": 1,

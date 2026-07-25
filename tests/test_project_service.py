@@ -61,6 +61,28 @@ class ProjectManifestTests(unittest.TestCase):
 
 
 class ProjectServiceTests(unittest.TestCase):
+    def test_list_projects_reports_corrupt_pipeline_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace_root = Path(temporary) / "workspaces"
+            location = create_project(
+                name="Corrupt Pipeline State",
+                workspace_root=workspace_root,
+            )
+            (location.path / ".glk/state/source_qa.json").write_text(
+                "{broken",
+                encoding="utf-8",
+            )
+
+            result = list_projects(workspace_root)
+
+            self.assertEqual(result.projects, ())
+            self.assertEqual(len(result.warnings), 1)
+            self.assertEqual(
+                result.warnings[0].directory,
+                "corrupt_pipeline_state",
+            )
+            self.assertIn("invalid UTF-8 JSON", result.warnings[0].message)
+
     def test_partial_translation_stage_precedes_stale_review(self) -> None:
         pipeline = {
             "final_translation_approved": False,

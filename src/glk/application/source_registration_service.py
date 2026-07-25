@@ -314,17 +314,31 @@ def validate_image_output_collisions(
     images: Iterable[Path],
     root: Path,
 ) -> None:
-    outputs: dict[PurePosixPath, Path] = {}
+    inputs: dict[str, Path] = {}
+    outputs: dict[str, tuple[PurePosixPath, Path]] = {}
     for image_path in images:
         relative = PurePosixPath(image_path.relative_to(root).as_posix())
-        output = relative.with_suffix(".txt")
-        previous = outputs.get(output)
-        if previous is not None:
+        input_key = relative.as_posix().casefold()
+        previous_input = inputs.get(input_key)
+        if previous_input is not None:
             raise SourceRegistrationError(
-                f"Output filename collision: {previous.name} and "
-                f"{image_path.name} both map to {output.as_posix()}"
+                "Case-insensitive source filename collision: "
+                f"{previous_input.relative_to(root).as_posix()} and "
+                f"{relative.as_posix()}"
             )
-        outputs[output] = image_path
+        inputs[input_key] = image_path
+
+        output = relative.with_suffix(".txt")
+        output_key = output.as_posix().casefold()
+        previous = outputs.get(output_key)
+        if previous is not None:
+            previous_output, previous_image = previous
+            raise SourceRegistrationError(
+                f"Output filename collision: {previous_image.name} and "
+                f"{image_path.name} map to case-insensitive output "
+                f"{previous_output.as_posix()}"
+            )
+        outputs[output_key] = (output, image_path)
 
 
 def register_pdf_source(

@@ -14,6 +14,7 @@ import re
 import unicodedata
 from typing import Any
 
+from glk.application._cache import read_json_object
 from glk.application._hashing import sha256_bytes as _sha256_bytes
 from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application._io import write_json_atomic as _write_json_atomic
@@ -596,13 +597,7 @@ def _render_review_tsv(candidates: list[GlossaryCandidate]) -> bytes:
 
 
 def _read_state(path: Path) -> dict[str, Any] | None:
-    if not path.is_file():
-        return None
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return value if isinstance(value, dict) else None
+    return read_json_object(path)
 
 
 def build_project_glossary_candidates(

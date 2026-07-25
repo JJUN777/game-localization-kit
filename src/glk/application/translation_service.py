@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 from typing import Any
 
+from glk.application._cache import read_json_object
 from glk.application._hashing import sha256_bytes as _sha256_bytes
 from glk.application._io import (
     write_bytes_atomic as _write_bytes_atomic,
@@ -96,13 +97,7 @@ def _utc_now() -> str:
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
-    if not path.is_file():
-        return None
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return value if isinstance(value, dict) else None
+    return read_json_object(path)
 
 
 def build_translation_chunks(

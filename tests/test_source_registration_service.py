@@ -11,6 +11,7 @@ from glk.application.project_service import create_project, load_project
 from glk.application.source_registration_service import (
     SourceRecoveryError,
     SourceRegistrationError,
+    validate_image_output_collisions,
     register_project_images,
     register_project_pdf,
     replace_project_images,
@@ -173,6 +174,18 @@ class SourceRegistrationServiceTests(unittest.TestCase):
                     workspace_root=workspace_root,
                 )
 
+    def test_rejects_case_insensitive_source_name_collisions(self) -> None:
+        root = Path("/virtual/images")
+
+        with self.assertRaisesRegex(
+            SourceRegistrationError,
+            "Case-insensitive source filename collision",
+        ):
+            validate_image_output_collisions(
+                [root / "Card.png", root / "card.png"],
+                root,
+            )
+
     def test_rejects_image_output_name_collisions_before_copying(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -205,6 +218,43 @@ class SourceRegistrationServiceTests(unittest.TestCase):
             )
             self.assertFalse(
                 (location.path / "01_input/images/card.png").exists()
+            )
+
+    def test_rejects_case_insensitive_output_collisions_before_copying(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace_root = root / "workspaces"
+            source_images = root / "images"
+            source_images.mkdir()
+            Image.new("RGB", (8, 8), "white").save(
+                source_images / "Card.PNG"
+            )
+            Image.new("RGB", (8, 8), "black").save(
+                source_images / "card.jpg"
+            )
+            location = create_project(
+                name="Casefold Collision",
+                workspace_root=workspace_root,
+            )
+
+            with self.assertRaisesRegex(
+                SourceRegistrationError,
+                "case-insensitive output",
+            ):
+                register_project_images(
+                    project="casefold_collision",
+                    folder=source_images,
+                    workspace_root=workspace_root,
+                )
+
+            self.assertIsNone(
+                load_project(
+                    "casefold_collision",
+                    workspace_root,
+                ).manifest.source_file
+            )
+            self.assertFalse(
+                (location.path / "01_input/images/Card.PNG").exists()
             )
 
     def test_replaces_unprocessed_pdf_with_images_and_preserves_prompt(self) -> None:

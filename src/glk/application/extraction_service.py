@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 import pymupdf
 
+from glk.application._cache import invalid_cache, read_json_object
 from glk.application._hashing import sha256_bytes as _sha256_bytes
 from glk.application._hashing import sha256_file as _sha256_file
 from glk.application._io import write_bytes_atomic as _write_bytes_atomic
@@ -118,10 +119,10 @@ def _load_cached_layout(
     provider: LayoutProvider,
     fragments: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
-    if not path.is_file():
+    value = read_json_object(path)
+    if value is None:
         return None
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
         metadata_matches = (
             value.get("source_sha256") == source_sha256
             and value.get("fragment_sha256") == fragment_sha256
@@ -133,8 +134,8 @@ def _load_cached_layout(
         layout = value["layout"]
         validate_layout(fragments, layout)
         return layout, merge_paragraph_continuations(reconstruct_blocks(fragments, layout))
-    except (KeyError, OSError, json.JSONDecodeError, ValueError, TypeError):
-        return None
+    except (KeyError, ValueError, TypeError) as error:
+        raise invalid_cache(path, "invalid PDF layout") from error
 
 
 def _reconstruct_validated_layout(

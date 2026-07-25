@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -96,6 +97,90 @@ class ImageOcrServiceTests(unittest.TestCase):
             self.assertTrue(second.ok)
             self.assertEqual(cached_provider.calls, 0)
             self.assertEqual(second.cached_images, ("card-1.png",))
+
+    def test_failed_forced_rerun_preserves_previous_successful_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            image_folder = root / "images"
+            image_folder.mkdir()
+            Image.new("RGB", (20, 10), "white").save(image_folder / "card.png")
+            create_project(name="Preserve OCR", workspace_root=workspace_root)
+
+            first = ocr_project_images(
+                project="preserve_ocr",
+                folder=image_folder,
+                workspace_root=workspace_root,
+                provider=FakeImageOcrProvider(),
+            )
+            self.assertTrue(first.ok)
+            project_path = workspace_root / "preserve_ocr"
+            individual_path = project_path / "02_source/ocr/individual/card.txt"
+            combined_path = project_path / "02_source/ocr/combined.txt"
+            previous_individual = individual_path.read_bytes()
+            previous_combined = combined_path.read_bytes()
+
+            failed_provider = FakeImageOcrProvider(fail_if_called=True)
+            second = ocr_project_images(
+                project="preserve_ocr",
+                workspace_root=workspace_root,
+                force=True,
+                provider=failed_provider,
+            )
+
+            self.assertFalse(second.ok)
+            self.assertEqual(failed_provider.calls, 1)
+            self.assertEqual(individual_path.read_bytes(), previous_individual)
+            self.assertEqual(combined_path.read_bytes(), previous_combined)
+            self.assertIn(
+                "Deal 1{DMGR}.",
+                (project_path / "02_source/ocr/combined.partial.txt").read_text(
+                    encoding="utf-8"
+                ),
+            )
+            state = json.loads(
+                (project_path / ".glk/state/image_ocr.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(state["status"], "partial")
+            self.assertEqual(state["failures"][0]["file"], "card.png")
+
+    def test_corrupt_cache_is_reported_without_calling_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            image_folder = root / "images"
+            image_folder.mkdir()
+            Image.new("RGB", (20, 10), "white").save(image_folder / "card.png")
+            create_project(name="Corrupt OCR Cache", workspace_root=workspace_root)
+
+            ocr_project_images(
+                project="corrupt_ocr_cache",
+                folder=image_folder,
+                workspace_root=workspace_root,
+                provider=FakeImageOcrProvider(),
+            )
+            project_path = workspace_root / "corrupt_ocr_cache"
+            individual_path = project_path / "02_source/ocr/individual/card.txt"
+            previous_text = individual_path.read_text(encoding="utf-8")
+            cache_path = project_path / ".glk/cache/ocr/results/card.json"
+            cache_path.write_text("{broken", encoding="utf-8")
+
+            provider = FakeImageOcrProvider()
+            result = ocr_project_images(
+                project="corrupt_ocr_cache",
+                workspace_root=workspace_root,
+                provider=provider,
+            )
+
+            self.assertFalse(result.ok)
+            self.assertEqual(provider.calls, 0)
+            self.assertIn("invalid UTF-8 JSON", result.failures[0].error)
+            self.assertEqual(
+                individual_path.read_text(encoding="utf-8"),
+                previous_text,
+            )
 
     def test_dry_run_does_not_require_provider_or_write_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -10,7 +10,9 @@ from pathlib import Path, PurePosixPath
 import re
 from typing import Any, Iterable
 
+from glk.application._cache import invalid_cache, read_json_object
 from glk.application._hashing import sha256_bytes as _sha256_bytes
+from glk.application._hashing import sha256_file_if_exists as _sha256_file
 from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.application.project_service import load_project
@@ -373,11 +375,13 @@ def _load_cached_result(
     input_sha256: str,
     source_type: str,
 ) -> SegmentationResult | None:
-    if not state_path.is_file() or not output_path.is_file():
+    state = read_json_object(state_path)
+    if state is None:
+        return None
+    output_hash = _sha256_file(output_path)
+    if output_hash is None:
         return None
     try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        output_hash = _sha256_bytes(output_path.read_bytes())
         if not (
             state.get("status") == "complete"
             and state.get("version") == SEGMENTATION_VERSION
@@ -395,8 +399,8 @@ def _load_cached_result(
             output_file=str(output_path),
             cached=True,
         )
-    except (KeyError, OSError, json.JSONDecodeError, TypeError, ValueError):
-        return None
+    except (KeyError, TypeError, ValueError) as error:
+        raise invalid_cache(state_path, "invalid segmentation state") from error
 
 
 def segment_project_source(

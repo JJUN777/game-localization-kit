@@ -20,6 +20,6 @@ def sha256_file(path: Path) -> str:
 
 def sha256_file_if_exists(path: Path) -> str | None:
     try:
-        return sha256_file(path) if path.is_file() else None
-    except OSError:
+        return sha256_file(path)
+    except FileNotFoundError:
         return None

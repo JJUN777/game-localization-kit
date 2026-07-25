@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-import json
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from PIL import Image, ImageOps
 
+from glk.application._cache import invalid_cache, read_json_object
 from glk.application._hashing import sha256_bytes as _sha256_bytes
 from glk.application._hashing import sha256_file as _sha256_file
 from glk.application._io import copy_file_atomic as _copy_file_atomic
@@ -137,10 +137,10 @@ def _load_cached_result(
     image_prompt_sha256: str,
     provider: ImageOcrProvider,
 ) -> dict[str, Any] | None:
-    if not path.is_file():
+    value = read_json_object(path)
+    if value is None:
         return None
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
         matches = (
             value.get("image_sha256") == image_sha256
             and value.get("common_prompt_sha256") == common_prompt_sha256
@@ -151,8 +151,8 @@ def _load_cached_result(
         if not matches:
             return None
         return validate_ocr_result(value["ocr"])
-    except (KeyError, OSError, json.JSONDecodeError, TypeError, ValueError):
-        return None
+    except (KeyError, TypeError, ValueError) as error:
+        raise invalid_cache(path, "invalid OCR result") from error
 
 
 def _registered_source_folder(location: ProjectLocation) -> Path:
@@ -309,9 +309,18 @@ def ocr_project_images(
             if ocr["status"] == "needs_review":
                 needs_review.append(relative_name)
         except Exception as error:
-            failures.append(ImageOcrFailure(relative_name, str(error)))
-            _write_text_atomic(individual_path, "")
-            combined_items.append((text_relative.as_posix(), ""))
+            failure_message = str(error)
+            try:
+                previous_text = individual_path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                previous_text = ""
+            except OSError as previous_error:
+                previous_text = ""
+                failure_message += (
+                    f"; could not preserve existing OCR text: {previous_error}"
+                )
+            failures.append(ImageOcrFailure(relative_name, failure_message))
+            combined_items.append((text_relative.as_posix(), previous_text))
             notify(f"Image {index}/{len(registered_images)}: failed: {error}")
 
     combined_path = (

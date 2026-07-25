@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from glk.application._cache import read_json_object
 from glk.application._hashing import sha256_file_if_exists as _sha256_file
 from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.domain.project import (
@@ -375,13 +376,7 @@ def list_projects(
 
 
 def _read_optional_json(path: Path) -> dict[str, Any] | None:
-    if not path.is_file():
-        return None
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return value if isinstance(value, dict) else None
+    return read_json_object(path)
 
 
 def _final_translation_files_current(
