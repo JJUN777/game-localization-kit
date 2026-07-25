@@ -236,8 +236,17 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
   - 검증: 정적·동적 경로, 1회 URL decode, query 분리, 잘못된 메서드·빈 ID·
     중첩 경로 단위 테스트를 포함한 전체 246개 테스트와 mypy 23개 파일 검사를
     통과했다.
-- [ ] `ARCH-004` `translate_project`, `import_project_glossary`,
+- [-] `ARCH-004` `translate_project`, `import_project_glossary`,
   `_inspect_pipeline_status` 등 대형 함수를 책임별로 분리한다.
+  - [x] `_inspect_pipeline_status`를 원문, 용어, 번역 실행, 번역 검수 상태
+    판정과 최종 조립 단계로 분리했다.
+    - 검증: pipeline 단계 전환과 최종 번역 승인·stale 판정을 포함한 전체
+      246개 테스트와 mypy 24개 파일 검사를 통과했다.
+  - [ ] `import_project_glossary`의 TSV 검증·정규화와 결과 저장을 분리한다.
+  - [ ] `translate_project`의 입력 준비·checkpoint 복원·청크 실행·최종화를
+    분리한다.
+  - 완료 기준: 세 진입 함수는 한 use case의 순서만 조정하고, 각 하위 함수는
+    독립된 상태 판정·검증·저장 책임 하나만 가져야 한다.
 - [x] `ARCH-005` 세 Gemini provider의 공통 동작을 기반 모듈로 추출한다.
   - 재시도 루프, 환경 설정 로딩, SDK 오류 판정과 timeout 정책을 공통 관리한다.
   - layout, OCR, translation 고유 책임은 prompt·schema·응답 변환으로 제한한다.
@@ -255,7 +264,7 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
 - [ ] `QUALITY-001` ruff를 작은 규칙 집합부터 도입하고 포맷 변경은 별도 커밋으로
   분리한다.
 - [ ] `QUALITY-002` mypy 대상을 도메인 계층부터 점진적으로 확대한다.
-  - 현재 설정된 23개 파일은 통과한다.
+  - 현재 설정된 24개 파일은 통과한다.
   - application/domain/extraction 35개 파일로 확대하면 7개 파일에서
     22개 오류가 확인되므로 한 번에 strict로 전환하지 않는다.
   - 오류가 0개인 파일부터 검사 대상에 편입하고, 나머지는 파일 단위로 오류를

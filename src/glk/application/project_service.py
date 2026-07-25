@@ -116,6 +116,41 @@ class ProjectScanResult:
     warnings: tuple[ProjectListWarning, ...]
 
 
+_FileHash = Callable[[Path], str | None]
+
+
+@dataclass(frozen=True, slots=True)
+class _SourcePipelineStatus:
+    source_type: str | None
+    source_acquired: bool
+    review_source_ready: bool
+    qa_status: str
+    qa_issues: Any
+    human_review: str
+    approved_sha256: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _GlossaryPipelineStatus:
+    glossary_status: str
+    glossary_candidates: Any
+    termbase_status: str
+    termbase_entries: Any
+
+
+@dataclass(frozen=True, slots=True)
+class _TranslationRunStatus:
+    translation_status: str
+    translated_blocks: Any
+    state: dict[str, Any] | None
+
+
+@dataclass(frozen=True, slots=True)
+class _TranslationReviewStatus:
+    translation_review: str
+    translation_qa_issues: Any
+
+
 def _resolve_path(path: str | Path) -> Path:
     candidate = Path(path).expanduser()
     if not candidate.is_absolute():
@@ -443,23 +478,12 @@ def _final_translation_files_current(
     return state.get("final_sha256") == file_hash(legacy_path)
 
 
-def _inspect_pipeline_status(
+def _inspect_source_pipeline(
     location: ProjectLocation,
     *,
-    hash_cache: FileHashCache | None = None,
-) -> dict[str, Any]:
-    project_path = location.path
-    paths = WorkspacePaths(project_path)
-    file_hash = (
-        hash_cache.sha256_file_if_exists
-        if hash_cache is not None
-        else _sha256_file
-    )
-    text_file_hash = (
-        hash_cache.sha256_text_file_if_exists
-        if hash_cache is not None
-        else _sha256_text_file
-    )
+    paths: WorkspacePaths,
+    file_hash: _FileHash,
+) -> _SourcePipelineStatus:
     if is_pdf_source_file(location.manifest.source_file):
         acquisition = _read_optional_json(paths.pdf_acquisition_state)
         source_type = "pdf"
@@ -478,7 +502,6 @@ def _inspect_pipeline_status(
     source_blocks_path = paths.source_segments
     source_sha256 = file_hash(source_blocks_path)
     review_source_ready = source_sha256 is not None
-
     qa_state = _read_optional_json(paths.source_qa_state)
     if qa_state is None:
         qa_status = "not_run"
@@ -512,16 +535,38 @@ def _inspect_pipeline_status(
     else:
         human_review = "pending"
 
+    return _SourcePipelineStatus(
+        source_type=source_type,
+        source_acquired=source_acquired,
+        review_source_ready=review_source_ready,
+        qa_status=qa_status,
+        qa_issues=qa_issues,
+        human_review=human_review,
+        approved_sha256=approved_sha256,
+    )
+
+
+def _inspect_glossary_pipeline(
+    *,
+    paths: WorkspacePaths,
+    source: _SourcePipelineStatus,
+    file_hash: _FileHash,
+) -> _GlossaryPipelineStatus:
     glossary_path = paths.glossary_review
     glossary_state = _read_optional_json(paths.glossary_build_state)
     if not glossary_path.is_file() or glossary_state is None:
-        glossary_status = "not_built" if human_review == "approved" else "not_ready"
+        glossary_status = (
+            "not_built"
+            if source.human_review == "approved"
+            else "not_ready"
+        )
         glossary_candidates = None
     elif (
-        human_review != "approved"
+        source.human_review != "approved"
         or glossary_state.get("status") != "complete"
         or glossary_state.get("version") != GLOSSARY_BUILD_VERSION
-        or glossary_state.get("approved_source_sha256") != approved_sha256
+        or glossary_state.get("approved_source_sha256")
+        != source.approved_sha256
     ):
         glossary_status = "stale"
         glossary_candidates = glossary_state.get("candidate_count")
@@ -538,7 +583,8 @@ def _inspect_pipeline_status(
         glossary_status != "current"
         or termbase_state.get("status") != "complete"
         or termbase_state.get("version") != TERMBASE_IMPORT_VERSION
-        or termbase_state.get("approved_source_sha256") != approved_sha256
+        or termbase_state.get("approved_source_sha256")
+        != source.approved_sha256
         or termbase_state.get("review_tsv_sha256") != file_hash(glossary_path)
         or termbase_state.get("termbase_sha256") != file_hash(termbase_path)
     ):
@@ -548,16 +594,38 @@ def _inspect_pipeline_status(
         termbase_status = "current"
         termbase_entries = termbase_state.get("entry_count")
 
+    return _GlossaryPipelineStatus(
+        glossary_status=glossary_status,
+        glossary_candidates=glossary_candidates,
+        termbase_status=termbase_status,
+        termbase_entries=termbase_entries,
+    )
+
+
+def _inspect_translation_run(
+    *,
+    paths: WorkspacePaths,
+    source: _SourcePipelineStatus,
+    glossary: _GlossaryPipelineStatus,
+    file_hash: _FileHash,
+    text_file_hash: _FileHash,
+) -> _TranslationRunStatus:
+    termbase_path = paths.termbase
     translation_path = paths.translation_segments
     translation_state = _read_optional_json(paths.translation_state)
     translation_prompt_path = paths.translation_prompt
     if translation_state is None:
-        translation_status = "not_run" if termbase_status == "current" else "not_ready"
+        translation_status = (
+            "not_run"
+            if glossary.termbase_status == "current"
+            else "not_ready"
+        )
         translated_blocks = None
     elif (
-        termbase_status != "current"
+        glossary.termbase_status != "current"
         or translation_state.get("version") != TRANSLATION_RUN_VERSION
-        or translation_state.get("approved_source_sha256") != approved_sha256
+        or translation_state.get("approved_source_sha256")
+        != source.approved_sha256
         or translation_state.get("termbase_sha256") != file_hash(termbase_path)
         or translation_state.get("project_prompt_sha256")
         != text_file_hash(translation_prompt_path)
@@ -579,6 +647,24 @@ def _inspect_pipeline_status(
         translation_status = "current"
         translated_blocks = translation_state.get("completed_blocks")
 
+    return _TranslationRunStatus(
+        translation_status=translation_status,
+        translated_blocks=translated_blocks,
+        state=translation_state,
+    )
+
+
+def _inspect_translation_review(
+    location: ProjectLocation,
+    *,
+    paths: WorkspacePaths,
+    translation: _TranslationRunStatus,
+    file_hash: _FileHash,
+) -> _TranslationReviewStatus:
+    project_path = location.path
+    termbase_path = paths.termbase
+    translation_path = paths.translation_segments
+    translation_state = translation.state
     translation_review_path = paths.translation_review
     translation_draft_path = paths.translation_draft
     translation_review_state = _read_optional_json(paths.translation_review_state)
@@ -588,7 +674,7 @@ def _inspect_pipeline_status(
     final_translation_path = paths.final_translation_for(
         location.manifest.source_file
     )
-    if translation_status != "current":
+    if translation.translation_status != "current":
         translation_review_status = (
             "stale"
             if translation_review_path.is_file()
@@ -651,22 +737,69 @@ def _inspect_pipeline_status(
         translation_review_status = "stale"
         translation_qa_issues = translation_review_state.get("error_count")
 
+    return _TranslationReviewStatus(
+        translation_review=translation_review_status,
+        translation_qa_issues=translation_qa_issues,
+    )
+
+
+def _inspect_pipeline_status(
+    location: ProjectLocation,
+    *,
+    hash_cache: FileHashCache | None = None,
+) -> dict[str, Any]:
+    paths = WorkspacePaths(location.path)
+    file_hash = (
+        hash_cache.sha256_file_if_exists
+        if hash_cache is not None
+        else _sha256_file
+    )
+    text_file_hash = (
+        hash_cache.sha256_text_file_if_exists
+        if hash_cache is not None
+        else _sha256_text_file
+    )
+    source = _inspect_source_pipeline(
+        location,
+        paths=paths,
+        file_hash=file_hash,
+    )
+    glossary = _inspect_glossary_pipeline(
+        paths=paths,
+        source=source,
+        file_hash=file_hash,
+    )
+    translation = _inspect_translation_run(
+        paths=paths,
+        source=source,
+        glossary=glossary,
+        file_hash=file_hash,
+        text_file_hash=text_file_hash,
+    )
+    translation_review = _inspect_translation_review(
+        location,
+        paths=paths,
+        translation=translation,
+        file_hash=file_hash,
+    )
     return {
-        "source_type": source_type,
+        "source_type": source.source_type,
         "source_processing_started": source_processing_started(location),
-        "source_acquired": source_acquired,
-        "review_source_ready": review_source_ready,
-        "qa_status": qa_status,
-        "qa_issues": qa_issues,
-        "human_review": human_review,
-        "final_source_approved": human_review == "approved",
-        "glossary_status": glossary_status,
-        "glossary_candidates": glossary_candidates,
-        "termbase_status": termbase_status,
-        "termbase_entries": termbase_entries,
-        "translation_status": translation_status,
-        "translated_blocks": translated_blocks,
-        "translation_review": translation_review_status,
-        "translation_qa_issues": translation_qa_issues,
-        "final_translation_approved": translation_review_status == "approved",
+        "source_acquired": source.source_acquired,
+        "review_source_ready": source.review_source_ready,
+        "qa_status": source.qa_status,
+        "qa_issues": source.qa_issues,
+        "human_review": source.human_review,
+        "final_source_approved": source.human_review == "approved",
+        "glossary_status": glossary.glossary_status,
+        "glossary_candidates": glossary.glossary_candidates,
+        "termbase_status": glossary.termbase_status,
+        "termbase_entries": glossary.termbase_entries,
+        "translation_status": translation.translation_status,
+        "translated_blocks": translation.translated_blocks,
+        "translation_review": translation_review.translation_review,
+        "translation_qa_issues": translation_review.translation_qa_issues,
+        "final_translation_approved": (
+            translation_review.translation_review == "approved"
+        ),
     }

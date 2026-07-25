@@ -47,6 +47,7 @@ files = [
   "src/glk/application/dashboard_job_service.py",
   "src/glk/application/review_types.py",
   "src/glk/application/dashboard_service.py",
+  "src/glk/application/project_service.py",
   "src/glk/application/source_registration_service.py",
   "src/glk/application/source_review_service.py",
   "src/glk/application/glossary_review_service.py",
