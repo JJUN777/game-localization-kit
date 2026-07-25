@@ -31,9 +31,10 @@ class GeminiImageOcrProvider(GeminiProviderBase):
         )
 
         def request() -> dict[str, Any]:
+            contents: list[types.PartUnionDict] = [prompt, image]
             response = self.client.models.generate_content(
                 model=self.model_name,
-                contents=[prompt, image],
+                contents=contents,
                 config=config,
             )
             if not response.text:

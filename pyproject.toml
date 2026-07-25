@@ -40,7 +40,7 @@ where = ["src"]
 
 [tool.mypy]
 python_version = "3.10"
-follow_imports = "skip"
+follow_imports = "normal"
 files = [
   "src/glk/error_response.py",
   "src/glk/application",

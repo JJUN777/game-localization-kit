@@ -425,7 +425,7 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     잘못된 입력의 구체적인 실패 조건까지 고정해야 한다.
   - 검증: 전용 단위 테스트 21개를 추가해 전체 269개 테스트, mypy 48개 파일과
     ruff 91개 Python 파일 검사를 통과했다.
-- [ ] `QUALITY-004` mypy의 모듈 경계 검사를 활성화한다.
+- [x] `QUALITY-004` mypy의 모듈 경계 검사를 활성화한다.
   - 현재 `follow_imports = "skip"`을 `normal`로 바꾸면 48개 대상에서 3개
     오류가 확인된다. `gemini_common.py`의 `PathLike` 경계와 layout·OCR
     provider의 `contents` 타입을 실제 SDK 계약에 맞게 정리한다.
@@ -433,6 +433,9 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     한 묶음에서 수정한 뒤 설정을 `normal`로 전환한다.
   - 완료 기준: `follow_imports = "normal"` 상태에서 CI의 기존 48개 파일이
     mypy 0 오류이고 unittest·ruff도 통과해야 한다.
+  - 검증: 설정 경로를 `Path`로 정규화하고 layout·OCR 요청 본문을 Gemini SDK의
+    `PartUnionDict` 목록으로 명시했다. `follow_imports = "normal"` 상태에서
+    mypy 48개 파일, 전체 289개 테스트와 ruff 검사를 통과했다.
 - [ ] `ERROR-003` 예외 문구 부분 검색에 의존하는 오류 판정을 도메인별
   안정적 코드로 교체한다.
   - 대상은 `error_response.py`의 detail 추론,
@@ -491,11 +494,10 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
 완료된 작업 순서는 각 항목의 상태와 검증 기록으로 보존합니다. 앞으로의 작업은
 서로 연관된 항목을 다음 순서로 나눠 커밋합니다.
 
-1. `QUALITY-004`: 확인된 3개 타입 오류 수정과 `follow_imports = "normal"` 전환
-2. `ERROR-003`: source·glossary·translation·review 순서로 문구 추론 제거
-3. `ARCH-006`: 선택한 use case를 각각 독립 커밋으로 분리
-4. `DOMAIN-001`: 하이픈 결합 경고의 검수 화면 표시 방법 확정과 구현
-5. 제품 기능 후속 항목의 우선순위 결정
+1. `ERROR-003`: source·glossary·translation·review 순서로 문구 추론 제거
+2. `ARCH-006`: 선택한 use case를 각각 독립 커밋으로 분리
+3. `DOMAIN-001`: 하이픈 결합 경고의 검수 화면 표시 방법 확정과 구현
+4. 제품 기능 후속 항목의 우선순위 결정
 
 `UPLOAD-001`은 실제 대용량 파일의 메모리 사용량을 측정하기 전까지, `REPO-002`는
 배포 정책과 라이선스를 결정하기 전까지 구현 순서에 넣지 않습니다.

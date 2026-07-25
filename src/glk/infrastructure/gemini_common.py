@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import math
 import os
+from pathlib import Path
 import random
 import time
 from typing import Callable, TypeVar
@@ -36,7 +37,8 @@ def load_gemini_environment(
     settings_root: str | os.PathLike[str] | None = None,
 ) -> dict[str, str]:
     """Read effective Gemini settings without mutating process environment."""
-    parsed = dotenv_values(resolve_settings_root(settings_root) / ".env")
+    normalized_root = Path(settings_root) if settings_root is not None else None
+    parsed = dotenv_values(resolve_settings_root(normalized_root) / ".env")
     effective: dict[str, str] = {}
     for name in _GEMINI_SETTING_NAMES:
         environment_value = os.getenv(name, "").strip()
