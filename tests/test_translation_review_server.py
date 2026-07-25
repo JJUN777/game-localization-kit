@@ -4,14 +4,26 @@ import json
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from google.genai import errors as gemini_errors
+
+from glk.application.translation_retry_job_service import _safe_retry_error
+from glk.application.translation_review_service import (
+    TranslationReviewConflictError,
+)
 from glk.application.translation_service import translate_project
 from glk.application.translation_retry_service import TranslationRetryResult
+from glk.application.translation_types import (
+    TranslationError,
+    TranslationValidationError,
+)
+from glk.infrastructure.gemini_common import GeminiConfigurationError
 from glk.infrastructure.translation_review_server import (
     TranslationReviewHttpServer,
     create_translation_review_server,
@@ -369,7 +381,9 @@ class TranslationReviewServerTests(unittest.TestCase):
             nonlocal calls
             calls += 1
             if calls == 1:
-                raise RuntimeError("temporary provider failure")
+                raise OSError(
+                    "/Users/private/project/review.txt: temporary provider failure"
+                )
             return result
 
         with patch(
@@ -386,7 +400,14 @@ class TranslationReviewServerTests(unittest.TestCase):
             )
             self.assertEqual(status, 202)
             failed = self._wait_for_retry_job("failed")
-            self.assertIn("temporary provider failure", failed["error"])
+            self.assertEqual(
+                failed["error"],
+                (
+                    "오류 문장 재번역에 실패했습니다. "
+                    "검수 내용은 유지되었습니다. 다시 시도하세요."
+                ),
+            )
+            self.assertNotIn("/Users/private", failed["error"])
 
             _, latest_document, _ = self._request("/api/review")
             status, second, _ = self._request(
@@ -406,6 +427,123 @@ class TranslationReviewServerTests(unittest.TestCase):
                 second["job"]["job_id"],
             )
             self._wait_for_retry_job("succeeded")
+
+    def test_retry_job_sanitizes_gemini_api_details(self) -> None:
+        _, document, _ = self._request("/api/review")
+        translations = {
+            block["id"]: block["translation"]
+            for block in document["blocks"]
+        }
+        api_error = gemini_errors.APIError(
+            404,
+            {
+                "error": {
+                    "code": 404,
+                    "status": "NOT_FOUND",
+                    "message": (
+                        "secret SDK detail /Users/private/models/missing"
+                    ),
+                }
+            },
+            SimpleNamespace(headers={}),  # type: ignore[arg-type]
+        )
+
+        with patch(
+            "glk.application.translation_retry_job_service.retry_failed_translations",
+            side_effect=api_error,
+        ):
+            status, _, _ = self._request(
+                "/api/retry",
+                method="POST",
+                payload={
+                    "review_sha256": document["review_sha256"],
+                    "translations": translations,
+                },
+            )
+            self.assertEqual(status, 202)
+            failed = self._wait_for_retry_job("failed")
+
+        self.assertEqual(
+            failed["error"],
+            (
+                "선택한 Gemini 모델을 사용할 수 없습니다. "
+                "AI 설정에서 모델을 확인하세요."
+            ),
+        )
+        self.assertNotIn("secret SDK detail", failed["error"])
+        self.assertNotIn("/Users/private", failed["error"])
+
+    def test_retry_error_keeps_conflict_and_validation_guidance(self) -> None:
+        conflict = _safe_retry_error(
+            TranslationReviewConflictError(
+                "sensitive changed review detail /Users/private"
+            )
+        )
+        validation = _safe_retry_error(
+            TranslationValidationError(
+                "sensitive validation detail /Users/private"
+            )
+        )
+
+        self.assertIn("최신 내용을 불러온 뒤", conflict)
+        self.assertIn("직접 수정하거나 다시 시도", validation)
+        self.assertNotIn("/Users/private", conflict)
+        self.assertNotIn("/Users/private", validation)
+        self.assertEqual(
+            TranslationReviewConflictError.code,
+            "REVIEW_CONFLICT",
+        )
+        self.assertEqual(
+            TranslationValidationError.code,
+            "TRANSLATION_VALIDATION_FAILED",
+        )
+
+    def test_retry_error_classifies_provider_failures_without_raw_detail(
+        self,
+    ) -> None:
+        expected_markers = {
+            400: "API 키 또는 요청 설정",
+            403: "호출 권한",
+            404: "모델",
+            429: "사용량 한도",
+            500: "일시적으로 응답하지 않습니다",
+        }
+        for code, marker in expected_markers.items():
+            with self.subTest(code=code):
+                api_error = gemini_errors.APIError(
+                    code,
+                    {
+                        "error": {
+                            "code": code,
+                            "status": "TEST_FAILURE",
+                            "message": (
+                                "secret SDK detail /Users/private/api-key"
+                            ),
+                        }
+                    },
+                    SimpleNamespace(headers={}),  # type: ignore[arg-type]
+                )
+                wrapped = TranslationError(
+                    "Selective retry failed. Cause: secret SDK detail"
+                )
+                wrapped.__cause__ = api_error
+
+                message = _safe_retry_error(wrapped)
+
+                self.assertIn(marker, message)
+                self.assertNotIn("secret SDK detail", message)
+                self.assertNotIn("/Users/private", message)
+
+        configuration = _safe_retry_error(
+            GeminiConfigurationError("GEMINI_API_KEY=/Users/private/key")
+        )
+        network = _safe_retry_error(
+            TimeoutError("socket timeout /Users/private")
+        )
+        self.assertIn("API 키가 설정되지 않았습니다", configuration)
+        self.assertIn("네트워크 연결", network)
+        self.assertNotIn("/Users/private", configuration)
+        self.assertNotIn("/Users/private", network)
 
     def _wait_for_retry_job(self, status: str) -> dict[str, object]:
         deadline = time.monotonic() + 2

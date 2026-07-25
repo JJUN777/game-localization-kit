@@ -19,6 +19,8 @@ class TranslationError(ValueError):
 class TranslationValidationError(TranslationError):
     """Raised when a model response violates the translation contract."""
 
+    code = "TRANSLATION_VALIDATION_FAILED"
+
 
 class TranslationProvider(Protocol):
     model_name: str

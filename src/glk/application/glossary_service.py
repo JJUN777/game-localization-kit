@@ -161,6 +161,12 @@ class GlossaryBuildError(ValueError):
     """Raised when glossary candidates cannot be built safely."""
 
 
+class GlossaryReviewStaleError(GlossaryBuildError):
+    """Raised when reviewed candidates must not be overwritten automatically."""
+
+    code = "GLOSSARY_REVIEW_STALE"
+
+
 class GlossaryImportError(ValueError):
     """Raised when a reviewed glossary cannot be imported safely."""
 

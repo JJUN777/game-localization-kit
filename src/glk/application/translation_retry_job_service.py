@@ -11,11 +11,21 @@ import threading
 from typing import Any
 from uuid import uuid4
 
+from google.genai import errors as gemini_errors
+
+from glk.application.translation_review_service import (
+    TranslationReviewConflictError,
+)
 from glk.application.translation_retry_service import (
     TranslationRetryResult,
     retry_failed_translations,
 )
+from glk.application.translation_types import TranslationValidationError
 from glk.config import resolve_settings_root
+from glk.infrastructure.gemini_common import (
+    GeminiConfigurationError,
+    gemini_status_code,
+)
 
 
 ACTIVE_RETRY_JOB_STATUSES = frozenset({"queued", "running"})
@@ -80,27 +90,77 @@ def _run_retry(
     )
 
 
+def _exception_chain(error: BaseException) -> tuple[BaseException, ...]:
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        chain.append(current)
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return tuple(chain)
+
+
 def _safe_retry_error(error: BaseException) -> str:
-    detail = " ".join(str(error).split())
-    detail_lower = detail.casefold()
-    if "changed after this page was loaded" in detail_lower:
+    chain = _exception_chain(error)
+    if any(isinstance(item, TranslationReviewConflictError) for item in chain):
         return (
             "재번역 중 검수 내용이 변경되었습니다. "
             "최신 내용을 불러온 뒤 다시 시도하세요."
         )
-    if (
-        "failed validation" in detail_lower
-        or "validation failed" in detail_lower
-    ):
+    if any(isinstance(item, TranslationValidationError) for item in chain):
         return (
             "AI 재번역 결과가 검증 규칙을 통과하지 못했습니다. "
             "검수 내용은 유지되었습니다. 직접 수정하거나 다시 시도하세요."
         )
-    if not detail:
-        return "오류 문장 재번역에 실패했습니다. 다시 시도하세요."
-    if len(detail) > 600:
-        detail = detail[:597] + "..."
-    return detail
+    if any(isinstance(item, GeminiConfigurationError) for item in chain):
+        return (
+            "Gemini API 키가 설정되지 않았습니다. "
+            "대시보드의 AI 설정에서 키를 저장한 뒤 다시 시도하세요."
+        )
+    api_error = next(
+        (item for item in chain if isinstance(item, gemini_errors.APIError)),
+        None,
+    )
+    if api_error is not None:
+        code = gemini_status_code(api_error)
+        if code in {400, 401}:
+            return (
+                "Gemini API 키 또는 요청 설정이 올바르지 않습니다. "
+                "AI 설정을 확인한 뒤 다시 시도하세요."
+            )
+        if code == 403:
+            return (
+                "Gemini API 호출 권한이 없습니다. "
+                "API 키 권한과 Google AI 프로젝트 설정을 확인하세요."
+            )
+        if code == 404:
+            return (
+                "선택한 Gemini 모델을 사용할 수 없습니다. "
+                "AI 설정에서 모델을 확인하세요."
+            )
+        if code == 429:
+            return (
+                "Gemini API 사용량 한도를 초과했습니다. "
+                "사용량 또는 결제 설정을 확인한 뒤 다시 시도하세요."
+            )
+        if code == 408 or (code is not None and 500 <= code <= 599):
+            return (
+                "Gemini API가 일시적으로 응답하지 않습니다. "
+                "잠시 후 다시 시도하세요."
+            )
+    if any(
+        isinstance(item, (ConnectionError, TimeoutError))
+        for item in chain
+    ):
+        return (
+            "Gemini API에 연결하지 못했습니다. "
+            "네트워크 연결을 확인한 뒤 다시 시도하세요."
+        )
+    return (
+        "오류 문장 재번역에 실패했습니다. "
+        "검수 내용은 유지되었습니다. 다시 시도하세요."
+    )
 
 
 class TranslationRetryJobManager:

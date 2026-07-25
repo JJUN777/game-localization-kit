@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import webbrowser
 
 from glk.application.translation_review_service import (
+    TranslationReviewConflictError,
     TranslationReviewError,
     finalize_project_translation_review,
     get_project_translation_review_document,
@@ -207,7 +208,7 @@ class _TranslationReviewHandler(LocalHttpRequestHandler):
             status = (
                 HTTPStatus.CONFLICT
                 if isinstance(error, TranslationRetryJobConflict)
-                or "changed after this page was loaded" in str(error)
+                or isinstance(error, TranslationReviewConflictError)
                 else HTTPStatus.BAD_REQUEST
             )
             self._send_error_json(status, str(error))

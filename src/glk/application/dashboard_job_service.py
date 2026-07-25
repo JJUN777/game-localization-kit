@@ -15,6 +15,7 @@ from glk.application._io import write_bytes_atomic, write_json_atomic
 from glk.application.extraction_service import ExtractionResult, extract_project_pdf
 from glk.application.glossary_service import (
     GlossaryBuildError,
+    GlossaryReviewStaleError,
     build_project_glossary_candidates,
 )
 from glk.application.image_ocr_service import ImageOcrRunResult, ocr_project_images
@@ -434,6 +435,24 @@ def _safe_translation_error(error: BaseException, model: str) -> str:
     return detail
 
 
+def _safe_glossary_error(error: BaseException) -> str:
+    if isinstance(error, GlossaryReviewStaleError):
+        return (
+            "기존 용어 검수 파일이 현재 승인 원문과 일치하지 않습니다. "
+            "기존 편집을 별도로 보존하거나 검수 파일을 정리한 뒤 "
+            "용어 후보를 다시 생성하세요."
+        )
+    if isinstance(error, GlossaryBuildError):
+        return (
+            "승인 원문이 변경되었거나 현재 상태와 맞지 않습니다. "
+            "원문 검수를 다시 승인한 뒤 용어 후보를 생성하세요."
+        )
+    return (
+        "용어 후보 생성에 실패했습니다. "
+        "승인 원문 상태를 확인한 뒤 다시 시도하세요."
+    )
+
+
 def _registered_source_type(project_id: str, workspace_root: str | Path) -> str:
     location = load_workspace_project_id(project_id, workspace_root)
     if is_pdf_source_file(location.manifest.source_file):
@@ -574,7 +593,7 @@ def run_glossary_pipeline(
         workspace_root=workspace_root,
     )
     if result.status == "stale":
-        raise GlossaryBuildError(
+        raise GlossaryReviewStaleError(
             "기존 용어 검수 파일이 승인 원문과 일치하지 않습니다. "
             "사용자 편집을 보호하기 위해 자동으로 덮어쓰지 않았습니다."
         )
@@ -1334,10 +1353,7 @@ class DashboardJobManager:
                 "Glossary job runner returned an invalid terminal status."
             ),
             result_error=result_error,
-            exception_error=lambda _caught, _job: (
-                "용어 후보 생성에 실패했습니다. "
-                "승인 원문 상태를 확인한 뒤 다시 시도하세요."
-            ),
+            exception_error=lambda caught, _job: _safe_glossary_error(caught),
             completion_message=lambda status, _result: (
                 "용어 후보 생성이 완료되었습니다."
                 if status == "succeeded"

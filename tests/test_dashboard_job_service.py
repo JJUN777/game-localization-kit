@@ -13,10 +13,15 @@ from glk.application.dashboard_job_service import (
     DashboardJobConflict,
     DashboardJobError,
     DashboardJobManager,
+    _safe_glossary_error,
     _safe_translation_error,
     run_glossary_pipeline,
     run_registered_source_pipeline,
     run_translation_pipeline,
+)
+from glk.application.glossary_service import (
+    GlossaryBuildError,
+    GlossaryReviewStaleError,
 )
 from glk.application.project_service import create_project
 from glk.application.source_registration_service import register_project_pdf
@@ -584,6 +589,56 @@ class DashboardJobManagerTests(unittest.TestCase):
         )
         self.assertNotIn("/Users/private", job["error"])
         manager.close()
+
+    def test_glossary_stale_error_keeps_safe_recovery_guidance(
+        self,
+    ) -> None:
+        create_approved_project(self.workspace_root, sample_blocks())
+        completed = threading.Event()
+
+        def glossary_runner(
+            project_id: str,
+            workspace_root: str | Path,
+            progress: object,
+        ) -> dict[str, object]:
+            completed.set()
+            raise GlossaryReviewStaleError(
+                "/Users/private/project/glossary_review.tsv is stale"
+            )
+
+        manager = DashboardJobManager(
+            self.workspace_root,
+            glossary_runner=glossary_runner,
+        )
+        manager.start_glossary_job(project_id="glossary_project")
+        self.assertTrue(completed.wait(timeout=2))
+        for _ in range(100):
+            job = manager.list_glossary_jobs()[0]
+            if job["status"] == "failed":
+                break
+            threading.Event().wait(0.01)
+
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("기존 용어 검수 파일", job["error"])
+        self.assertIn("별도로 보존", job["error"])
+        self.assertIn("다시 생성", job["error"])
+        self.assertNotIn("/Users/private", job["error"])
+        manager.close()
+
+    def test_glossary_build_error_hides_source_path(self) -> None:
+        message = _safe_glossary_error(
+            GlossaryBuildError(
+                "Final common source not found: "
+                "/Users/private/project/approved_source.jsonl"
+            )
+        )
+
+        self.assertIn("원문 검수를 다시 승인", message)
+        self.assertNotIn("/Users/private", message)
+        self.assertEqual(
+            GlossaryReviewStaleError.code,
+            "GLOSSARY_REVIEW_STALE",
+        )
 
     def test_runs_and_persists_a_successful_glossary_job(self) -> None:
         create_approved_project(self.workspace_root, sample_blocks())

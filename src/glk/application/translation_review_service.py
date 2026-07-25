@@ -47,6 +47,12 @@ class TranslationReviewError(ValueError):
     """Raised when a translation review cannot be processed safely."""
 
 
+class TranslationReviewConflictError(TranslationReviewError):
+    """Raised when optimistic review locking detects a concurrent change."""
+
+    code = "REVIEW_CONFLICT"
+
+
 class TranslationReviewParseError(TranslationReviewError):
     def __init__(self, code: str, message: str, block_id: str | None = None):
         super().__init__(message)
@@ -775,7 +781,7 @@ def save_project_translation_review(
     """Safely rebuild review TXT from block translations with optimistic locking."""
     context = _load_review_context(project, workspace_root)
     if expected_review_sha256 != context.review_sha256:
-        raise TranslationReviewError(
+        raise TranslationReviewConflictError(
             "The review TXT changed after this page was loaded. Reload before saving."
         )
     if not isinstance(translations, dict):

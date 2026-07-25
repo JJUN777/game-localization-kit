@@ -17,6 +17,7 @@ from glk.application._translation_context import (
 )
 from glk.application.project_service import load_project
 from glk.application.translation_review_service import (
+    TranslationReviewConflictError,
     TranslationReviewError,
     get_project_translation_review_document,
     run_project_translation_qa,
@@ -104,7 +105,7 @@ def retry_failed_translations(
         expected_review_sha256 is not None
         and document["review_sha256"] != expected_review_sha256
     ):
-        raise TranslationReviewError(
+        raise TranslationReviewConflictError(
             "The review TXT changed after this page was loaded. Reload before retrying."
         )
 
@@ -207,7 +208,7 @@ def retry_failed_translations(
                 f"the review was not changed. Cause: {error}"
             ) from error
         if translated is None:
-            raise TranslationError(
+            raise TranslationValidationError(
                 f"Selective retranslation failed validation for {block_id}; "
                 "the review was not changed."
             )
