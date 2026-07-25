@@ -239,6 +239,63 @@ class GlossaryImportResult:
         return value
 
 
+@dataclass(frozen=True, slots=True)
+class _GlossaryImportContext:
+    project_path: Path
+    project_id: str
+    source_language: str
+    target_language: str
+    paths: WorkspacePaths
+    blocks: tuple[SourceBlock, ...]
+    approved_hash: str
+    expected_candidate_ids: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _GlossaryImportPayload:
+    normalized_tsv: bytes
+    review_hash: str
+    entries: tuple[dict[str, Any], ...]
+    warnings: tuple[str, ...]
+
+    @property
+    def active_count(self) -> int:
+        return sum(
+            item["status"] in {"approved", "keep"}
+            for item in self.entries
+        )
+
+    @property
+    def rejected_count(self) -> int:
+        return sum(item["status"] == "rejected" for item in self.entries)
+
+    @property
+    def manual_count(self) -> int:
+        return sum(item["origin"] == "manual" for item in self.entries)
+
+    @property
+    def unverified_count(self) -> int:
+        return sum(not item["source_verified"] for item in self.entries)
+
+
+@dataclass(slots=True)
+class _GlossaryImportTracker:
+    seen_terms: dict[str, int]
+    seen_term_keys: dict[str, int]
+    seen_ids: dict[str, int]
+    seen_automatic_ids: set[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _GlossaryRowFields:
+    status: str
+    source_term: str
+    translation: str
+    category: str
+    note: str
+    candidate_id: str
+
+
 @dataclass(slots=True)
 class _Occurrence:
     surface: str
@@ -694,7 +751,11 @@ def build_project_glossary_candidates(
         return GlossaryBuildResult(
             project_path=str(location.path),
             approved_source_sha256=approved_hash,
-            candidate_count=(int(state["candidate_count"]) if state_matches else len(candidates)),
+            candidate_count=(
+                int(state["candidate_count"])
+                if state_matches and state is not None
+                else len(candidates)
+            ),
             output_file=str(output_path),
             status=status,
             cached=state_matches,
@@ -879,13 +940,10 @@ def _render_imported_review_tsv(rows: list[dict[str, str]]) -> bytes:
     return buffer.getvalue().encode("utf-8-sig")
 
 
-def import_project_glossary(
-    *,
+def _prepare_glossary_import(
     project: str | Path,
-    file: str | Path,
-    workspace_root: str | Path = "workspaces",
-    allow_missing_terms: bool = False,
-) -> GlossaryImportResult:
+    workspace_root: str | Path,
+) -> _GlossaryImportContext:
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
     pipeline = inspect_project(location.path)["pipeline"]
@@ -902,8 +960,7 @@ def import_project_glossary(
 
     blocks, approved_data = _load_approved_blocks(location.path)
     approved_hash = _sha256_bytes(approved_data)
-    build_state_path = paths.glossary_build_state
-    build_state = _read_state(build_state_path)
+    build_state = _read_state(paths.glossary_build_state)
     if (
         not build_state
         or build_state.get("status") != "complete"
@@ -927,12 +984,218 @@ def import_project_glossary(
         raise GlossaryImportError(
             "Glossary build parameters are invalid. Rebuild the review TSV."
         ) from error
-    expected_by_id = {
-        candidate.candidate_id: candidate for candidate in expected_candidates
-    }
+    return _GlossaryImportContext(
+        project_path=location.path,
+        project_id=location.manifest.project_id,
+        source_language=location.manifest.source_language,
+        target_language=location.manifest.target_language,
+        paths=paths,
+        blocks=tuple(blocks),
+        approved_hash=approved_hash,
+        expected_candidate_ids=frozenset(
+            candidate.candidate_id for candidate in expected_candidates
+        ),
+    )
 
-    input_path = _resolve_review_tsv(file, location.path)
-    input_rows = _parse_review_tsv(input_path.read_bytes())
+
+def _normalize_glossary_row_fields(
+    record_number: int,
+    raw_row: dict[str, str],
+) -> _GlossaryRowFields:
+    status = raw_row["status"].strip()
+    source_term = " ".join(raw_row["source_term"].split())
+    translation = raw_row["translation"].strip()
+    category = raw_row["category"].strip()
+    note = raw_row["note"].strip()
+    candidate_id = raw_row["candidate_id"].strip()
+    if status not in _GLOSSARY_STATUSES:
+        raise GlossaryImportError(
+            f"Record {record_number} has invalid status {status!r}."
+        )
+    if status == "review":
+        raise GlossaryImportError(
+            f"Record {record_number} ({source_term or 'empty term'}) is still in review."
+        )
+    if not source_term:
+        raise GlossaryImportError(
+            f"Record {record_number} has an empty source_term."
+        )
+    if (
+        "{" in source_term
+        or "}" in source_term
+        or _TOKEN_PATTERN.search(source_term)
+    ):
+        raise GlossaryImportError(
+            f"Record {record_number} registers a protected token as a glossary term."
+        )
+    if category not in _GLOSSARY_CATEGORIES:
+        raise GlossaryImportError(
+            f"Record {record_number} has invalid category {category!r}."
+        )
+    if status == "approved" and not translation:
+        raise GlossaryImportError(
+            f"Record {record_number} is approved but translation is empty."
+        )
+    if status == "keep":
+        if (
+            translation
+            and _normalized_term(translation) != _normalized_term(source_term)
+        ):
+            raise GlossaryImportError(
+                f"Record {record_number} is keep but translation differs from source_term."
+            )
+        translation = source_term
+    return _GlossaryRowFields(
+        status,
+        source_term,
+        translation,
+        category,
+        note,
+        candidate_id,
+    )
+
+
+def _register_glossary_row_identity(
+    record_number: int,
+    fields: _GlossaryRowFields,
+    *,
+    expected_candidate_ids: frozenset[str],
+    tracker: _GlossaryImportTracker,
+) -> tuple[str, str]:
+    normalized_source = _normalized_term(fields.source_term)
+    if normalized_source in tracker.seen_terms:
+        raise GlossaryImportError(
+            f"Record {record_number} duplicates source_term from record "
+            f"{tracker.seen_terms[normalized_source]}."
+        )
+    tracker.seen_terms[normalized_source] = record_number
+    source_key = _candidate_key(fields.source_term)
+    if source_key and source_key in tracker.seen_term_keys:
+        raise GlossaryImportError(
+            f"Record {record_number} duplicates a case/plural variant from record "
+            f"{tracker.seen_term_keys[source_key]}."
+        )
+    if source_key:
+        tracker.seen_term_keys[source_key] = record_number
+
+    candidate_id = fields.candidate_id
+    if candidate_id in expected_candidate_ids:
+        origin = "auto"
+        tracker.seen_automatic_ids.add(candidate_id)
+    elif candidate_id.startswith("manual-"):
+        expected_manual_id = _manual_candidate_id(fields.source_term)
+        if candidate_id != expected_manual_id:
+            raise GlossaryImportError(
+                f"Record {record_number} has a changed manual candidate_id. "
+                "Clear candidate_id to add the edited term as a new manual row."
+            )
+        origin = "manual"
+    elif candidate_id:
+        raise GlossaryImportError(
+            f"Record {record_number} has unknown or changed candidate_id "
+            f"{candidate_id!r}."
+        )
+    else:
+        origin = "manual"
+        candidate_id = _manual_candidate_id(fields.source_term)
+    if candidate_id in tracker.seen_ids:
+        raise GlossaryImportError(
+            f"Record {record_number} duplicates candidate_id from record "
+            f"{tracker.seen_ids[candidate_id]}."
+        )
+    tracker.seen_ids[candidate_id] = record_number
+    return candidate_id, origin
+
+
+def _resolve_glossary_row_evidence(
+    record_number: int,
+    source_term: str,
+    origin: str,
+    *,
+    occurrence_index: dict[str, list[_Occurrence]],
+    allow_missing_terms: bool,
+) -> tuple[dict[str, Any], bool, str | None]:
+    evidence = _term_evidence(occurrence_index, source_term)
+    if evidence is not None:
+        return evidence, True, None
+    if origin != "manual" or not allow_missing_terms:
+        raise GlossaryImportError(
+            f"Record {record_number} source_term {source_term!r} was not found "
+            "in the approved source."
+        )
+    return (
+        {
+            "variants": [source_term],
+            "occurrences": 0,
+            "block_ids": [],
+            "locations": [],
+            "example": "",
+        },
+        False,
+        f"Manual term {source_term!r} was imported without source evidence.",
+    )
+
+
+def _normalize_glossary_import_row(
+    record_number: int,
+    raw_row: dict[str, str],
+    *,
+    expected_candidate_ids: frozenset[str],
+    occurrence_index: dict[str, list[_Occurrence]],
+    tracker: _GlossaryImportTracker,
+    allow_missing_terms: bool,
+) -> tuple[dict[str, str], dict[str, Any], str | None]:
+    fields = _normalize_glossary_row_fields(record_number, raw_row)
+    candidate_id, origin = _register_glossary_row_identity(
+        record_number,
+        fields,
+        expected_candidate_ids=expected_candidate_ids,
+        tracker=tracker,
+    )
+    evidence, source_verified, warning = _resolve_glossary_row_evidence(
+        record_number,
+        fields.source_term,
+        origin,
+        occurrence_index=occurrence_index,
+        allow_missing_terms=allow_missing_terms,
+    )
+
+    normalized_row = {
+        "status": fields.status,
+        "source_term": fields.source_term,
+        "translation": fields.translation,
+        "category": fields.category,
+        "note": fields.note,
+        "variants": " | ".join(evidence["variants"]),
+        "occurrences": str(evidence["occurrences"]),
+        "locations": ",".join(evidence["locations"]),
+        "example": evidence["example"],
+        "candidate_id": candidate_id,
+    }
+    entry = {
+        "candidate_id": candidate_id,
+        "source_term": fields.source_term,
+        "translation": fields.translation,
+        "category": fields.category,
+        "status": fields.status,
+        "note": fields.note,
+        "variants": evidence["variants"],
+        "occurrences": evidence["occurrences"],
+        "block_ids": evidence["block_ids"],
+        "locations": evidence["locations"],
+        "example": evidence["example"],
+        "origin": origin,
+        "source_verified": source_verified,
+    }
+    return normalized_row, entry, warning
+
+
+def _normalize_glossary_import(
+    context: _GlossaryImportContext,
+    input_rows: list[tuple[int, dict[str, str]]],
+    *,
+    allow_missing_terms: bool,
+) -> _GlossaryImportPayload:
     evidence_max_words = max(
         (
             len(
@@ -945,149 +1208,30 @@ def import_project_glossary(
         default=1,
     )
     occurrence_index = _collect_occurrences(
-        blocks,
+        list(context.blocks),
         max_words=max(evidence_max_words, 1),
     )
-    seen_terms: dict[str, int] = {}
-    seen_term_keys: dict[str, int] = {}
-    seen_ids: dict[str, int] = {}
-    seen_automatic_ids: set[str] = set()
+    tracker = _GlossaryImportTracker({}, {}, {}, set())
     normalized_rows: list[dict[str, str]] = []
     entries: list[dict[str, Any]] = []
     warnings: list[str] = []
-
     for record_number, raw_row in input_rows:
-        status = raw_row["status"].strip()
-        source_term = " ".join(raw_row["source_term"].split())
-        translation = raw_row["translation"].strip()
-        category = raw_row["category"].strip()
-        note = raw_row["note"].strip()
-        candidate_id = raw_row["candidate_id"].strip()
-
-        if status not in _GLOSSARY_STATUSES:
-            raise GlossaryImportError(
-                f"Record {record_number} has invalid status {status!r}."
-            )
-        if status == "review":
-            raise GlossaryImportError(
-                f"Record {record_number} ({source_term or 'empty term'}) is still in review."
-            )
-        if not source_term:
-            raise GlossaryImportError(f"Record {record_number} has an empty source_term.")
-        if "{" in source_term or "}" in source_term or _TOKEN_PATTERN.search(source_term):
-            raise GlossaryImportError(
-                f"Record {record_number} registers a protected token as a glossary term."
-            )
-        if category not in _GLOSSARY_CATEGORIES:
-            raise GlossaryImportError(
-                f"Record {record_number} has invalid category {category!r}."
-            )
-        if status == "approved" and not translation:
-            raise GlossaryImportError(
-                f"Record {record_number} is approved but translation is empty."
-            )
-        if status == "keep":
-            if translation and _normalized_term(translation) != _normalized_term(source_term):
-                raise GlossaryImportError(
-                    f"Record {record_number} is keep but translation differs from source_term."
-                )
-            translation = source_term
-
-        normalized_source = _normalized_term(source_term)
-        if normalized_source in seen_terms:
-            raise GlossaryImportError(
-                f"Record {record_number} duplicates source_term from record "
-                f"{seen_terms[normalized_source]}."
-            )
-        seen_terms[normalized_source] = record_number
-        source_key = _candidate_key(source_term)
-        if source_key and source_key in seen_term_keys:
-            raise GlossaryImportError(
-                f"Record {record_number} duplicates a case/plural variant from record "
-                f"{seen_term_keys[source_key]}."
-            )
-        if source_key:
-            seen_term_keys[source_key] = record_number
-
-        if candidate_id in expected_by_id:
-            origin = "auto"
-            seen_automatic_ids.add(candidate_id)
-        elif candidate_id.startswith("manual-"):
-            expected_manual_id = _manual_candidate_id(source_term)
-            if candidate_id != expected_manual_id:
-                raise GlossaryImportError(
-                    f"Record {record_number} has a changed manual candidate_id. "
-                    "Clear candidate_id to add the edited term as a new manual row."
-                )
-            origin = "manual"
-        elif candidate_id:
-            raise GlossaryImportError(
-                f"Record {record_number} has unknown or changed candidate_id "
-                f"{candidate_id!r}."
-            )
-        else:
-            origin = "manual"
-            candidate_id = _manual_candidate_id(source_term)
-
-        if candidate_id in seen_ids:
-            raise GlossaryImportError(
-                f"Record {record_number} duplicates candidate_id from record "
-                f"{seen_ids[candidate_id]}."
-            )
-        seen_ids[candidate_id] = record_number
-
-        evidence = _term_evidence(occurrence_index, source_term)
-        source_verified = evidence is not None
-        if evidence is None:
-            if origin != "manual" or not allow_missing_terms:
-                raise GlossaryImportError(
-                    f"Record {record_number} source_term {source_term!r} was not found "
-                    "in the approved source."
-                )
-            evidence = {
-                "variants": [source_term],
-                "occurrences": 0,
-                "block_ids": [],
-                "locations": [],
-                "example": "",
-            }
-            warnings.append(
-                f"Manual term {source_term!r} was imported without source evidence."
-            )
-
-        normalized_rows.append(
-            {
-                "status": status,
-                "source_term": source_term,
-                "translation": translation,
-                "category": category,
-                "note": note,
-                "variants": " | ".join(evidence["variants"]),
-                "occurrences": str(evidence["occurrences"]),
-                "locations": ",".join(evidence["locations"]),
-                "example": evidence["example"],
-                "candidate_id": candidate_id,
-            }
+        normalized_row, entry, warning = _normalize_glossary_import_row(
+            record_number,
+            raw_row,
+            expected_candidate_ids=context.expected_candidate_ids,
+            occurrence_index=occurrence_index,
+            tracker=tracker,
+            allow_missing_terms=allow_missing_terms,
         )
-        entries.append(
-            {
-                "candidate_id": candidate_id,
-                "source_term": source_term,
-                "translation": translation,
-                "category": category,
-                "status": status,
-                "note": note,
-                "variants": evidence["variants"],
-                "occurrences": evidence["occurrences"],
-                "block_ids": evidence["block_ids"],
-                "locations": evidence["locations"],
-                "example": evidence["example"],
-                "origin": origin,
-                "source_verified": source_verified,
-            }
-        )
+        normalized_rows.append(normalized_row)
+        entries.append(entry)
+        if warning is not None:
+            warnings.append(warning)
 
-    missing_candidate_ids = sorted(set(expected_by_id) - seen_automatic_ids)
+    missing_candidate_ids = sorted(
+        context.expected_candidate_ids - tracker.seen_automatic_ids
+    )
     if missing_candidate_ids:
         preview = ", ".join(missing_candidate_ids[:5])
         suffix = "..." if len(missing_candidate_ids) > 5 else ""
@@ -1097,91 +1241,122 @@ def import_project_glossary(
         )
 
     normalized_tsv = _render_imported_review_tsv(normalized_rows)
-    review_hash = _sha256_bytes(normalized_tsv)
-    canonical_review_path = paths.glossary_review
-    output_path = paths.termbase
-    state_path = paths.glossary_import_state
-    import_state = _read_state(state_path)
-    if (
+    return _GlossaryImportPayload(
+        normalized_tsv=normalized_tsv,
+        review_hash=_sha256_bytes(normalized_tsv),
+        entries=tuple(entries),
+        warnings=tuple(warnings),
+    )
+
+
+def _glossary_import_is_cached(
+    context: _GlossaryImportContext,
+    payload: _GlossaryImportPayload,
+) -> bool:
+    paths = context.paths
+    import_state = _read_state(paths.glossary_import_state)
+    return bool(
         import_state
         and import_state.get("status") == "complete"
         and import_state.get("version") == GLOSSARY_IMPORT_VERSION
-        and import_state.get("approved_source_sha256") == approved_hash
-        and import_state.get("review_tsv_sha256") == review_hash
-        and canonical_review_path.is_file()
-        and _sha256_bytes(canonical_review_path.read_bytes()) == review_hash
-        and output_path.is_file()
+        and import_state.get("approved_source_sha256")
+        == context.approved_hash
+        and import_state.get("review_tsv_sha256") == payload.review_hash
+        and paths.glossary_review.is_file()
+        and _sha256_bytes(paths.glossary_review.read_bytes())
+        == payload.review_hash
+        and paths.termbase.is_file()
         and import_state.get("termbase_sha256")
-        == _sha256_bytes(output_path.read_bytes())
-    ):
-        return GlossaryImportResult(
-            project_path=str(location.path),
-            approved_source_sha256=approved_hash,
-            review_tsv_sha256=review_hash,
-            entry_count=len(entries),
-            active_count=sum(item["status"] in {"approved", "keep"} for item in entries),
-            rejected_count=sum(item["status"] == "rejected" for item in entries),
-            manual_count=sum(item["origin"] == "manual" for item in entries),
-            unverified_count=sum(not item["source_verified"] for item in entries),
-            review_file=str(canonical_review_path),
-            output_file=str(output_path),
-            cached=True,
-            warnings=tuple(warnings),
-        )
+        == _sha256_bytes(paths.termbase.read_bytes())
+    )
 
+
+def _glossary_import_result(
+    context: _GlossaryImportContext,
+    payload: _GlossaryImportPayload,
+    *,
+    cached: bool = False,
+) -> GlossaryImportResult:
+    return GlossaryImportResult(
+        project_path=str(context.project_path),
+        approved_source_sha256=context.approved_hash,
+        review_tsv_sha256=payload.review_hash,
+        entry_count=len(payload.entries),
+        active_count=payload.active_count,
+        rejected_count=payload.rejected_count,
+        manual_count=payload.manual_count,
+        unverified_count=payload.unverified_count,
+        review_file=str(context.paths.glossary_review),
+        output_file=str(context.paths.termbase),
+        cached=cached,
+        warnings=payload.warnings,
+    )
+
+
+def _write_glossary_import(
+    context: _GlossaryImportContext,
+    payload: _GlossaryImportPayload,
+) -> None:
+    paths = context.paths
     generated_at = _utc_now()
     termbase = {
         "schema_version": 1,
         "version": GLOSSARY_IMPORT_VERSION,
-        "project_id": location.manifest.project_id,
-        "source_language": location.manifest.source_language,
-        "target_language": location.manifest.target_language,
-        "approved_source_sha256": approved_hash,
-        "review_tsv_sha256": review_hash,
+        "project_id": context.project_id,
+        "source_language": context.source_language,
+        "target_language": context.target_language,
+        "approved_source_sha256": context.approved_hash,
+        "review_tsv_sha256": payload.review_hash,
         "generated_at": generated_at,
-        "entries": entries,
+        "entries": payload.entries,
     }
     termbase_data = (
         json.dumps(termbase, ensure_ascii=False, indent=2) + "\n"
     ).encode("utf-8")
     termbase_hash = _sha256_bytes(termbase_data)
-    active_count = sum(item["status"] in {"approved", "keep"} for item in entries)
-    rejected_count = sum(item["status"] == "rejected" for item in entries)
-    manual_count = sum(item["origin"] == "manual" for item in entries)
-    unverified_count = sum(not item["source_verified"] for item in entries)
-
-    _write_bytes_atomic(canonical_review_path, normalized_tsv)
-    _write_bytes_atomic(output_path, termbase_data)
+    _write_bytes_atomic(paths.glossary_review, payload.normalized_tsv)
+    _write_bytes_atomic(paths.termbase, termbase_data)
     _write_json_atomic(
-        state_path,
+        paths.glossary_import_state,
         {
             "schema_version": 1,
             "status": "complete",
             "version": GLOSSARY_IMPORT_VERSION,
             "input_file": paths.relative(paths.glossary_review),
-            "approved_source_sha256": approved_hash,
-            "review_tsv_sha256": review_hash,
+            "approved_source_sha256": context.approved_hash,
+            "review_tsv_sha256": payload.review_hash,
             "output_file": paths.relative(paths.termbase),
             "termbase_sha256": termbase_hash,
-            "entry_count": len(entries),
-            "active_count": active_count,
-            "rejected_count": rejected_count,
-            "manual_count": manual_count,
-            "unverified_count": unverified_count,
-            "candidate_ids": [item["candidate_id"] for item in entries],
+            "entry_count": len(payload.entries),
+            "active_count": payload.active_count,
+            "rejected_count": payload.rejected_count,
+            "manual_count": payload.manual_count,
+            "unverified_count": payload.unverified_count,
+            "candidate_ids": [
+                item["candidate_id"] for item in payload.entries
+            ],
             "updated_at": generated_at,
         },
     )
-    return GlossaryImportResult(
-        project_path=str(location.path),
-        approved_source_sha256=approved_hash,
-        review_tsv_sha256=review_hash,
-        entry_count=len(entries),
-        active_count=active_count,
-        rejected_count=rejected_count,
-        manual_count=manual_count,
-        unverified_count=unverified_count,
-        review_file=str(canonical_review_path),
-        output_file=str(output_path),
-        warnings=tuple(warnings),
+
+
+def import_project_glossary(
+    *,
+    project: str | Path,
+    file: str | Path,
+    workspace_root: str | Path = "workspaces",
+    allow_missing_terms: bool = False,
+) -> GlossaryImportResult:
+    context = _prepare_glossary_import(project, workspace_root)
+    input_path = _resolve_review_tsv(file, context.project_path)
+    input_rows = _parse_review_tsv(input_path.read_bytes())
+    payload = _normalize_glossary_import(
+        context,
+        input_rows,
+        allow_missing_terms=allow_missing_terms,
     )
+
+    if _glossary_import_is_cached(context, payload):
+        return _glossary_import_result(context, payload, cached=True)
+    _write_glossary_import(context, payload)
+    return _glossary_import_result(context, payload)
