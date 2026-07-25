@@ -13,6 +13,7 @@ from glk.application.dashboard_job_service import (
     DashboardJobConflict,
     DashboardJobError,
     DashboardJobManager,
+    _safe_translation_error,
     run_glossary_pipeline,
     run_registered_source_pipeline,
     run_translation_pipeline,
@@ -47,6 +48,17 @@ class DashboardJobManagerTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
+
+    def test_translation_validation_error_keeps_actionable_cause(self) -> None:
+        error = ValueError(
+            "Translation failed for chunk-test. Cause: "
+            "block-1: 원문 유지 용어 'player'가 번역문에서 변경되었습니다."
+        )
+
+        message = _safe_translation_error(error, "gemini-test")
+
+        self.assertIn("검증 규칙을 통과하지 못했습니다", message)
+        self.assertIn("원문 유지 용어 'player'", message)
 
     def test_runs_and_persists_a_successful_source_job(self) -> None:
         completed = threading.Event()

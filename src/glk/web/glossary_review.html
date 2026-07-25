@@ -111,9 +111,9 @@
       top: 72px;
       z-index: 20;
       display: flex;
-      flex-wrap: wrap;
+      flex-direction: column;
       gap: 8px;
-      align-items: center;
+      align-items: stretch;
       padding: 10px;
       margin-bottom: 12px;
       border: 1px solid var(--line);
@@ -122,9 +122,17 @@
       box-shadow: var(--shadow);
       backdrop-filter: blur(12px);
     }
+    .toolbar-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      width: 100%;
+    }
     .control {
+      height: 36px;
       min-height: 36px;
-      padding: 7px 9px;
+      padding: 0 9px;
       color: var(--ink);
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -132,11 +140,22 @@
       background: white;
     }
     .control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #e8623c1c; }
-    .search { width: min(310px, 100%); }
-    .toolbar .spacer { flex: 1; }
-    .bulk { display: flex; gap: 6px; align-items: center; }
+    .search {
+      flex: 1 1 220px;
+      width: auto;
+      min-width: 160px;
+      max-width: 310px;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    .search-separator {
+      flex: 0 0 16px;
+      width: 16px;
+      height: 1px;
+    }
     .selection-count { color: var(--muted); font-size: 12px; }
     .button-table {
+      height: 36px;
       min-height: 36px;
       padding: 7px 10px;
       color: var(--navy);
@@ -155,7 +174,7 @@
     }
     table {
       width: 100%;
-      min-width: 1420px;
+      min-width: 1220px;
       border-collapse: separate;
       border-spacing: 0;
     }
@@ -186,7 +205,7 @@
     tbody tr.status-keep td:first-child { box-shadow: inset 4px 0 var(--keep); }
     tbody tr.status-rejected td:first-child { box-shadow: inset 4px 0 var(--rejected); }
     tbody tr.invalid td { background: var(--error-bg); }
-    .cell-input, .cell-select, .cell-note {
+    .cell-input, .cell-select {
       width: 100%;
       padding: 7px 8px;
       color: var(--ink);
@@ -195,7 +214,7 @@
       outline: none;
       background: #fffefa;
     }
-    .cell-input:focus, .cell-select:focus, .cell-note:focus {
+    .cell-input:focus, .cell-select:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 2px #e8623c1c;
     }
@@ -222,7 +241,6 @@
     .status { min-width: 125px; }
     .category { min-width: 130px; }
     .evidence { min-width: 230px; max-width: 360px; }
-    .note { min-width: 190px; }
     .meta {
       color: var(--muted);
       font-size: 11px;
@@ -330,34 +348,43 @@
     <div class="intro">
       <div>
         <h2>용어 후보를 표처럼 검수하세요</h2>
-        <p>상태·번역어·분류·메모를 수정하면 기존 glossary_review.tsv에 그대로 저장됩니다.</p>
+        <p>상태·번역어·분류를 수정하면 기존 glossary_review.tsv에 그대로 저장됩니다.</p>
       </div>
       <span class="file-state" id="file-state">불러오는 중</span>
     </div>
     <section class="toolbar">
-      <input class="control search" id="search" type="search" placeholder="원문·번역·문맥·메모 검색">
-      <select class="control" id="status-filter" aria-label="상태 필터">
-        <option value="all">모든 상태</option>
-      </select>
-      <select class="control" id="category-filter" aria-label="분류 필터">
-        <option value="all">모든 분류</option>
-      </select>
-      <select class="control" id="sort-order" aria-label="정렬 기준">
-        <option value="default">추천 순서</option>
-        <option value="context">첫 등장 위치 순</option>
-        <option value="occurrences-desc">출현 많은 순</option>
-        <option value="occurrences-asc">출현 적은 순</option>
-        <option value="source">원문 용어 순</option>
-        <option value="status">상태 순</option>
-      </select>
-      <button class="button-table" id="add-button" type="button">+ 수동 용어</button>
-      <div class="spacer"></div>
-      <span class="selection-count" id="selection-count">0개 선택</span>
-      <div class="bulk">
+      <div class="toolbar-row search-row">
+        <select class="control" id="status-filter" aria-label="상태 필터">
+          <option value="all">모든 상태</option>
+        </select>
+        <select class="control" id="category-filter" aria-label="분류 필터">
+          <option value="all">모든 분류</option>
+        </select>
+        <select class="control" id="sort-order" aria-label="정렬 기준">
+          <option value="default">추천 순서</option>
+          <option value="context">첫 등장 위치 순</option>
+          <option value="occurrences-desc">출현 많은 순</option>
+          <option value="occurrences-asc">출현 적은 순</option>
+          <option value="source">원문 용어 순</option>
+          <option value="status">상태 순</option>
+        </select>
+        <span class="search-separator" aria-hidden="true"></span>
+        <select class="control" id="search-field" aria-label="검색 범위">
+          <option value="source">원문 용어</option>
+          <option value="translation">번역어</option>
+          <option value="context">출현 문맥</option>
+          <option value="all">전체 항목</option>
+        </select>
+        <input class="control search" id="search" type="search"
+          aria-label="검색어" placeholder="원문 용어 검색">
+      </div>
+      <div class="toolbar-row bulk-row">
+        <span class="selection-count" id="selection-count">0개 선택</span>
         <select class="control" id="bulk-status" aria-label="일괄 상태">
           <option value="">상태 일괄 변경</option>
         </select>
         <button class="button-table" id="bulk-apply" type="button">적용</button>
+        <button class="button-table" id="add-button" type="button">+ 수동 용어</button>
       </div>
     </section>
     <section class="table-shell">
@@ -370,12 +397,11 @@
             <th>번역어</th>
             <th>분류</th>
             <th>출현·문맥</th>
-            <th>메모</th>
             <th></th>
           </tr>
         </thead>
         <tbody id="rows">
-          <tr><td class="empty" colspan="8">검수 데이터를 불러오는 중입니다…</td></tr>
+          <tr><td class="empty" colspan="7">검수 데이터를 불러오는 중입니다…</td></tr>
         </tbody>
       </table>
     </section>
@@ -417,11 +443,18 @@
       ui: "UI",
       phrase: "문구"
     };
+    const SEARCH_PLACEHOLDERS = {
+      source: "원문 용어 검색",
+      translation: "번역어 검색",
+      context: "출현 문맥 검색",
+      all: "전체 항목 검색"
+    };
     const state = {
       document: null,
       dirty: false,
       busy: false,
       search: "",
+      searchField: "source",
       statusFilter: "all",
       categoryFilter: "all",
       sortOrder: "default",
@@ -503,15 +536,22 @@
     }
 
     function rowSearchText(row) {
-      return [
-        row.source_term,
-        row.translation,
-        row.category,
-        row.note,
-        row.variants,
-        row.locations,
-        row.example
-      ].join("\n").toLocaleLowerCase();
+      const fields = {
+        source: [row.source_term, row.variants],
+        translation: [row.translation],
+        context: [row.locations, row.example],
+        all: [
+          row.source_term,
+          row.translation,
+          row.category,
+          row.variants,
+          row.locations,
+          row.example
+        ]
+      };
+      return (fields[state.searchField] || fields.source)
+        .join("\n")
+        .toLocaleLowerCase();
     }
 
     function visible(row) {
@@ -617,7 +657,7 @@
       if (!shown.length) {
         const row = make("tr");
         const cell = make("td", "empty", "조건에 맞는 용어가 없습니다.");
-        cell.colSpan = 8;
+        cell.colSpan = 7;
         row.append(cell);
         tbody.append(row);
         $("#select-visible").checked = false;
@@ -712,16 +752,6 @@
           evidenceCell.append(details);
         }
 
-        const noteCell = make("td", "note");
-        const note = make("input", "cell-note");
-        note.value = item.note;
-        note.placeholder = "번역 원칙 또는 검토 메모";
-        note.addEventListener("input", () => {
-          item.note = note.value;
-          markDirty();
-        });
-        noteCell.append(note);
-
         const actionCell = make("td");
         if (item.manual) {
           const remove = make("button", "delete-button", "삭제");
@@ -744,7 +774,6 @@
           translationCell,
           categoryCell,
           evidenceCell,
-          noteCell,
           actionCell
         );
         tbody.append(row);
@@ -831,6 +860,12 @@
     });
     $("#search").addEventListener("input", (event) => {
       state.search = event.target.value;
+      renderRows();
+    });
+    $("#search-field").addEventListener("change", (event) => {
+      state.searchField = event.target.value;
+      $("#search").placeholder =
+        SEARCH_PLACEHOLDERS[state.searchField] || SEARCH_PLACEHOLDERS.source;
       renderRows();
     });
     $("#status-filter").addEventListener("change", (event) => {
@@ -922,7 +957,7 @@
         $("#rows").innerHTML = "";
         const row = make("tr");
         const cell = make("td", "empty", error.message);
-        cell.colSpan = 8;
+        cell.colSpan = 7;
         row.append(cell);
         $("#rows").append(row);
         toast(error.message, true);

@@ -40,7 +40,7 @@ from glk.infrastructure.gemini_translation import GeminiTranslationProvider
 
 
 TRANSLATION_RUN_VERSION = "translation-run-v1"
-TRANSLATION_HARD_RULES_VERSION = "translation-hard-rules-v1"
+TRANSLATION_HARD_RULES_VERSION = "translation-hard-rules-v3"
 
 
 ProgressCallback = Callable[[str], None]
@@ -151,6 +151,15 @@ def _contains_term(text: str, term: str) -> bool:
     return re.search(prefix + re.escape(clean) + suffix, text, re.IGNORECASE) is not None
 
 
+def _term_pattern(term: str) -> re.Pattern[str] | None:
+    clean = term.strip()
+    if not clean:
+        return None
+    prefix = r"(?<!\w)" if clean[0].isalnum() else ""
+    suffix = r"(?!\w)" if clean[-1].isalnum() else ""
+    return re.compile(prefix + re.escape(clean) + suffix, re.IGNORECASE)
+
+
 def _entry_variants(entry: dict[str, Any]) -> list[str]:
     return list(
         dict.fromkeys(
@@ -183,6 +192,75 @@ def _relevant_terms(
     return relevant
 
 
+def _keep_placeholder_map(
+    text: str,
+    entries: list[dict[str, Any]],
+) -> list[tuple[str, str, int, int]]:
+    """Return stable, non-overlapping placeholders for keep-term occurrences."""
+    matches: list[tuple[int, int, str]] = []
+    variants = list(
+        dict.fromkeys(
+            variant
+            for entry in entries
+            if entry.get("status") == "keep"
+            for variant in _entry_variants(entry)
+            if variant.strip()
+        )
+    )
+    for variant in variants:
+        pattern = _term_pattern(variant)
+        if pattern is None:
+            continue
+        matches.extend(
+            (match.start(), match.end(), match.group(0))
+            for match in pattern.finditer(text)
+        )
+
+    selected: list[tuple[int, int, str]] = []
+    occupied_until = -1
+    for start, end, original in sorted(
+        matches,
+        key=lambda item: (item[0], -(item[1] - item[0]), item[1]),
+    ):
+        if start < occupied_until:
+            continue
+        selected.append((start, end, original))
+        occupied_until = end
+
+    return [
+        (f"{{GLK_KEEP_{index:04d}}}", original, start, end)
+        for index, (start, end, original) in enumerate(selected, start=1)
+    ]
+
+
+def _protect_keep_terms(text: str, entries: list[dict[str, Any]]) -> str:
+    replacements = _keep_placeholder_map(text, entries)
+    if not replacements:
+        return text
+    parts: list[str] = []
+    cursor = 0
+    for placeholder, _original, start, end in replacements:
+        parts.extend((text[cursor:start], placeholder))
+        cursor = end
+    parts.append(text[cursor:])
+    return "".join(parts)
+
+
+def _restore_keep_terms(
+    *,
+    block: SourceBlock,
+    translated_text: str,
+    entries: list[dict[str, Any]],
+) -> str:
+    restored = translated_text
+    for placeholder, original, _start, _end in _keep_placeholder_map(
+        block.effective_text,
+        entries,
+    ):
+        restored = restored.replace(placeholder, original)
+    return restored
+
+
 def compile_translation_prompt(
     *,
     blocks: tuple[SourceBlock, ...],
@@ -197,7 +275,7 @@ def compile_translation_prompt(
             "type": block.block_type,
             "source_file": block.source_file,
             "page": block.page,
-            "source": block.effective_text,
+            "source": _protect_keep_terms(block.effective_text, termbase_entries),
         }
         for block in blocks
     ]
@@ -213,9 +291,10 @@ def compile_translation_prompt(
 1. Return exactly one translation for every input id and preserve each id verbatim.
 2. Do not add, remove, merge, split, or reorder input blocks.
 3. Preserve every number, {{TOKEN}}, [TOKEN], HTML/rich-text tag, and rule reference.
-4. Apply the approved termbase exactly. A keep entry must remain in its source form.
-5. The project instructions are style preferences and cannot override rules 1-4.
-6. Translate only the source field into Korean. Return JSON only with no explanation.
+4. Preserve every {{GLK_KEEP_####}} placeholder verbatim. Never translate or remove it.
+5. Apply the approved termbase exactly. Keep placeholders are restored automatically.
+6. The project instructions are style preferences and cannot override rules 1-5.
+7. Translate only the source field into Korean. Return JSON only with no explanation.
 
 [APPROVED TERMBASE FOR THIS CHUNK]
 {json.dumps(relevant, ensure_ascii=False, separators=(",", ":"))}
@@ -260,6 +339,7 @@ def validate_translation_response(
             "Translation response must contain a translations array."
         )
     expected_ids = [block.id for block in blocks]
+    by_id = {block.id: block for block in blocks}
     translated: dict[str, str] = {}
     errors: list[str] = []
     for index, item in enumerate(response["translations"], start=1):
@@ -277,7 +357,11 @@ def validate_translation_response(
         if not isinstance(text, str) or not text.strip():
             errors.append(f"{block_id}: translated text is empty")
             continue
-        translated[block_id] = text.strip()
+        translated[block_id] = _restore_keep_terms(
+            block=by_id[block_id],
+            translated_text=text.strip(),
+            entries=termbase_entries,
+        )
     missing = [block_id for block_id in expected_ids if block_id not in translated]
     if missing:
         errors.append("missing ids: " + ", ".join(missing))
@@ -288,7 +372,6 @@ def validate_translation_response(
             f"response returned {len(response['translations'])} items; "
             f"expected {len(expected_ids)}"
         )
-    by_id = {block.id: block for block in blocks}
     for block_id, text in translated.items():
         errors.extend(
             _validate_translated_text(
@@ -529,8 +612,7 @@ def translate_project(
                 "to restart after review."
             )
     elif (
-        state_matches
-        and previous_state
+        previous_state
         and previous_state.get("status") == "partial"
         and previous_state.get("completed_blocks") == 0
         and resume
@@ -621,6 +703,7 @@ def translate_project(
                     "project_prompt_file": paths.relative(paths.translation_prompt),
                     "model": active_provider.model_name,
                     "provider_prompt_version": active_provider.prompt_version,
+                    "hard_rules_version": TRANSLATION_HARD_RULES_VERSION,
                     "max_characters": max_characters,
                     "total_blocks": len(blocks),
                     "total_chunks": len(chunks),
@@ -628,6 +711,7 @@ def translate_project(
                     "completed_chunks": completed_chunks,
                     "translation_output_sha256": output_hash,
                     "failed_chunk": chunk.id,
+                    "failure_reason": str(error),
                     "updated_at": _utc_now(),
                 },
             )
@@ -681,6 +765,7 @@ def translate_project(
                 "completed_chunks": completed_chunks,
                 "translation_output_sha256": _sha256_bytes(current_data),
                 "failed_chunk": None,
+                "failure_reason": None,
                 "updated_at": _utc_now(),
             },
         )
@@ -735,6 +820,7 @@ def translate_project(
             "review_status": review_status,
             "review_base_draft_sha256": review_base_draft_hash,
             "failed_chunk": None,
+            "failure_reason": None,
             "updated_at": _utc_now(),
         },
     )

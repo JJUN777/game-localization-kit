@@ -262,8 +262,18 @@ def _acquisition_failure_message(
 
 
 def _safe_translation_error(error: BaseException, model: str) -> str:
-    detail = _safe_provider_error([str(error)], model)
+    message = str(error)
+    detail = _safe_provider_error([message], model)
     if detail.startswith("원본을 처리하지 못했습니다."):
+        _prefix, separator, cause = message.rpartition("Cause:")
+        if separator and cause.strip():
+            compact_cause = " ".join(cause.split())
+            if len(compact_cause) > 600:
+                compact_cause = compact_cause[:597] + "..."
+            return (
+                "Gemini 번역 결과가 검증 규칙을 통과하지 못했습니다. "
+                f"검증 사유: {compact_cause}"
+            )
         return (
             "초벌 번역에 실패했습니다. 완료된 청크는 보존되었습니다. "
             "다시 시도하면 이어서 진행합니다."

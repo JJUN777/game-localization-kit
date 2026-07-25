@@ -12,6 +12,29 @@ _CURLY_TOKEN_PATTERN = re.compile(r"\{[A-Za-z][A-Za-z0-9_]*\}")
 _SQUARE_TOKEN_PATTERN = re.compile(r"\[[^\]\n]+\]")
 _HTML_TAG_PATTERN = re.compile(r"</?[^>\n]+>")
 _NUMBER_PATTERN = re.compile(r"\d+(?:[.,]\d+)*%?")
+_ENGLISH_NUMBER_WORDS = {
+    "zero": "0",
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "ten": "10",
+    "eleven": "11",
+    "twelve": "12",
+    "thirteen": "13",
+    "fourteen": "14",
+    "fifteen": "15",
+    "sixteen": "16",
+    "seventeen": "17",
+    "eighteen": "18",
+    "nineteen": "19",
+    "twenty": "20",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +80,19 @@ def _format_counter(values: Counter[str]) -> str:
     )
 
 
+def _source_number_word_values(text: str) -> Counter[str]:
+    values: Counter[str] = Counter()
+    for word, number in _ENGLISH_NUMBER_WORDS.items():
+        values[number] += len(
+            re.findall(
+                rf"(?<!\w){re.escape(word)}(?!\w)",
+                text,
+                re.IGNORECASE,
+            )
+        )
+    return values
+
+
 def check_translation_contract(
     *,
     source_text: str,
@@ -74,14 +110,24 @@ def check_translation_contract(
     source_items = _preserved_items(source_text)
     target_items = _preserved_items(translated_text)
     for code, source_values in source_items.items():
-        if source_values != target_items[code]:
+        target_values = target_items[code]
+        if code == "number_changed":
+            missing_source_values = source_values - target_values
+            unexpected_target_values = target_values - source_values
+            # Korean counters naturally render an implicit singular noun as "1개".
+            unexpected_target_values.pop("1", None)
+            unexpected_target_values -= _source_number_word_values(source_text)
+            changed = bool(missing_source_values or unexpected_target_values)
+        else:
+            changed = source_values != target_values
+        if changed:
             issues.append(
                 TranslationContractIssue(
                     code=code,
                     message=(
                         f"{labels[code]}이 원문과 다릅니다. "
                         f"원문: {_format_counter(source_values)} / "
-                        f"번역: {_format_counter(target_items[code])}"
+                        f"번역: {_format_counter(target_values)}"
                     ),
                 )
             )

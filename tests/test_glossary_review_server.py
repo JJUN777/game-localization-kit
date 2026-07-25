@@ -101,6 +101,38 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertIsInstance(html, str)
         self.assertIn("용어 후보를 표처럼 검수하세요", html)
         self.assertIn("검증 및 termbase 생성", html)
+        self.assertIn('id="search-field"', html)
+        self.assertIn('<option value="source">원문 용어</option>', html)
+        self.assertIn('<option value="translation">번역어</option>', html)
+        self.assertIn('<option value="context">출현 문맥</option>', html)
+        self.assertIn('<option value="all">전체 항목</option>', html)
+        self.assertIn('searchField: "source"', html)
+        self.assertNotIn('<option value="note">', html)
+        self.assertNotIn("<th>메모</th>", html)
+        self.assertLess(
+            html.index('class="toolbar-row search-row"'),
+            html.index('class="toolbar-row bulk-row"'),
+        )
+        self.assertLess(
+            html.index('id="status-filter"'),
+            html.index('id="category-filter"'),
+        )
+        self.assertLess(
+            html.index('id="category-filter"'),
+            html.index('id="sort-order"'),
+        )
+        self.assertLess(
+            html.index('id="sort-order"'),
+            html.index('id="search-field"'),
+        )
+        self.assertLess(
+            html.index('id="search-field"'),
+            html.index('id="search"'),
+        )
+        self.assertLess(
+            html.index('id="bulk-apply"'),
+            html.index('id="add-button"'),
+        )
         self.assertIn('id="sort-order"', html)
         self.assertIn("첫 등장 위치 순", html)
         self.assertIn("출현 많은 순", html)

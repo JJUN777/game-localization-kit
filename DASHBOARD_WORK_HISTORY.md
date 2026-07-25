@@ -633,6 +633,28 @@ git diff --check
 - `rejected cards`는 자연스럽게 번역하면서 `keep player`는 계속 원문을 요구하는 회귀 테스트를 추가했습니다.
 - 전체 178 tests, 설정된 16개 Python 파일 mypy, Python bytecode 컴파일과 의존성 검사를 통과했습니다.
 
+### 2026-07-25 — 용어 검수 검색 범위 분리
+
+- 용어 검색의 기본 범위를 원문 용어와 표기 변형으로 제한하고 `번역어`, `출현 문맥`, `전체 항목` 범위를 따로 선택할 수 있게 했습니다.
+- 검색 범위는 기존 상태·분류 필터 및 정렬과 함께 적용되며 선택한 범위에 맞춰 검색창 안내 문구도 바뀝니다.
+- 툴바 첫 줄에는 상태·분류·정렬을 먼저 놓고 간격 뒤에 검색 범위·검색창을 배치했습니다. 둘째 줄에는 선택 개수·상태 일괄 변경·적용·수동 용어 추가를 나란히 배치했습니다.
+- 메모 검색과 표의 메모 편집 열은 제거했지만 기존 TSV의 note 값은 화면 저장 시에도 그대로 보존합니다.
+- Orca 내장 브라우저에서 `five cards`가 기본 원문 검색에서는 나오지 않고 출현 문맥 검색에서는 `DRAW`, `cards`, `player` 3개만 표시되는 것을 확인했으며 사용자 TSV는 변경하지 않았습니다.
+- Safari에서도 select와 검색창 높이가 맞도록 36px 높이와 WebKit 검색창 스타일 초기화를 적용했습니다.
+- Orca 화면 좌표에서 첫 줄 제어가 모두 36px 높이로 정렬되고 정렬과 검색 사이에 32px 간격이 생기며, 수동 용어 버튼이 적용 버튼 바로 옆에 배치된 것을 확인했습니다. 브라우저 콘솔 오류는 없었습니다.
+- 전체 178 tests, inline JavaScript 문법, 설정된 16개 Python 파일 mypy와 의존성 검사를 통과했습니다.
+
+### 2026-07-25 — 초벌 번역 validation 반복 실패 수정
+
+- `keep` 용어를 Gemini 프롬프트의 원문에서 `{GLK_KEEP_####}` 고정 토큰으로 보호하고 응답 검증 전에 실제 원문 표기로 복원하도록 변경했습니다.
+- 프롬프트 지시만으로 `player`, `players`, `deck` 같은 원문 유지 용어를 보존하던 불안정한 경로를 결정적 치환·복원 방식으로 보강했습니다.
+- 원문에 있던 숫자가 누락되거나 변경되는 경우는 계속 오류로 처리하되, `five cards → 카드 5장`이나 단수 명사의 한국어 수량 표현처럼 번역문에 자연스럽게 추가되는 숫자는 허용합니다.
+- 완료 블록이 0개인 partial 작업은 번역 보호 규칙 버전이 변경되어도 새 규칙으로 안전하게 다시 시작할 수 있게 했습니다.
+- 번역 검증 실패 사유를 translation 상태와 대시보드 오류에 보존해 실패한 블록과 규칙을 화면에서 확인할 수 있게 했습니다.
+- Orca에서 `gemini-3.1-flash-lite`로 기존 실패 프로젝트를 실제 재시도해 21개 블록·1개 청크 완료와 `draft.txt`·`review.txt` 생성을 확인했습니다.
+- 생성 결과에서 `IMPORTANT`, `player`/`players`, `deck`이 원문 표기로 유지되고 숫자 표현이 정상 통과한 것을 확인했습니다.
+- 전체 181 tests, 설정된 16개 Python 파일 mypy, Python bytecode 컴파일과 `git diff --check`를 통과했습니다.
+
 ---
 
 ## 다른 컴퓨터에서 작업 재개
@@ -689,6 +711,7 @@ glk ui --no-open
   - 실제 호출 없이 수행하는 로컬 형식 검사와 구분
 - [x] 승인 원문 기반 용어 후보 생성 UI 구현
 - [x] 용어 검수 표 문맥·출현 횟수 정렬 구현
+- [x] 용어 검수 검색 범위를 원문·번역어·문맥·전체 항목으로 분리하고 메모 UI 제거
 - [x] 용어 검수 완료 모달과 대시보드 복귀 구현
 - [x] 승인 원문·termbase 기반 초벌 번역 background job UI 구현
 - [x] 번역 최종 승인 완료 모달과 대시보드 복귀 구현
@@ -702,3 +725,569 @@ glk ui --no-open
 - [ ] 프로젝트 내보내기·가져오기 범위 결정
 
 다음 작업자는 이 체크리스트와 `git status`, 최신 커밋을 함께 확인하고 이어서 작업합니다. 구현 범위나 API가 바뀌면 코드와 같은 커밋에서 이 문서의 설계·이력·체크리스트도 갱신합니다.
+---
+
+## 부록: 전체 코드베이스 정적 분석 (2026-07-25)
+
+이 부록은 `feature/local-dashboard` 브랜치 시점의 전체 코드베이스를 정적 분석한 결과입니다. 브랜치를 `main`에 머지할 때 이 문서를 삭제하는 대신, 아래 항목은 별도 이슈나 `docs/`로 옮겨 보존합니다.
+
+### 검증 방법과 한계
+
+작업 머신에 Python 3.10+가 없어(시스템 Python 3.9.6, `dataclass(slots=True)` 미지원) **코드를 실행하지 못했습니다.** 아래는 전부 소스를 직접 읽은 정적 분석이며 각 항목에 파일:줄을 명시했습니다. 테스트 통과 여부, 실제 런타임 동작, 성능 수치는 확인하지 못했습니다. "O(n^2)" 같은 표현은 코드 구조상의 복잡도이며 실측값이 아닙니다.
+
+분석 대상: `src` 15,478줄 / HTML 5,730줄 / `tests` 8,021줄(테스트 함수 178개).
+
+---
+
+### 1. Critical - 데이터 손실 가능
+
+#### 1.1 원본 교체 실패 시 사용자 원본이 삭제됨
+
+`src/glk/application/source_registration_service.py:216-232`
+
+```python
+except Exception:
+    shutil.rmtree(paths.input_pdf_dir, ignore_errors=True)
+    shutil.rmtree(paths.input_images_dir, ignore_errors=True)
+    if backup_pdf.exists():
+        backup_pdf.rename(paths.input_pdf_dir)   # 여기서 예외가 나면
+    ...
+    raise
+finally:
+    if backup_root.exists():
+        shutil.rmtree(backup_root)               # 백업이 그대로 삭제됨
+```
+
+복구 경로의 `rename`이 실패하면 예외가 `finally`로 흘러가고, `finally`는 조건 없이 백업 트리를 `rmtree`합니다. 이 시점에서 `input_pdf_dir`/`input_images_dir`는 이미 위에서 `rmtree`된 상태입니다. **사용자의 유일한 원본 PDF·이미지가 소실됩니다.**
+
+`rename`이 실패하는 현실적 조건: Windows에서 다른 프로세스가 파일 핸들을 잡고 있는 경우(미리보기, 백신, 클라우드 동기화), 권한 문제, 대상 경로에 잔여물이 있는 경우. 커밋 `e6cc8bf`가 "Windows background job 테스트 파일 잠금 경쟁 해결"이므로 Windows 파일 잠금은 이 프로젝트에서 이미 관측된 현상입니다.
+
+수정 방향: 복구가 완전히 성공했을 때만 백업을 삭제하고, 실패 시에는 백업 경로를 보존한 채 사용자에게 위치를 알립니다.
+
+```python
+restored = False
+try:
+    ...
+except Exception:
+    try:
+        # 복구 시도
+        restored = True
+    except Exception:
+        raise SourceRegistrationError(
+            f"원본 복구에 실패했습니다. 백업이 {backup_root}에 보존되어 있습니다."
+        )
+    raise
+finally:
+    if restored and backup_root.exists():
+        shutil.rmtree(backup_root)
+```
+
+---
+
+### 2. High
+
+#### 2.1 원문 준비 작업 실패 시 내부 오류 원문이 UI로 노출
+
+`src/glk/application/dashboard_job_service.py` - `_execute_source`, `_execute_glossary`
+
+```python
+except Exception as caught:
+    status = "failed"
+    error = str(caught) or caught.__class__.__name__   # 원문 그대로
+```
+
+같은 파일의 `_execute_translation`은 동일한 위치에서 `_safe_translation_error(caught, job.model)`로 정제합니다. 이 파일에는 정제 전용 함수 `_safe_provider_error`(146행, 91줄)가 있는데 원문 준비 job의 예외 경로에서는 쓰이지 않습니다. `_safe_provider_error`는 acquisition **실패 결과** 경로에서만 호출됩니다.
+
+결과적으로 SDK 예외 문자열, 절대 경로, 스택 유래 정보가 브라우저 토스트에 그대로 표시됩니다. 세 job이 같은 패턴을 공유해야 하는데 하나만 정제되어 있는 비대칭입니다.
+
+#### 2.2 오류 분류를 사람이 읽는 메시지 문자열 매칭으로 수행
+
+프로젝트 전반에서 반복되는 가장 큰 설계 리스크입니다. 확인된 지점:
+
+| 위치 | 내용 |
+|---|---|
+| `error_response.py:78-140` | `_message_for_detail` - 영어 예외 문구 30여 개를 `in` 검사해 한글 메시지 결정 |
+| `error_response.py:160-180` | `make_http_error_response` - 문구로 HTTP 코드 결정 |
+| `dashboard_job_service.py:146-236` | `_safe_provider_error` - provider 오류 문구 30여 개 매칭 |
+| `translation_review_server.py:268-272` | `"changed after this page was loaded" in str(error)` -> 409 결정 |
+| `gemini_layout.py:51`, `gemini_ocr.py:30`, `gemini_translation.py:50` | `_is_retryable_error` - 재시도 여부를 문구로 결정 |
+
+예외 문구는 API 계약이 아닙니다. Google SDK가 문구를 바꾸거나 번역하면 분류가 조용히 무너지고, 사용자는 "요청을 처리하지 못했습니다" 같은 일반 메시지를 받게 됩니다. 테스트는 현재 문구를 하드코딩하므로 이 회귀를 잡지 못합니다.
+
+특히 `error_response.py:145-150`의 우선순위가 위험합니다.
+
+```python
+localized = (
+    message
+    or (_message_for_detail(detail_text) if detail_text else None)  # 문구 추론이
+    or _CODE_MESSAGES.get(code)                                     # 명시적 코드보다 우선
+    ...
+)
+```
+
+`PROJECT_INIT_FAILED`의 detail에 우연히 `stale`이 들어가면 "다른 곳에서 검수 내용이 변경되었습니다"가 표시됩니다. 명시적으로 전달된 `code`가 문구 추론에 밀리는 구조입니다.
+
+수정 방향: 예외 클래스에 안정적인 `code` 속성을 부여하고 문구 매칭을 제거합니다. Gemini 오류는 `google.genai.errors.APIError`의 타입·상태 코드 속성을 사용합니다.
+
+#### 2.3 `_is_retryable_error`의 상태 코드 오탐
+
+`gemini_layout.py:51-62` (3개 파일에 동일 복제)
+
+```python
+_NON_RETRYABLE_STATUS_CODES = {400, 401, 403, 404}
+
+def _is_retryable_error(error):
+    message = str(error).lower()
+    if any(str(code) in message for code in _NON_RETRYABLE_STATUS_CODES):
+        return False
+```
+
+`"400"`을 메시지 **어디서든** 부분 문자열로 찾습니다. 요청 ID, 타임스탬프, 토큰 수, 바이트 크기에 `400`/`401`/`403`/`404`가 포함된 일시적 500 오류는 재시도 불가로 분류되어 즉시 실패합니다. 예: `"503 Service Unavailable ... tokens: 12404"`.
+
+`"not found"` 매칭도 같은 문제입니다. 모델 미존재는 맞지만 다른 문맥의 "not found"도 재시도를 차단합니다.
+
+#### 2.4 Gemini 호출에 타임아웃이 없음
+
+`gemini_layout.py`, `gemini_ocr.py`, `gemini_translation.py` 세 provider 모두 `types.GenerateContentConfig`에 타임아웃을 설정하지 않고 `genai.Client(api_key=...)`에도 `http_options`를 주지 않습니다.
+
+이 시스템은 백그라운드 job을 **전역 1개만** 허용하고(`dashboard_job_service.py` `_active_job`) 취소 수단이 없습니다(`close()`는 `_closed = True`만 설정). 따라서 한 요청이 응답 없이 매달리면 대시보드의 모든 job 기능이 무기한 잠기고, 사용자는 프로세스를 강제 종료하는 수밖에 없습니다.
+
+#### 2.5 무료 티어 rate limit에 사실상 대응 불가
+
+재시도는 `max_retries=3`, `base_delay=2`, 지수 백오프입니다. 대기 시간은 2초 -> 4초로 **총 6초 남짓**이며 `Retry-After`를 읽지 않습니다.
+
+Gemini 무료 티어의 한도는 분당 요청 수 기준입니다. README와 `docs/COSTS.md`는 무료 티어 사용을 전면에 내세우는데, 분당 한도에 걸린 경우 6초 백오프로는 3번 모두 실패합니다. 429 계열은 별도의 긴 백오프(최소 30~60초)로 분리해야 합니다.
+
+#### 2.6 대시보드 문서 생성 시 전체 파이프라인 검사가 2배 실행
+
+`dashboard_service.py:326-341`
+
+```python
+listed = list_projects(workspace_root)      # 내부에서 프로젝트마다 inspect_project() 호출
+for summary in listed.projects:
+    status = inspect_project(summary.path)  # 같은 작업을 다시 호출
+```
+
+`list_projects`(`project_service.py:334`)는 이미 프로젝트마다 `inspect_project`를 부릅니다. `get_dashboard_document`가 이를 또 부르므로 프로젝트당 정확히 2회 실행됩니다.
+
+`inspect_project` 1회의 비용은 `_inspect_pipeline_status`(212줄) 안에서:
+
+- `_sha256_file` 호출 약 18회. 같은 파일을 **여러 번** 해싱합니다. `termbase_path` 3회, `translation_draft_path` 2회, `translation_path` 2회 - 메모이제이션이 없습니다.
+- `source_processing_started`(`project_service.py:230`)가 `02_source`, `03_terminology`, `.glk/cache`, `.glk/segments`, `.glk/state`, `.glk/reports`, `05_output`, `04_translation` 8개 트리를 `rglob("*")`로 전수 순회합니다. `.glk/cache/pdf/pages`에는 페이지별 렌더 PNG가 쌓이므로 100페이지 룰북이면 수백 개 파일을 훑습니다.
+
+즉 대시보드 새로고침 1회가 (전 프로젝트 캐시 파일 전수 순회 + 중복 해싱) x 2입니다. 다행히 폴링은 `/api/jobs`만 1초 간격으로 치고(`dashboard.html:2302`) `/api/dashboard`는 job 완료 시에만 재조회하므로 상시 부하는 아닙니다.
+
+#### 2.7 청크마다 전체 결과 파일을 다시 쓰는 O(n^2) 쓰기
+
+`translation_service.py:660-700` - 청크 루프 안에서 매 반복마다
+
+```python
+current_data = _serialize_segments(list(completed.values()))  # 누적 전체 직렬화
+_write_bytes_atomic(output_path, current_data)                # 전체 재작성 + fsync
+_write_json_atomic(state_path, {...})                         # 상태 재작성 + fsync
+```
+
+N개 청크 처리 시 누적 쓰기량이 O(N^2)입니다. 청크당 fsync 2회도 함께 발생합니다. 중단 복구를 위한 의도적 설계이지만, JSONL은 append-only 특성을 살릴 수 있고 상태 파일만 원자적으로 갱신하면 동일한 안전성을 O(N)으로 얻을 수 있습니다.
+
+#### 2.8 다중 파일 커밋의 원자성 부재
+
+`_io.py`는 **파일 1개** 단위 원자성만 제공합니다. 여러 파일과 그 파일들을 기술하는 상태 파일을 함께 갱신하는 지점에는 커밋 포인트가 없습니다.
+
+| 위치 | 순차 기록 대상 |
+|---|---|
+| `glossary_service.py:1052-1063` | 정규화 TSV -> termbase.json -> import 상태 |
+| `translation_review_service.py:1034-1062` | approved JSONL -> 최종 TXT N개 -> 리뷰 상태 |
+| `source_review_service.py:613-639` | review TXT -> 리뷰 상태 |
+| `translation_service.py:690-745` | 결과 JSONL -> draft -> review -> 상태 |
+
+중간에 프로세스가 죽으면 데이터 파일과 해시 상태가 영구히 어긋납니다. 프로젝트의 stale 판정이 전부 해시 비교라서, 이 경우 사용자는 원인 설명 없이 "stale"만 보게 되고 자동 회복 경로가 없습니다.
+
+또한 `_io.py`의 어떤 writer도 `os.replace` 후 **부모 디렉터리를 fsync하지 않습니다.** `os.replace`는 가시성 측면에서 원자적이지만 디렉터리 엔트리의 내구성은 별개입니다. `docs/ARCHITECTURE.md`가 "flush/fsync -> os.replace"를 내구성 보장으로 설명하는데 실제로는 전원 손실 시 교체가 유실될 수 있습니다.
+
+#### 2.9 OCR 실패가 기존 성공 결과물을 빈 파일로 덮어씀
+
+`image_ocr_service.py:310-315`
+
+```python
+except Exception as error:
+    failures.append(ImageOcrFailure(relative_name, str(error)))
+    _write_text_atomic(individual_path, "")        # 이전 성공 텍스트를 비움
+    combined_items.append((text_relative.as_posix(), ""))
+```
+
+일시적 네트워크 오류로 재실행이 실패하면 이전 실행에서 정상 생성된 `02_source/ocr/individual/<파일>.txt`가 빈 파일이 됩니다. `.glk/cache/ocr/results`의 검증된 JSON은 남으므로 재시도로 복원되긴 하지만, 그 사이 사용자에게는 결과가 사라진 것으로 보입니다. 실패 시에는 기존 파일을 건드리지 않는 편이 맞습니다.
+
+#### 2.10 파일명 대소문자 충돌 미검사
+
+`source_registration_service.py:278-292`의 중복 검사가 대소문자를 구분합니다. macOS(기본 APFS 대소문자 무시)와 Windows에서 `Card.png`와 `card.PNG`는 같은 파일입니다.
+
+업로드 경로(`dashboard_server.py:381`)는 `name_key = safe_name.casefold()`로 정규화해 검사하므로 안전하지만, `01_input/images/`에 직접 파일을 넣는 CLI 경로는 걸러지지 않습니다. 이후 OCR 개별 출력과 최종 번역 TXT까지 같은 이름으로 생성되어 조용한 last-write-wins가 발생합니다.
+
+---
+
+### 3. Medium
+
+#### 3.1 job 상태 파일을 검증 없이 dataclass에 splat
+
+`dashboard_job_service.py:604-706`
+
+```python
+value = json.loads(state_path.read_text(encoding="utf-8"))
+source_job = DashboardSourceJob(**value)
+```
+
+키 누락·초과는 `TypeError`로 걸러지지만 **타입은 검증되지 않습니다.** `status`가 숫자여도 통과하고 이후 `status in ACTIVE_JOB_STATUSES` 비교가 조용히 False가 됩니다. 도메인 모델은 `validate()`로 철저히 검증하는데 job 상태만 예외인 비일관성입니다.
+
+더 실질적인 문제: 루프는 `workspace_root.glob("*/.glk/state/dashboard_source_job.json")`로 파일을 찾으면서 **프로젝트 ID를 파일 내용에서** 읽습니다(`job.project_id`). 사용자가 프로젝트 폴더 이름을 바꾸면 job 상태가 존재하지 않는 ID로 등록되고 `is_project_active()`가 무관한 프로젝트를 차단할 수 있습니다. ID는 경로에서 유도해야 합니다.
+
+#### 3.2 삭제·교체와 job 시작 사이의 TOCTOU
+
+`dashboard_server.py` - `do_DELETE`, `_handle_source_upload`, `do_PATCH`가 모두 동일 패턴입니다.
+
+```python
+if self.server.job_manager.is_project_active(project_id):   # 락 밖에서 검사
+    ... 409 반환
+try:
+    with self.server.mutation_lock:                          # 그 다음에 락 획득
+        send2trash(str(location.path))
+```
+
+`is_project_active` 검사와 실제 변경 사이에 다른 요청이 `mutation_lock`을 먼저 잡고 job을 시작할 수 있습니다(`start_source_job`도 같은 락 사용). 그러면 **실행 중인 job의 프로젝트 폴더가 휴지통으로 이동**합니다. 활성 검사를 락 안으로 옮기면 해결됩니다.
+
+`ThreadingHTTPServer`이므로 동시 요청은 실제로 가능합니다. 다만 단일 사용자 로컬 도구라 발생 확률은 낮습니다.
+
+#### 3.3 세션 토큰 비교가 상수 시간이 아님
+
+4개 서버 전부 `==` 비교이고 `secrets.compare_digest`는 코드베이스에 **한 번도 등장하지 않습니다.**
+
+```
+dashboard_server.py:238            X-GLK-Token") == self.server.auth_token
+source_review_server.py:116        X-GLK-Token") == self.server.auth_token
+translation_review_server.py:111   X-GLK-Token") != self.server.auth_token
+glossary_review_server.py:107      X-GLK-Token") != self.server.auth_token
+```
+
+localhost 전용 + `token_urlsafe(32)`(256비트)라 실질적 위험은 낮습니다. 다만 프로젝트가 보안 경계를 명시적으로 다루는 만큼 일관성 차원에서 `compare_digest`가 맞습니다.
+
+#### 3.4 업로드 본문 256 MiB를 전량 메모리에 적재
+
+`dashboard_server.py:299-317`
+
+```python
+envelope = (...).encode("ascii") + self.rfile.read(length)   # 최대 256 MiB
+message = BytesParser(policy=policy.default).parsebytes(envelope)
+```
+
+원본 바이트 + 파서 사본 + 디코딩된 파트별 payload가 동시에 존재합니다. 한도치 업로드 시 실사용 메모리는 수백 MB에 이릅니다. 이후 파트별로 임시 디렉터리에 쓰므로 스트리밍 파싱으로 바꾸면 상수 메모리로 처리할 수 있습니다.
+
+#### 3.5 `parse_page_selection`이 범위 검사 전에 집합을 전개
+
+`extraction/layout.py:65-89`
+
+```python
+start, end = int(start_raw), int(end_raw)
+if start > end:
+    raise ValueError(...)
+selected.update(range(start - 1, end))    # 먼저 전개
+...
+invalid = sorted(...)                     # 나중에 범위 검사
+```
+
+`glk run --pages 1-99999999` 같은 오타 하나로 1억 개 정수 집합을 만들어 수 GB를 소모합니다. CLI 전용 경로라 심각도는 낮지만 검사 순서를 뒤집으면 그만입니다.
+
+#### 3.6 `ok` 필드의 절반이 상수
+
+`ok` 프로퍼티 15개 중 **10개가 `return True` 하드코딩**입니다.
+
+| 의미 있음 | 상수 True |
+|---|---|
+| `extraction_service.py:71` (`not self.failures`) | `glossary_service.py:206, 232` |
+| `image_ocr_service.py:77` (`not self.failures`) | `project_service.py:88` |
+| `translation_retry_service.py:56` | `segmentation_service.py:46` |
+| `translation_review_service.py:109` (`self.passed`) | `source_qa_service.py:54` |
+| `translation_review_service.py:140` (`self.valid`) | `source_registration_service.py:87` |
+| | `source_review_service.py:56, 77` |
+| | `translation_review_service.py:83` |
+| | `translation_service.py:79` |
+
+`to_dict()`가 이 값을 `ok`로 발행하므로 `glk ... --json` 소비자와 브라우저는 어떤 응답의 `ok`가 실제 성공을 의미하는지 알 수 없습니다. 특히 `translation_service.py:79`는 부분 완료 결과에서도 `ok: true`를 반환합니다.
+
+#### 3.7 캐시 로더 5곳이 오류와 캐시 미스를 구분하지 못함
+
+`project_service.py:398`, `translation_service.py:96` 등이 동일 패턴입니다.
+
+```python
+except (OSError, json.JSONDecodeError):
+    return None
+```
+
+디스크 오류, 권한 문제, 손상된 JSON이 모두 "상태 없음"으로 처리됩니다. `_hashing.py:22`의 `sha256_file_if_exists`도 `except OSError: return None`이라 읽기 실패가 "파일 없음"과 같아집니다. 결과적으로 파이프라인이 조용히 "not_run"이나 "stale"로 후퇴하고 사용자는 진짜 원인을 알 수 없습니다.
+
+#### 3.8 프롬프트 파일에 개행 정규화가 없음
+
+프롬프트·리뷰 텍스트를 `read_text(encoding="utf-8")`로 읽으며 `newline=` 처리와 `errors=` 지정이 없습니다. `docs/ARCHITECTURE.md`는 프롬프트 해시를 캐시 무효화 기준으로 삼는데, Windows에서 편집기가 CRLF로 저장하면 해시가 달라져 **전체 번역 캐시가 무효화되고 API 비용이 다시 발생**합니다. Windows/macOS 양쪽을 지원하는 도구에서 실제로 부딪힐 문제입니다.
+
+#### 3.9 단계 판정 순서 때문에 partial 상태가 가려짐
+
+`project_service.py:257-273` `_project_stage`
+
+```python
+if pipeline["translation_review"] in {"pending", "stale", "qa_passed"}:
+    return "translation_review"          # 먼저 검사
+if pipeline["translation_status"] == "partial":
+    return "translation_partial"         # 나중에 검사
+```
+
+번역이 partial이면 `translation_review`는 "stale"이 되므로(`translation_status != "current"` 분기) 위 조건에 먼저 걸립니다. 리뷰 파일이 남아 있는 partial 프로젝트는 "번역 진행 중"이 아니라 "번역 검수"로 표시됩니다.
+
+#### 3.10 `.env` 저장 위치가 CWD
+
+`dashboard_server.py:1177` - `settings_root=Path.cwd() if settings_root is None else settings_root`
+
+README는 "저장소 최상위 `.env`"라고 안내하지만 실제 기준은 현재 작업 디렉터리입니다. 사용자가 다른 폴더에서 `glk ui`를 실행하면 API 키가 그 폴더의 `.env`에 저장되고, 다음에 저장소에서 실행할 때 키가 사라진 것처럼 보입니다.
+
+관련해서 `ai_settings_service.py:180-190`의 `save()`는 `os.environ`을 프로세스 전역으로 변경합니다. HTTP 요청 처리 중 전역 상태를 바꾸는 부수 효과이며, 생성자에서 스냅샷한 `_environment_api_key`는 갱신되지 않아 이후 `status()`의 `api_key_source` 보고가 실제 환경과 어긋날 수 있습니다.
+
+#### 3.11 비편집 설치에서 `.env` 탐색 경로가 깨짐
+
+`gemini_layout.py:33-39`
+
+```python
+project_env = Path(__file__).resolve().parents[3] / ".env"
+```
+
+`src/glk/infrastructure/gemini_layout.py` 기준으로 `parents[3]`은 편집 설치(`pip install -e .`)에서는 저장소 루트가 맞습니다. 하지만 일반 설치에서는 `site-packages/glk/infrastructure/` -> `parents[3]`이 `lib/python3.x/` 부근을 가리켜 무관한 `.env`를 읽거나 아무것도 못 읽습니다. `pyproject.toml`이 일반 설치를 막지 않으므로 잠재 버그입니다.
+
+#### 3.12 termbase 증거 수집이 행마다 전체 코퍼스 재스캔
+
+`glossary_service.py:938` -> `:766` `_term_evidence`가 TSV 행마다 `_collect_occurrences(blocks, ...)`를 새로 호출합니다. 메모이제이션이 없어 import 비용이 O(행 수 x 코퍼스 크기)입니다. 용어 300개 x 승인 블록 수천 개 조합에서 체감 지연이 예상됩니다.
+
+#### 3.13 검수 서버의 Gemini 재번역이 요청 스레드에서 동기 실행
+
+`translation_review_server.py:225-238` - `/api/retry`가 `mutation_lock`을 잡은 채 `retry_failed_translations`를 호출하고 이 함수가 Gemini를 부릅니다. 타임아웃이 없으므로(2.4) 브라우저 요청이 무기한 대기하고 그동안 저장·QA·최종 승인이 모두 잠깁니다. 대시보드는 이런 작업을 백그라운드 job으로 분리했는데 검수 서버는 그렇지 않은 비일관성입니다.
+
+---
+
+### 4. Low
+
+- `dashboard_job_service.py:1` - 모듈 docstring 누락. 다른 49개 모듈은 모두 있습니다.
+- `project_service.py:196-199` - `try: normalized_id = normalize_project_id(...) except ProjectValidationError: raise`는 의미 없는 no-op입니다.
+- `translation_service.py:315` - `_load_segments`에서 `line_number`가 0으로 초기화되어 `read_text` 자체가 실패하면 "at line 0"이라는 오해를 부르는 메시지가 나옵니다.
+- `extraction_service.py:161` - 도달 불가한 `RuntimeError`.
+- `dashboard_server.py` - `do_OPTIONS`/`do_HEAD`가 없어 기본 501 응답이 나가며 이 경로는 `_SECURITY_HEADERS`를 타지 않습니다. `server_version`도 재정의하지 않아 Python 버전이 노출됩니다.
+- 커밋 메시지 접두 공백이 불규칙합니다(`  수정:`, ` 기능:`, `기능:`, `feat:`).
+
+---
+
+### 5. 구조적 문제
+
+#### 5.1 검수 서버 4개의 대규모 중복
+
+`dashboard_server.py`, `source_review_server.py`, `glossary_review_server.py`, `translation_review_server.py`가 다음을 **각각 독립적으로** 구현합니다.
+
+```
+_SECURITY_HEADERS      4곳 (dashboard:93, translation:31, glossary:30, source:31)
+def server_bind        4곳
+def _host_is_local     4곳
+def _api_authorized    4곳
+def _send_bytes        4곳
+def _send_json         4곳
+def _send_error_json   4곳
+def _read_request_json 4곳
+origin 프로퍼티        4곳
+포트 검증              4곳
+serve_* 진입 함수      4곳
+```
+
+CSP 문자열이 4곳에 복제되어 있어 보안 헤더 하나를 바꾸려면 4개 파일을 고쳐야 하고 한 곳을 놓치면 조용히 불일치합니다. 공통 `LocalReviewHttpServer` 기반 클래스 하나로 약 400~500줄을 줄일 수 있습니다.
+
+#### 5.2 Gemini provider 3개의 중복
+
+`_is_retryable_error` 전체, `_NON_RETRYABLE_STATUS_CODES`, 재시도 루프(지수 백오프 + jitter), `from_environment`, `__init__` 시그니처가 `gemini_layout.py`·`gemini_ocr.py`·`gemini_translation.py`에 동일하게 복제되어 있습니다. 2.3과 2.4 같은 결함을 고칠 때 3곳을 모두 손대야 합니다.
+
+`gemini_ocr.py:69`와 `gemini_translation.py:96`은 `from_environment` 안에서 `import os`를 지역 임포트하는데 `gemini_layout.py`는 모듈 최상단에서 임포트합니다. 같은 패턴의 세 번째 불일치입니다.
+
+#### 5.3 job 관리자의 3중 복제
+
+`dashboard_job_service.py`(1,259줄)는 source/glossary/translation 세 job 타입에 대해 거의 동일한 코드를 3세트 유지합니다.
+
+- `_state_path` / `_glossary_state_path` / `_translation_state_path`
+- `_persist` / `_persist_glossary` / `_persist_translation`
+- `list_jobs` / `list_glossary_jobs` / `list_translation_jobs`
+- `_load_records` 안의 40줄 블록 x 3 (102줄 함수)
+- `_execute_source` / `_execute_glossary` / `_execute_translation` - 각 80줄, 구조 동일
+- 세 dataclass - `source_type`, `resume`/`force` 필드만 다름
+
+job 타입을 파라미터화하면 이 파일은 절반 이하로 줄어듭니다.
+
+#### 5.4 God function
+
+AST로 측정한 80줄 이상 함수:
+
+| 줄 수 | 함수 | 파일 |
+|---:|---|---|
+| 386 | `build_parser` | `cli.py:1033` |
+| 368 | `translate_project` | `translation_service.py:392` |
+| 291 | `import_project_glossary` | `glossary_service.py:796` |
+| 212 | `_inspect_pipeline_status` | `project_service.py:410` |
+| 186 | `save_project_source_review` | `source_review_service.py:457` |
+| 182 | `_run_pipeline` | `cli.py:424` |
+| 166 | `do_POST` | `dashboard_server.py:755` |
+| 148 | `do_GET` | `dashboard_server.py:606` |
+| 127 | `do_PATCH` | `dashboard_server.py:972` |
+| 127 | `start_translation_job` | `dashboard_job_service.py:896` |
+| 119 | `_read_source_upload` | `dashboard_server.py:299` |
+| 108 | `run_registered_source_pipeline` | `dashboard_job_service.py:285` |
+| 107 | `_parse_review_text` | `translation_review_service.py:322` |
+| 103 | `finalize_project_translation_review` | `translation_review_service.py:975` |
+| 102 | `_load_records` | `dashboard_job_service.py:604` |
+| 91 | `_safe_provider_error` | `dashboard_job_service.py:146` |
+| 87 | `_analyze_review` | `translation_review_service.py:517` |
+| 80 | `_execute_translation` | `dashboard_job_service.py:1176` |
+
+`translate_project`는 캐시 판정, 상태 검증, provider 생성, 청크 루프, 부분 저장, 최종 저장, 리뷰 생성을 한 함수에서 처리합니다. `do_POST`/`do_GET`/`do_PATCH`는 라우팅 테이블 없이 `if path == ...` 체인으로 구성되어 있습니다.
+
+#### 5.5 라우팅이 문자열 비교 체인
+
+`dashboard_server.py`의 4개 HTTP 메서드 핸들러가 경로를 `if path == "..."` / `startswith` / `endswith`로 직접 검사합니다. `_source_upload_project_id`, `_ocr_prompt_project_id`, `_translation_prompt_project_id` 세 함수는 접두·접미만 다른 동일 로직입니다. 엔드포인트가 늘어날 때마다 인증 검사를 각 분기에 다시 써야 하고 실제로 인증 검사 코드가 핸들러마다 반복되어 있습니다. 한 곳을 빠뜨리면 인증 없는 엔드포인트가 생깁니다.
+
+---
+
+### 6. 도구·프로세스 격차
+
+| 항목 | 상태 |
+|---|---|
+| 린터 | 없음 (ruff/flake8 설정 파일 부재) |
+| 포매터 | 없음 (black/ruff-format 부재) |
+| pre-commit | 없음 |
+| `.editorconfig` | 없음 |
+| 커버리지 측정 | 없음 (coverage.py 미통합) |
+| LICENSE | **없음** |
+| mypy 적용률 | **50개 파일 중 16개 (32%)** |
+
+#### mypy 설정이 보이는 것보다 훨씬 약함
+
+`pyproject.toml:41`
+
+```toml
+follow_imports = "skip"
+```
+
+이 설정은 검사 대상 파일이 임포트하는 모든 심볼을 `Any`로 만듭니다. 즉 16개 파일을 검사하더라도 **모듈 경계를 넘는 타입 오류는 전혀 잡히지 않습니다.** `strict` 계열 옵션(`disallow_untyped_defs` 등)도 없어 타입 없는 함수가 통과합니다.
+
+미포함 파일에 정작 중요한 것들이 있습니다.
+
+- **도메인 계층 전체** - `source_block.py`, `translation_segment.py`, `project.py`, `translation_qa.py`, `approved_translation.py`, `workspace.py`. 불변식이 가장 많이 모여 있는 계층입니다.
+- `translation_service.py` (759줄, 최대 복잡도)
+- `glossary_service.py` (1,086줄)
+- `cli.py` (1,428줄)
+- Gemini provider 3개 전부
+
+#### 테스트 커버리지의 비대칭
+
+테스트 함수 178개는 충실한 편입니다. 다만 전용 테스트 모듈이 없는 코드가 있습니다.
+
+- `domain/translation_qa.py` - 번역 QA의 결정적 규칙(토큰·숫자·용어 보존). 이 프로젝트의 품질 보증 핵심인데 `domain/source_block.py`에는 전용 테스트가 있고 이쪽은 없습니다.
+- `domain/approved_translation.py`, `domain/workspace.py`, `domain/translation_segment.py`
+- `application/translation_review_service.py` (1,077줄), `translation_retry_service.py`, `translation_restart_service.py`, `glossary_review_service.py`
+- `extraction/layout.py` - `join_fragment_texts`, `parse_page_selection` 같은 순수 함수가 있어 테스트하기 가장 쉬운 대상입니다.
+
+일부는 서버 테스트를 통해 간접 검증되지만 순수 함수 단위 테스트가 없어 3.5 같은 결함이 남아 있습니다.
+
+#### 저장소에 임시 파일이 커밋되어 있음
+
+```
+tmp_ocr_image_01.png
+tmp_ocr_image_02.png
+tmp_pdf_2pages.pdf
+```
+
+`git ls-files`로 확인한 추적 상태입니다. `.gitignore`의 `*.tmp` 패턴은 `tmp_` 접두사를 잡지 못합니다. `docs/COSTS.md`의 실측 샘플로 보이므로 `docs/samples/`로 옮기거나 제거가 필요합니다.
+
+`venv/`는 `include/` 하위 폴더만 있는 빈 껍데기이며 `.gitignore`에 있어 추적되지는 않습니다.
+
+---
+
+### 7. 도메인 로직 관찰
+
+#### 하이픈 결합 휴리스틱
+
+`extraction/layout.py:214-216`
+
+```python
+if result.endswith("-") and next_text[:1].islower():
+    result = result[:-1] + next_text
+```
+
+PDF 줄바꿈 하이픈을 제거하는 처리로 일반적으로는 올바릅니다. 다만 보드게임 룰북에는 `re-roll`, `re-draw`, `non-combat`처럼 정당한 하이픈 복합어가 많습니다. 이 단어가 줄 끝에서 잘려 fragment 경계와 겹치면 `reroll`로 결합됩니다. 발생 조건이 좁긴 해도(하이픈이 fragment 끝에 와야 함) 이 도메인에서는 실제로 마주칠 수 있습니다.
+
+단어 사전이나 "하이픈 앞이 2글자 이하면 보존" 같은 보수적 규칙, 혹은 결합 시 경고를 남겨 원문 검수 화면에서 확인하게 하는 방법을 고려할 만합니다. 사람이 원문을 검수하는 단계가 있으니 경고 기반 접근이 이 프로젝트의 설계 철학에 맞습니다.
+
+#### 확인 결과 문제가 아닌 항목
+
+`glossary_service.py:702-720` `_resolve_review_tsv`가 절대 경로를 제한 없이 받아들이는 것은 사실입니다. 다만 `glossary_review_server.py:229`가 `file="03_terminology/glossary_review.tsv"`로 **하드코딩**해 호출하므로 웹 경로에서는 임의 경로를 넘길 수 없습니다. CLI `glk glossary import --file <경로>`에서만 임의 경로가 쓰이며 이는 사용자가 자기 파일을 지정하는 정상 기능입니다. **보안 취약점이 아닙니다.**
+
+#### 잘 만들어진 부분
+
+객관적으로 견고한 지점도 명시해 둡니다.
+
+- `extraction/layout.py`의 `validate_layout`과 `extraction/image_ocr.py`의 `validate_ocr_result`는 LLM 응답을 다루는 신뢰 경계 검증기로서 제대로 작성되어 있습니다.
+- `domain/source_block.py`의 `validate()`는 bbox 정규화 범위, 좌표 역전, `bool`을 `int`로 오인하는 케이스(`isinstance(value, bool)` 배제)까지 잡습니다. `bool` 배제는 흔히 놓치는 부분입니다.
+- `translation_segment.py`가 `source_text`/`translated_text`와 각 SHA-256의 일치를 실제로 재계산해 검증합니다.
+- `dashboard.html`의 XSS 방어가 일관됩니다. `escapeHtml`이 `& < > " '`를 모두 처리하고 `projectCard`에서 `pathTitle`을 정의 시점에 이스케이프하며 사용자 제어 값(프로젝트 이름, 파일명, 경로)이 전부 통과합니다. 검토한 템플릿 보간에서 누락을 찾지 못했습니다.
+- 커스텀 헤더(`X-GLK-Token`)를 요구하고 `do_OPTIONS`를 구현하지 않으므로 외부 사이트의 preflight가 실패해 CSRF가 차단됩니다. `Host` 헤더 검사로 DNS rebinding도 막습니다.
+- `_read_request_json`이 `Content-Type: application/json`을 강제하는 것도 CSRF 방어에 기여합니다.
+- `list_projects`가 프로젝트별로 예외를 잡아 손상된 하나가 전체 스캔을 무너뜨리지 않게 한 설계는 적절합니다.
+- `mkstemp` 기반 임시 파일이 0600으로 생성되므로 `.env`가 처음부터 안전한 권한을 갖습니다. 뒤따르는 `chmod(0o600)`은 중복이지만 무해합니다.
+
+---
+
+### 8. 우선순위 정리
+
+**즉시**
+
+- [ ] `source_registration_service.py:216-232` 백업 삭제 로직 수정 (1.1) - 유일한 데이터 손실 경로
+- [ ] `_execute_source`/`_execute_glossary`에 `_safe_provider_error` 적용 (2.1)
+- [ ] Gemini 3개 provider에 타임아웃 추가 (2.4)
+- [ ] `is_project_active` 검사를 `mutation_lock` 안으로 이동 (3.2)
+
+**단기**
+
+- [ ] `_is_retryable_error`를 SDK 예외 타입 기반으로 교체 + 429 전용 백오프 (2.3, 2.5)
+- [ ] `get_dashboard_document`의 중복 `inspect_project` 제거, 파일 해시 메모이제이션 (2.6)
+- [ ] OCR 실패 시 기존 결과물 보존 (2.9)
+- [ ] `_io.py`에 부모 디렉터리 fsync 추가 (2.8)
+- [ ] 프롬프트·리뷰 텍스트 읽기에 개행 정규화 (3.8)
+- [ ] `.env` 위치를 CWD가 아닌 명시적 기준으로 (3.10)
+
+**구조 개선**
+
+- [ ] `LocalReviewHttpServer` 공통 기반 클래스 추출 (5.1) - 4곳 중복 제거, 보안 헤더 단일 정의
+- [ ] Gemini provider 공통 기반 클래스 (5.2)
+- [ ] 오류 코드를 예외 클래스 속성으로 이동, 문구 매칭 제거 (2.2)
+- [ ] `dashboard_job_service.py` job 타입 파라미터화 (5.3)
+- [ ] `ok` 프로퍼티 정리 - 의미 없으면 제거 (3.6)
+
+**도구**
+
+- [ ] `ruff` 도입 (린트 + 포맷)
+- [ ] mypy에서 `follow_imports = "skip"` 제거하고 도메인 계층부터 편입 (6)
+- [ ] `LICENSE` 추가
+- [ ] `tmp_*` 파일 정리 또는 `docs/samples/`로 이동
+- [ ] `domain/translation_qa.py`, `extraction/layout.py` 단위 테스트 추가
+
+---
+
+### 9. 총평
+
+계층 분리, 불변 도메인 모델, 해시 기반 무결성, 사람 검증 게이트는 일관되게 잘 설계되어 있고 LLM 응답 검증과 XSS·CSRF 방어는 실제로 견고합니다.
+
+다만 이번 정적 분석에서 드러난 약점은 뚜렷한 패턴을 보입니다.
+
+**첫째, 오류를 문자열로 다룹니다.** 5개 지점에서 예외 메시지 부분 문자열로 재시도 여부, HTTP 상태 코드, 사용자 메시지를 결정합니다. 이 프로젝트가 데이터에는 스키마 버전과 SHA-256을 붙여 엄격히 관리하는 것과 대비되는, 가장 일관성 없는 부분입니다.
+
+**둘째, 검증과 사용이 분리되어 경합이 남습니다.** 락 밖 검사 후 락 안 변경 패턴이 3개 핸들러에 반복되고 백업 복구와 정리가 뒤엉켜 데이터 손실 경로를 만듭니다.
+
+**셋째, 같은 코드가 3~4벌씩 존재합니다.** 서버 4개, provider 3개, job 타입 3개. 위 결함들이 대부분 "여러 곳 중 한 곳만 고쳐져 있는" 형태로 나타나는 근본 원인입니다. 2.1의 정제 누락, `import os` 위치 불일치가 그 예입니다.
+
+가장 시급한 것은 1.1 하나입니다. 나머지는 품질 개선이지만 이건 사용자가 번역하려던 원본 파일을 잃을 수 있는 경로입니다.

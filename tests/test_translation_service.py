@@ -15,6 +15,7 @@ from glk.application.translation_service import (
     build_translation_chunks,
     compile_translation_prompt,
     translate_project,
+    validate_translation_response,
 )
 from glk.application.translation_review_service import (
     _final_translation_outputs,
@@ -313,6 +314,88 @@ class TranslationFoundationTests(unittest.TestCase):
             ["keep_term_changed"],
         )
 
+    def test_keep_terms_use_placeholders_and_are_restored_before_validation(
+        self,
+    ) -> None:
+        block = make_block(
+            1,
+            "Each player shuffles the deck. All players draw.",
+        )
+        entries = [
+            {
+                "source_term": "player",
+                "translation": "player",
+                "status": "keep",
+                "variants": ["player", "players"],
+                "note": "",
+            },
+            {
+                "source_term": "deck",
+                "translation": "deck",
+                "status": "keep",
+                "variants": ["deck"],
+                "note": "",
+            },
+        ]
+
+        prompt = compile_translation_prompt(
+            blocks=(block,),
+            termbase_entries=entries,
+            project_instructions="Translate naturally.",
+        )
+
+        self.assertIn(
+            "Each {GLK_KEEP_0001} shuffles the {GLK_KEEP_0002}. "
+            "All {GLK_KEEP_0003} draw.",
+            prompt,
+        )
+        self.assertIn("Preserve every {GLK_KEEP_####} placeholder", prompt)
+        translated = validate_translation_response(
+            response={
+                "translations": [
+                    {
+                        "id": block.id,
+                        "text": (
+                            "각 {GLK_KEEP_0001}는 {GLK_KEEP_0002}을 섞습니다. "
+                            "모든 {GLK_KEEP_0003}가 뽑습니다."
+                        ),
+                    }
+                ]
+            },
+            blocks=(block,),
+            termbase_entries=entries,
+        )
+        self.assertEqual(
+            translated[block.id],
+            "각 player는 deck을 섞습니다. 모든 players가 뽑습니다.",
+        )
+
+    def test_number_validation_allows_words_and_korean_singular_counters(
+        self,
+    ) -> None:
+        self.assertEqual(
+            check_translation_contract(
+                source_text="Each player draws five cards.",
+                translated_text="각 플레이어는 카드 5장을 뽑습니다.",
+                termbase_entries=[],
+            ),
+            [],
+        )
+        self.assertEqual(
+            check_translation_contract(
+                source_text="Reveal the top event card.",
+                translated_text="맨 위 이벤트 카드 1장을 공개합니다.",
+                termbase_entries=[],
+            ),
+            [],
+        )
+        issues = check_translation_contract(
+            source_text="Combat",
+            translated_text="전투 123123",
+            termbase_entries=[],
+        )
+        self.assertEqual([issue.code for issue in issues], ["number_changed"])
+
     def test_translates_blocks_validates_terms_and_creates_review_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
@@ -407,10 +490,20 @@ class TranslationFoundationTests(unittest.TestCase):
             self.assertEqual(state["status"], "partial")
             self.assertEqual(state["completed_blocks"], 0)
             self.assertEqual(
+                state["hard_rules_version"],
+                "translation-hard-rules-v3",
+            )
+            self.assertIn("숫자 구성이 원문과 다릅니다", state["failure_reason"])
+            self.assertEqual(
                 inspect_project("translation_project", workspace_root)["pipeline"][
                     "translation_status"
                 ],
                 "partial",
+            )
+            state["input_sha256"] = "previous-hard-rules-input"
+            (project_path / ".glk/state/translation.json").write_text(
+                json.dumps(state),
+                encoding="utf-8",
             )
 
             resumed = translate_project(
@@ -662,7 +755,7 @@ class TranslationReviewTests(unittest.TestCase):
                 (project_path / ".glk/segments/approved_translation.jsonl").exists()
             )
 
-    def test_qa_blocks_number_token_and_approved_term_changes(self) -> None:
+    def test_qa_blocks_changed_or_unexpected_numbers(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
             project_path, _ = self._translated_project(workspace_root)
