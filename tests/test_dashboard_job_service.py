@@ -753,6 +753,51 @@ class DashboardJobManagerTests(unittest.TestCase):
         )
         manager.close()
 
+    def test_marks_a_previous_translation_job_as_interrupted(self) -> None:
+        project_path = create_translation_project(
+            self.workspace_root,
+            [
+                make_translation_block(1, "COMBAT", block_type="heading"),
+                make_translation_block(2, "Each Hunter gains 2 Stamina."),
+                make_translation_block(3, "Hunters may spend Stamina."),
+            ],
+        )
+        state_path = WorkspacePaths(
+            project_path
+        ).dashboard_translation_job_state
+        state_path.write_text(
+            json.dumps(
+                {
+                    "job_id": "old-translation-job",
+                    "project_id": "translation_project",
+                    "model": "gemini-test",
+                    "resume": False,
+                    "force": False,
+                    "status": "running",
+                    "progress_message": "running",
+                    "progress_current": 1,
+                    "progress_total": 2,
+                    "result": None,
+                    "error": None,
+                    "created_at": "2026-07-25T00:00:00Z",
+                    "started_at": "2026-07-25T00:00:01Z",
+                    "finished_at": None,
+                    "updated_at": "2026-07-25T00:00:01Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        manager = DashboardJobManager(self.workspace_root)
+
+        job = manager.list_translation_jobs()[0]
+        self.assertEqual(job["status"], "interrupted")
+        self.assertIsNotNone(job["finished_at"])
+        self.assertIn("종료", job["progress_message"])
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["status"], "interrupted")
+        manager.close()
+
     def test_partial_translation_requires_its_saved_prompt(self) -> None:
         project_path = create_translation_project(
             self.workspace_root,

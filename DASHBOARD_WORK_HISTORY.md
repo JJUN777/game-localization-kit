@@ -793,6 +793,21 @@ git diff --check
 - 전체 241개 테스트, 설정된 22개 Python 파일 mypy, Python bytecode 컴파일과
   `git diff --check`를 통과했습니다.
 
+### 2026-07-25 — dashboard background job 골격 통합
+
+- source, glossary, translation job의 공통 상태 필드를 `DashboardJobRecord`로
+  통합했습니다.
+- `_JobStore`가 종류별 state 경로와 parser를 받아 저장·복원·실행 중 상태의
+  interrupted 전환·최신 목록 정렬을 공통 처리합니다.
+- manager의 `_queue_job`과 `_execute_job`이 single-active 검사, thread 시작,
+  running 전환, 진행률 저장, runner 호출과 terminal 결과 저장을 담당합니다.
+- job별 코드에는 runner 인자와 허용 terminal 상태, 오류 정제와 사용자 진행
+  문구만 남겼습니다.
+- translation 실행 중 state의 재시작 복원 회귀 테스트를 추가해 source·glossary와
+  동일하게 interrupted 상태로 보존되는 것을 확인했습니다.
+- 전체 242개 테스트, 설정된 22개 Python 파일 mypy, Python bytecode 컴파일과
+  `git diff --check`를 통과했습니다.
+
 ---
 
 ## 다른 컴퓨터에서 작업 재개

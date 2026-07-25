@@ -216,8 +216,15 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     factory가 동일한 port 검증을 사용한다.
   - 검증: 공통 상속·CSP 변형·port·복귀 URL·JSON 오류 타입 단위 테스트와
     네 서버 통합 테스트를 통과한다.
-- [ ] `ARCH-002` source·glossary·translation job의 저장·조회·실행 골격을
+- [x] `ARCH-002` source·glossary·translation job의 저장·조회·실행 골격을
   파라미터화한다.
+  - 공통 `DashboardJobRecord`가 상태·진행률·결과·시간 필드를 제공한다.
+  - `_JobStore`가 job 종류별 state 경로·parser만 받아 저장, 복원, 중단 전환과
+    최신 목록을 공통 처리한다.
+  - `_queue_job`과 `_execute_job`이 단일 active 검사, thread 시작, running 전환,
+    진행률 저장과 terminal 결과 저장을 공통 처리한다.
+  - 검증: 세 job의 성공·실패·진행률·상호 배제와 실행 중 저장 상태의
+    interrupted 복원 회귀 테스트를 통과한다.
 - [ ] `ARCH-003` dashboard HTTP 경로 분석과 인증을 라우팅 계층으로 분리한다.
 - [ ] `ARCH-004` `translate_project`, `import_project_glossary`,
   `_inspect_pipeline_status` 등 대형 함수를 책임별로 분리한다.

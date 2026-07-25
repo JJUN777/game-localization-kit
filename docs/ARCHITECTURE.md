@@ -264,6 +264,13 @@ ID·순서·숫자·token·HTML·용어 검증
 
 `glk ui` 대시보드는 `dashboard_service`가 만든 읽기 전용 프로젝트 상태를 표시하고, 준비된 기존 `source`, `glossary`, `translation` 검수 서버를 필요할 때 실행합니다. 프로젝트 생성과 삭제 요청은 application service의 규칙을 재사용합니다. PDF·이미지 최초 등록은 `source_registration_service`가 CLI와 GUI에 같은 복사·manifest 규칙을 제공하며 AI 작업은 실행하지 않습니다. `dashboard_job_service`는 등록 원본의 acquisition·segmentation·source QA, 승인 원문 기반 용어 후보 생성과 termbase 기반 초벌 번역을 HTTP 요청과 분리된 단일 active worker 정책으로 실행합니다. 최신 실행 상태는 각각 `.glk/state/dashboard_source_job.json`, `.glk/state/dashboard_glossary_job.json`, `.glk/state/dashboard_translation_job.json`에 저장하며 schema와 상위 프로젝트 경로를 검증한 뒤 복원합니다. 용어 후보 생성은 기존 `glossary_service`의 로컬 규칙만 재사용하며 Gemini API를 호출하지 않습니다. `translation_prompt_service`는 초벌 번역과 분리해 프로젝트 prompt를 저장하고 개행 정규화 SHA-256으로 동시 편집 충돌을 차단합니다. 초벌 번역은 기존 `translation_service`의 청크 저장과 resume 규칙을 재사용하고, partial 상태에서 prompt가 바뀌면 이어하기 대신 명시적 전체 재번역만 허용합니다. 전체 재번역은 `translation_restart_service`가 기존 번역·검수·승인·최종 출력 snapshot을 먼저 revisions에 보관하고 성공한 경우에만 새 draft로 검수 상태를 초기화합니다. 번역 검수의 오류 문장 선택 재번역은 `translation_retry_job_service`가 검수 HTTP 요청과 분리해 실행합니다. 시작 요청은 현재 편집을 저장한 뒤 즉시 반환하고 검수 화면은 진행 상태를 조회하며, 실행 중 동시 편집은 잠그지 않고 UI에서 차단한 뒤 최종 저장 시 review hash로 변경 충돌을 거부합니다. 최종 번역이 current이면 승인 state의 `final_files`를 다시 검사해 다운로드 가능한 출력 목록을 read model에 포함합니다. `ai_settings_service`와 Gemini provider는 `config.resolve_settings_root`가 선택한 동일한 `.env`를 사용합니다. 명시적 경로, `GLK_SETTINGS_ROOT`, 검증된 editable checkout, OS별 사용자 설정 디렉터리 순으로 해석하며 키와 모델만 원자적으로 갱신하고 다른 항목과 주석을 보존합니다. `ai_model_catalog`는 패키지의 `data/gemini_models.json`을 검증해 드롭다운 모델 ID와 설명을 제공합니다. API 응답에는 키 값이 아니라 설정 여부와 적용 출처만 포함합니다. 삭제할 때는 정규화된 ID, workspace 바로 아래 경로와 manifest ID를 다시 확인한 뒤 검증된 프로젝트 폴더만 `send2trash`로 운영체제 휴지통에 이동합니다. 대시보드에서 연 검수 서버는 같은 프로젝트와 종류에 대해 재사용하며 대시보드 종료 시 함께 종료합니다.
 
+세 dashboard background job은 `DashboardJobRecord`의 공통 상태 필드를 사용합니다.
+종류별 `_JobStore`는 state 파일 위치와 parser만 주입받아 저장·복원·중단 상태
+전환·목록 조회를 처리합니다. manager의 공통 queue/execute 골격은 단일 active
+정책, daemon thread 시작, running·진행률·terminal 상태 저장을 담당하고,
+source·glossary·translation 함수에는 runner 인자와 허용 terminal 상태,
+사용자 안내 문구만 남깁니다.
+
 Gemini adapter는 `GeminiProviderBase`가 `.env` 로딩, API 키 검증, 모델 선택,
 SDK client·timeout 구성과 재시도 실행을 한 번만 구현합니다. layout, 이미지 OCR,
 translation provider는 각 작업의 prompt·응답 schema·결과 검증만 담당합니다.

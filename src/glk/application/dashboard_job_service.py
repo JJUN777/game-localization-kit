@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 import threading
-from typing import Any, Callable
+from typing import Any, Callable, Generic, TypeVar
 from uuid import uuid4
 
 from glk.application._cache import read_json_object
@@ -191,11 +191,9 @@ def _validate_job_timestamp(
 
 
 @dataclass(slots=True)
-class DashboardSourceJob:
+class DashboardJobRecord:
     job_id: str
     project_id: str
-    source_type: str
-    model: str
     status: str
     progress_message: str
     progress_current: int | None
@@ -209,6 +207,12 @@ class DashboardSourceJob:
 
     def to_dict(self) -> dict[str, Any]:
         return {"schema_version": JOB_SCHEMA_VERSION, **asdict(self)}
+
+
+@dataclass(slots=True)
+class DashboardSourceJob(DashboardJobRecord):
+    source_type: str
+    model: str
 
     @classmethod
     def from_dict(
@@ -234,23 +238,7 @@ class DashboardSourceJob:
 
 
 @dataclass(slots=True)
-class DashboardGlossaryJob:
-    job_id: str
-    project_id: str
-    status: str
-    progress_message: str
-    progress_current: int | None
-    progress_total: int | None
-    result: dict[str, Any] | None
-    error: str | None
-    created_at: str
-    started_at: str | None
-    finished_at: str | None
-    updated_at: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"schema_version": JOB_SCHEMA_VERSION, **asdict(self)}
-
+class DashboardGlossaryJob(DashboardJobRecord):
     @classmethod
     def from_dict(
         cls,
@@ -268,25 +256,10 @@ class DashboardGlossaryJob:
 
 
 @dataclass(slots=True)
-class DashboardTranslationJob:
-    job_id: str
-    project_id: str
+class DashboardTranslationJob(DashboardJobRecord):
     model: str
     resume: bool
     force: bool
-    status: str
-    progress_message: str
-    progress_current: int | None
-    progress_total: int | None
-    result: dict[str, Any] | None
-    error: str | None
-    created_at: str
-    started_at: str | None
-    finished_at: str | None
-    updated_at: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"schema_version": JOB_SCHEMA_VERSION, **asdict(self)}
 
     @classmethod
     def from_dict(
@@ -691,6 +664,120 @@ def run_translation_pipeline(
     }
 
 
+JobRecordT = TypeVar("JobRecordT", bound=DashboardJobRecord)
+
+
+class _JobStore(Generic[JobRecordT]):
+    """Persist and restore one dashboard job kind."""
+
+    def __init__(
+        self,
+        workspace_root: Path,
+        *,
+        state_filename: str,
+        state_path: Callable[[WorkspacePaths], Path],
+        parse: Callable[[dict[str, Any], str], JobRecordT],
+    ) -> None:
+        self.workspace_root = workspace_root
+        self.state_filename = state_filename
+        self._state_path = state_path
+        self._parse = parse
+        self.records: dict[str, JobRecordT] = {}
+
+    def path_for(self, project_id: str) -> Path:
+        location = load_workspace_project_id(
+            project_id,
+            self.workspace_root,
+        )
+        return self._state_path(WorkspacePaths(location.path))
+
+    def persist(self, job: JobRecordT) -> None:
+        write_json_atomic(self.path_for(job.project_id), job.to_dict())
+
+    def put(self, job: JobRecordT) -> None:
+        self.records[job.project_id] = job
+        self.persist(job)
+
+    def matching(
+        self,
+        project_id: str,
+        job_id: str,
+    ) -> JobRecordT | None:
+        job = self.records.get(project_id)
+        if job is None or job.job_id != job_id:
+            return None
+        return job
+
+    def active(self) -> JobRecordT | None:
+        return next(
+            (
+                job
+                for job in self.records.values()
+                if job.status in ACTIVE_JOB_STATUSES
+            ),
+            None,
+        )
+
+    def list_dicts(self) -> list[dict[str, Any]]:
+        jobs = sorted(
+            self.records.values(),
+            key=lambda job: job.created_at,
+            reverse=True,
+        )
+        return [job.to_dict() for job in jobs]
+
+    def _record_project_id(self, state_path: Path) -> str:
+        project_id = state_path.parents[2].name
+        return load_workspace_project_id(
+            project_id,
+            self.workspace_root,
+        ).manifest.project_id
+
+    def load(
+        self,
+        *,
+        upgrade: Callable[[JobRecordT], bool] | None = None,
+    ) -> None:
+        if not self.workspace_root.is_dir():
+            return
+        pattern = f"*/.glk/state/{self.state_filename}"
+        for state_path in self.workspace_root.glob(pattern):
+            try:
+                value = read_json_object(state_path)
+                if value is None:
+                    continue
+                job = self._parse(
+                    value,
+                    self._record_project_id(state_path),
+                )
+                changed = False
+                if job.status in ACTIVE_JOB_STATUSES:
+                    now = _utc_now()
+                    job.status = "interrupted"
+                    job.progress_message = (
+                        "이전 대시보드가 종료되어 작업 상태를 확인할 수 없습니다."
+                    )
+                    job.error = (
+                        "Dashboard process stopped before job completion."
+                    )
+                    job.finished_at = now
+                    job.updated_at = now
+                    changed = True
+                if upgrade is not None and upgrade(job):
+                    changed = True
+                if changed:
+                    write_json_atomic(state_path, job.to_dict())
+                if job.status in TERMINAL_JOB_STATUSES:
+                    self.records[job.project_id] = job
+            except (
+                OSError,
+                UnicodeError,
+                TypeError,
+                ValueError,
+            ):
+                continue
+
+
 class DashboardJobManager:
     """Own one active dashboard job and latest per-project records."""
 
@@ -709,56 +796,44 @@ class DashboardJobManager:
             translation_runner or run_translation_pipeline
         )
         self._lock = threading.RLock()
-        self._jobs: dict[str, DashboardSourceJob] = {}
-        self._glossary_jobs: dict[str, DashboardGlossaryJob] = {}
-        self._translation_jobs: dict[str, DashboardTranslationJob] = {}
+        self._source_jobs = _JobStore[DashboardSourceJob](
+            self.workspace_root,
+            state_filename="dashboard_source_job.json",
+            state_path=lambda paths: paths.dashboard_source_job_state,
+            parse=lambda value, project_id: DashboardSourceJob.from_dict(
+                value,
+                expected_project_id=project_id,
+            ),
+        )
+        self._glossary_jobs = _JobStore[DashboardGlossaryJob](
+            self.workspace_root,
+            state_filename="dashboard_glossary_job.json",
+            state_path=lambda paths: paths.dashboard_glossary_job_state,
+            parse=lambda value, project_id: DashboardGlossaryJob.from_dict(
+                value,
+                expected_project_id=project_id,
+            ),
+        )
+        self._translation_jobs = _JobStore[DashboardTranslationJob](
+            self.workspace_root,
+            state_filename="dashboard_translation_job.json",
+            state_path=lambda paths: paths.dashboard_translation_job_state,
+            parse=lambda value, project_id: DashboardTranslationJob.from_dict(
+                value,
+                expected_project_id=project_id,
+            ),
+        )
+        self._stores: tuple[_JobStore[Any], ...] = (
+            self._source_jobs,
+            self._glossary_jobs,
+            self._translation_jobs,
+        )
         self._closed = False
-        self._load_records()
-
-    def _state_path(self, project_id: str) -> Path:
-        location = load_workspace_project_id(
-            project_id,
-            self.workspace_root,
+        self._source_jobs.load(
+            upgrade=self._upgrade_acquisition_failure,
         )
-        return WorkspacePaths(location.path).dashboard_source_job_state
-
-    def _persist(self, job: DashboardSourceJob) -> None:
-        write_json_atomic(self._state_path(job.project_id), job.to_dict())
-
-    def _glossary_state_path(self, project_id: str) -> Path:
-        location = load_workspace_project_id(
-            project_id,
-            self.workspace_root,
-        )
-        return WorkspacePaths(location.path).dashboard_glossary_job_state
-
-    def _persist_glossary(self, job: DashboardGlossaryJob) -> None:
-        write_json_atomic(
-            self._glossary_state_path(job.project_id),
-            job.to_dict(),
-        )
-
-    def _translation_state_path(self, project_id: str) -> Path:
-        location = load_workspace_project_id(
-            project_id,
-            self.workspace_root,
-        )
-        return WorkspacePaths(
-            location.path
-        ).dashboard_translation_job_state
-
-    def _persist_translation(self, job: DashboardTranslationJob) -> None:
-        write_json_atomic(
-            self._translation_state_path(job.project_id),
-            job.to_dict(),
-        )
-
-    def _record_project_id(self, state_path: Path) -> str:
-        project_id = state_path.parents[2].name
-        return load_workspace_project_id(
-            project_id,
-            self.workspace_root,
-        ).manifest.project_id
+        self._glossary_jobs.load()
+        self._translation_jobs.load()
 
     def _upgrade_acquisition_failure(
         self,
@@ -814,119 +889,6 @@ class DashboardJobManager:
         job.updated_at = _utc_now()
         return True
 
-    def _load_records(self) -> None:
-        if not self.workspace_root.is_dir():
-            return
-        for state_path in self.workspace_root.glob(
-            "*/.glk/state/dashboard_source_job.json"
-        ):
-            try:
-                value = read_json_object(state_path)
-                if value is None:
-                    continue
-                source_job = DashboardSourceJob.from_dict(
-                    value,
-                    expected_project_id=self._record_project_id(state_path),
-                )
-                changed = False
-                if source_job.status in ACTIVE_JOB_STATUSES:
-                    now = _utc_now()
-                    source_job.status = "interrupted"
-                    source_job.progress_message = (
-                        "이전 대시보드가 종료되어 작업 상태를 확인할 수 없습니다."
-                    )
-                    source_job.error = (
-                        "Dashboard process stopped before job completion."
-                    )
-                    source_job.finished_at = now
-                    source_job.updated_at = now
-                    changed = True
-                if self._upgrade_acquisition_failure(source_job):
-                    changed = True
-                if changed:
-                    write_json_atomic(state_path, source_job.to_dict())
-                if source_job.status not in TERMINAL_JOB_STATUSES:
-                    continue
-                self._jobs[source_job.project_id] = source_job
-            except (
-                OSError,
-                UnicodeError,
-                TypeError,
-                ValueError,
-            ):
-                continue
-        for state_path in self.workspace_root.glob(
-            "*/.glk/state/dashboard_glossary_job.json"
-        ):
-            try:
-                value = read_json_object(state_path)
-                if value is None:
-                    continue
-                glossary_job = DashboardGlossaryJob.from_dict(
-                    value,
-                    expected_project_id=self._record_project_id(state_path),
-                )
-                if glossary_job.status in ACTIVE_JOB_STATUSES:
-                    now = _utc_now()
-                    glossary_job.status = "interrupted"
-                    glossary_job.progress_message = (
-                        "이전 대시보드가 종료되어 작업 상태를 확인할 수 없습니다."
-                    )
-                    glossary_job.error = (
-                        "Dashboard process stopped before job completion."
-                    )
-                    glossary_job.finished_at = now
-                    glossary_job.updated_at = now
-                    write_json_atomic(state_path, glossary_job.to_dict())
-                if glossary_job.status not in TERMINAL_JOB_STATUSES:
-                    continue
-                self._glossary_jobs[glossary_job.project_id] = glossary_job
-            except (
-                OSError,
-                UnicodeError,
-                TypeError,
-                ValueError,
-            ):
-                continue
-        for state_path in self.workspace_root.glob(
-            "*/.glk/state/dashboard_translation_job.json"
-        ):
-            try:
-                value = read_json_object(state_path)
-                if value is None:
-                    continue
-                translation_job = DashboardTranslationJob.from_dict(
-                    value,
-                    expected_project_id=self._record_project_id(state_path),
-                )
-                if translation_job.status in ACTIVE_JOB_STATUSES:
-                    now = _utc_now()
-                    translation_job.status = "interrupted"
-                    translation_job.progress_message = (
-                        "이전 대시보드가 종료되어 작업 상태를 확인할 수 없습니다."
-                    )
-                    translation_job.error = (
-                        "Dashboard process stopped before job completion."
-                    )
-                    translation_job.finished_at = now
-                    translation_job.updated_at = now
-                    write_json_atomic(
-                        state_path,
-                        translation_job.to_dict(),
-                    )
-                if translation_job.status not in TERMINAL_JOB_STATUSES:
-                    continue
-                self._translation_jobs[
-                    translation_job.project_id
-                ] = translation_job
-            except (
-                OSError,
-                UnicodeError,
-                TypeError,
-                ValueError,
-            ):
-                continue
-
     def _active_job(
         self,
     ) -> (
@@ -935,73 +897,64 @@ class DashboardJobManager:
         | DashboardTranslationJob
         | None
     ):
-        source_job = next(
-            (
-                job
-                for job in self._jobs.values()
-                if job.status in ACTIVE_JOB_STATUSES
-            ),
-            None,
-        )
-        if source_job is not None:
-            return source_job
-        glossary_job = next(
-            (
-                job
-                for job in self._glossary_jobs.values()
-                if job.status in ACTIVE_JOB_STATUSES
-            ),
-            None,
-        )
-        if glossary_job is not None:
-            return glossary_job
-        return next(
-            (
-                job
-                for job in self._translation_jobs.values()
-                if job.status in ACTIVE_JOB_STATUSES
-            ),
-            None,
-        )
+        for store in self._stores:
+            active = store.active()
+            if active is not None:
+                return active
+        return None
 
     def is_project_active(self, project_id: str) -> bool:
         with self._lock:
-            jobs = (
-                self._jobs.get(project_id),
-                self._glossary_jobs.get(project_id),
-                self._translation_jobs.get(project_id),
-            )
             return any(
-                job is not None and job.status in ACTIVE_JOB_STATUSES
-                for job in jobs
+                (job := store.records.get(project_id)) is not None
+                and job.status in ACTIVE_JOB_STATUSES
+                for store in self._stores
             )
+
+    def _ensure_start_allowed(self, project_id: str) -> None:
+        if self._closed:
+            raise DashboardJobError("Dashboard job manager is closed.")
+        active = self._active_job()
+        if active is None:
+            return
+        if active.project_id == project_id:
+            raise DashboardJobConflict(
+                "This project already has a background job running."
+            )
+        raise DashboardJobConflict(
+            "Another project background job is already running."
+        )
+
+    def _queue_job(
+        self,
+        store: _JobStore[JobRecordT],
+        job: JobRecordT,
+        *,
+        target: Callable[[str, str], None],
+        thread_name: str,
+    ) -> dict[str, Any]:
+        store.put(job)
+        queued_job = job.to_dict()
+        thread = threading.Thread(
+            target=target,
+            args=(job.job_id, job.project_id),
+            name=thread_name,
+            daemon=True,
+        )
+        thread.start()
+        return queued_job
 
     def list_jobs(self) -> list[dict[str, Any]]:
         with self._lock:
-            jobs = sorted(
-                self._jobs.values(),
-                key=lambda job: job.created_at,
-                reverse=True,
-            )
-            return [job.to_dict() for job in jobs]
+            return self._source_jobs.list_dicts()
 
     def list_glossary_jobs(self) -> list[dict[str, Any]]:
         with self._lock:
-            jobs = sorted(
-                self._glossary_jobs.values(),
-                key=lambda job: job.created_at,
-                reverse=True,
-            )
-            return [job.to_dict() for job in jobs]
+            return self._glossary_jobs.list_dicts()
 
     def list_translation_jobs(self) -> list[dict[str, Any]]:
         with self._lock:
-            jobs = sorted(
-                self._translation_jobs.values(),
-                key=lambda job: job.created_at,
-                reverse=True,
-            )
-            return [job.to_dict() for job in jobs]
+            return self._translation_jobs.list_dicts()
 
     def start_source_job(
         self,
@@ -1014,17 +967,7 @@ class DashboardJobManager:
             self.workspace_root,
         )
         with self._lock:
-            if self._closed:
-                raise DashboardJobError("Dashboard job manager is closed.")
-            active = self._active_job()
-            if active is not None:
-                if active.project_id == project_id:
-                    raise DashboardJobConflict(
-                        "This project already has a background job running."
-                    )
-                raise DashboardJobConflict(
-                    "Another project background job is already running."
-                )
+            self._ensure_start_allowed(project_id)
             now = _utc_now()
             job = DashboardSourceJob(
                 job_id=uuid4().hex,
@@ -1042,17 +985,12 @@ class DashboardJobManager:
                 finished_at=None,
                 updated_at=now,
             )
-            self._jobs[project_id] = job
-            self._persist(job)
-            queued_job = job.to_dict()
-            thread = threading.Thread(
+            return self._queue_job(
+                self._source_jobs,
+                job,
                 target=self._execute_source,
-                args=(job.job_id, project_id),
-                name=f"glk-source-job-{project_id}",
-                daemon=True,
+                thread_name=f"glk-source-job-{project_id}",
             )
-            thread.start()
-            return queued_job
 
     def start_glossary_job(
         self,
@@ -1078,17 +1016,7 @@ class DashboardJobManager:
                 "from the dashboard."
             )
         with self._lock:
-            if self._closed:
-                raise DashboardJobError("Dashboard job manager is closed.")
-            active = self._active_job()
-            if active is not None:
-                if active.project_id == project_id:
-                    raise DashboardJobConflict(
-                        "This project already has a background job running."
-                    )
-                raise DashboardJobConflict(
-                    "Another project background job is already running."
-                )
+            self._ensure_start_allowed(project_id)
             now = _utc_now()
             job = DashboardGlossaryJob(
                 job_id=uuid4().hex,
@@ -1104,17 +1032,12 @@ class DashboardJobManager:
                 finished_at=None,
                 updated_at=now,
             )
-            self._glossary_jobs[project_id] = job
-            self._persist_glossary(job)
-            queued_job = job.to_dict()
-            thread = threading.Thread(
+            return self._queue_job(
+                self._glossary_jobs,
+                job,
                 target=self._execute_glossary,
-                args=(job.job_id, project_id),
-                name=f"glk-glossary-job-{project_id}",
-                daemon=True,
+                thread_name=f"glk-glossary-job-{project_id}",
             )
-            thread.start()
-            return queued_job
 
     def start_translation_job(
         self,
@@ -1136,17 +1059,7 @@ class DashboardJobManager:
             self.workspace_root,
         )
         with self._lock:
-            if self._closed:
-                raise DashboardJobError("Dashboard job manager is closed.")
-            active = self._active_job()
-            if active is not None:
-                if active.project_id == project_id:
-                    raise DashboardJobConflict(
-                        "This project already has a background job running."
-                    )
-                raise DashboardJobConflict(
-                    "Another project background job is already running."
-                )
+            self._ensure_start_allowed(project_id)
             pipeline = inspect_project(location.path)["pipeline"]
             if not pipeline["final_source_approved"]:
                 raise DashboardJobError(
@@ -1232,29 +1145,44 @@ class DashboardJobManager:
                 finished_at=None,
                 updated_at=now,
             )
-            self._translation_jobs[project_id] = job
-            self._persist_translation(job)
-            queued_job = job.to_dict()
-            thread = threading.Thread(
+            return self._queue_job(
+                self._translation_jobs,
+                job,
                 target=self._execute_translation,
-                args=(job.job_id, project_id),
-                name=f"glk-translation-job-{project_id}",
-                daemon=True,
+                thread_name=f"glk-translation-job-{project_id}",
             )
-            thread.start()
-            return queued_job
 
-    def _execute_source(self, job_id: str, project_id: str) -> None:
+    def _execute_job(
+        self,
+        store: _JobStore[JobRecordT],
+        *,
+        job_id: str,
+        project_id: str,
+        running_message: str,
+        run: Callable[[JobRecordT, JobProgress], dict[str, Any]],
+        terminal_statuses: frozenset[str],
+        invalid_status_message: str,
+        result_error: Callable[
+            [str, dict[str, Any]],
+            str | None,
+        ],
+        exception_error: Callable[[Exception, JobRecordT], str],
+        completion_message: Callable[
+            [str, dict[str, Any] | None],
+            str,
+        ],
+        complete_progress_on_success: bool = False,
+    ) -> None:
         with self._lock:
-            job = self._jobs.get(project_id)
-            if job is None or job.job_id != job_id:
+            job = store.matching(project_id, job_id)
+            if job is None:
                 return
             now = _utc_now()
             job.status = "running"
             job.started_at = now
             job.updated_at = now
-            job.progress_message = "원문 준비 작업을 시작했습니다."
-            self._persist(job)
+            job.progress_message = running_message
+            store.persist(job)
 
         def report(
             message: str,
@@ -1262,8 +1190,8 @@ class DashboardJobManager:
             total: int | None,
         ) -> None:
             with self._lock:
-                current_job = self._jobs.get(project_id)
-                if current_job is None or current_job.job_id != job_id:
+                current_job = store.matching(project_id, job_id)
+                if current_job is None:
                     return
                 current_job.progress_message = message
                 if current is not None:
@@ -1271,169 +1199,143 @@ class DashboardJobManager:
                 if total is not None:
                     current_job.progress_total = total
                 current_job.updated_at = _utc_now()
-                self._persist(current_job)
+                store.persist(current_job)
 
         try:
-            result = self._source_runner(
+            run_result = run(job, report)
+            status = str(run_result.get("status") or "")
+            if status not in terminal_statuses:
+                raise DashboardJobError(invalid_status_message)
+            error = result_error(status, run_result)
+            result: dict[str, Any] | None = run_result
+        except Exception as caught:
+            result = None
+            status = "failed"
+            error = exception_error(caught, job)
+
+        with self._lock:
+            current_job = store.matching(project_id, job_id)
+            if current_job is None:
+                return
+            now = _utc_now()
+            current_job.status = status
+            current_job.result = result
+            current_job.error = error
+            current_job.finished_at = now
+            current_job.updated_at = now
+            current_job.progress_message = completion_message(status, result)
+            if complete_progress_on_success and status == "succeeded":
+                current_job.progress_current = current_job.progress_total
+            store.persist(current_job)
+
+    def _execute_source(self, job_id: str, project_id: str) -> None:
+        def run(
+            job: DashboardSourceJob,
+            report: JobProgress,
+        ) -> dict[str, Any]:
+            return self._source_runner(
                 project_id,
                 self.workspace_root,
                 job.model,
                 report,
             )
-            status = str(result.get("status") or "")
-            if status not in {"succeeded", "partial", "failed"}:
-                raise DashboardJobError(
-                    "Source job runner returned an invalid terminal status."
-                )
-            error_value = result.get("error")
-            error = (
-                str(error_value)
-                if status in {"partial", "failed"} and error_value
-                else (
-                    "일부 원본 처리에 실패했습니다. 다시 시도하세요."
-                    if status == "partial"
-                    else (
-                        "원문 준비 작업에 실패했습니다. 다시 시도하세요."
-                        if status == "failed"
-                        else None
-                    )
-                )
-            )
-        except Exception as caught:
-            result = None
-            status = "failed"
-            error = _safe_provider_error([str(caught)], job.model)
 
-        with self._lock:
-            current_job = self._jobs.get(project_id)
-            if current_job is None or current_job.job_id != job_id:
-                return
-            now = _utc_now()
-            current_job.status = status
-            current_job.result = result
-            current_job.error = error
-            current_job.finished_at = now
-            current_job.updated_at = now
+        def result_error(
+            status: str,
+            result: dict[str, Any],
+        ) -> str | None:
+            error_value = result.get("error")
+            if status in {"partial", "failed"} and error_value:
+                return str(error_value)
+            if status == "partial":
+                return "일부 원본 처리에 실패했습니다. 다시 시도하세요."
+            if status == "failed":
+                return "원문 준비 작업에 실패했습니다. 다시 시도하세요."
+            return None
+
+        def completion_message(
+            status: str,
+            _result: dict[str, Any] | None,
+        ) -> str:
             if status == "succeeded":
-                current_job.progress_message = "원문 검수 준비가 완료되었습니다."
-            elif status == "partial":
-                current_job.progress_message = (
-                    "일부 원본 처리에 실패했습니다."
-                )
-            else:
-                current_job.progress_message = "원문 준비 작업에 실패했습니다."
-            self._persist(current_job)
+                return "원문 검수 준비가 완료되었습니다."
+            if status == "partial":
+                return "일부 원본 처리에 실패했습니다."
+            return "원문 준비 작업에 실패했습니다."
+
+        self._execute_job(
+            self._source_jobs,
+            job_id=job_id,
+            project_id=project_id,
+            running_message="원문 준비 작업을 시작했습니다.",
+            run=run,
+            terminal_statuses=frozenset({"succeeded", "partial", "failed"}),
+            invalid_status_message=(
+                "Source job runner returned an invalid terminal status."
+            ),
+            result_error=result_error,
+            exception_error=lambda caught, job: _safe_provider_error(
+                [str(caught)],
+                job.model,
+            ),
+            completion_message=completion_message,
+        )
 
     def _execute_glossary(self, job_id: str, project_id: str) -> None:
-        with self._lock:
-            job = self._glossary_jobs.get(project_id)
-            if job is None or job.job_id != job_id:
-                return
-            now = _utc_now()
-            job.status = "running"
-            job.started_at = now
-            job.updated_at = now
-            job.progress_message = "용어 후보 생성을 시작했습니다."
-            self._persist_glossary(job)
-
-        def report(
-            message: str,
-            current: int | None,
-            total: int | None,
-        ) -> None:
-            with self._lock:
-                current_job = self._glossary_jobs.get(project_id)
-                if current_job is None or current_job.job_id != job_id:
-                    return
-                current_job.progress_message = message
-                if current is not None:
-                    current_job.progress_current = current
-                if total is not None:
-                    current_job.progress_total = total
-                current_job.updated_at = _utc_now()
-                self._persist_glossary(current_job)
-
-        try:
-            result = self._glossary_runner(
+        def run(
+            _job: DashboardGlossaryJob,
+            report: JobProgress,
+        ) -> dict[str, Any]:
+            return self._glossary_runner(
                 project_id,
                 self.workspace_root,
                 report,
             )
-            status = str(result.get("status") or "")
-            if status not in {"succeeded", "failed"}:
-                raise DashboardJobError(
-                    "Glossary job runner returned an invalid terminal status."
-                )
+
+        def result_error(
+            status: str,
+            result: dict[str, Any],
+        ) -> str | None:
             error_value = result.get("error")
-            error = (
-                str(error_value)
-                if status == "failed" and error_value
-                else (
-                    "용어 후보 생성에 실패했습니다. 다시 시도하세요."
-                    if status == "failed"
-                    else None
-                )
-            )
-        except Exception:
-            result = None
-            status = "failed"
-            error = (
+            if status == "failed" and error_value:
+                return str(error_value)
+            if status == "failed":
+                return "용어 후보 생성에 실패했습니다. 다시 시도하세요."
+            return None
+
+        self._execute_job(
+            self._glossary_jobs,
+            job_id=job_id,
+            project_id=project_id,
+            running_message="용어 후보 생성을 시작했습니다.",
+            run=run,
+            terminal_statuses=frozenset({"succeeded", "failed"}),
+            invalid_status_message=(
+                "Glossary job runner returned an invalid terminal status."
+            ),
+            result_error=result_error,
+            exception_error=lambda _caught, _job: (
                 "용어 후보 생성에 실패했습니다. "
                 "승인 원문 상태를 확인한 뒤 다시 시도하세요."
-            )
-
-        with self._lock:
-            current_job = self._glossary_jobs.get(project_id)
-            if current_job is None or current_job.job_id != job_id:
-                return
-            now = _utc_now()
-            current_job.status = status
-            current_job.result = result
-            current_job.error = error
-            current_job.finished_at = now
-            current_job.updated_at = now
-            if status == "succeeded":
-                current_job.progress_message = "용어 후보 생성이 완료되었습니다."
-                current_job.progress_current = current_job.progress_total
-            else:
-                current_job.progress_message = "용어 후보 생성에 실패했습니다."
-            self._persist_glossary(current_job)
+            ),
+            completion_message=lambda status, _result: (
+                "용어 후보 생성이 완료되었습니다."
+                if status == "succeeded"
+                else "용어 후보 생성에 실패했습니다."
+            ),
+            complete_progress_on_success=True,
+        )
 
     def _execute_translation(
         self,
         job_id: str,
         project_id: str,
     ) -> None:
-        with self._lock:
-            job = self._translation_jobs.get(project_id)
-            if job is None or job.job_id != job_id:
-                return
-            now = _utc_now()
-            job.status = "running"
-            job.started_at = now
-            job.updated_at = now
-            job.progress_message = "초벌 번역을 시작했습니다."
-            self._persist_translation(job)
-
-        def report(
-            message: str,
-            current: int | None,
-            total: int | None,
-        ) -> None:
-            with self._lock:
-                current_job = self._translation_jobs.get(project_id)
-                if current_job is None or current_job.job_id != job_id:
-                    return
-                current_job.progress_message = message
-                if current is not None:
-                    current_job.progress_current = current
-                if total is not None:
-                    current_job.progress_total = total
-                current_job.updated_at = _utc_now()
-                self._persist_translation(current_job)
-
-        try:
-            result = self._translation_runner(
+        def run(
+            job: DashboardTranslationJob,
+            report: JobProgress,
+        ) -> dict[str, Any]:
+            return self._translation_runner(
                 project_id,
                 self.workspace_root,
                 job.model,
@@ -1441,55 +1343,55 @@ class DashboardJobManager:
                 job.force,
                 report,
             )
-            status = str(result.get("status") or "")
-            if status not in {"succeeded", "failed"}:
-                raise DashboardJobError(
-                    "Translation job runner returned an invalid terminal status."
-                )
-            error_value = result.get("error")
-            error = (
-                str(error_value)
-                if status == "failed" and error_value
-                else (
-                    "초벌 번역에 실패했습니다. 다시 시도하세요."
-                    if status == "failed"
-                    else None
-                )
-            )
-        except Exception as caught:
-            result = None
-            status = "failed"
-            error = _safe_translation_error(caught, job.model)
 
-        with self._lock:
-            current_job = self._translation_jobs.get(project_id)
-            if current_job is None or current_job.job_id != job_id:
-                return
-            now = _utc_now()
-            current_job.status = status
-            current_job.result = result
-            current_job.error = error
-            current_job.finished_at = now
-            current_job.updated_at = now
-            if status == "succeeded":
-                qa = result.get("qa") if isinstance(result, dict) else None
-                qa_errors = (
-                    qa.get("error_count")
-                    if isinstance(qa, dict)
-                    else None
+        def result_error(
+            status: str,
+            result: dict[str, Any],
+        ) -> str | None:
+            error_value = result.get("error")
+            if status == "failed" and error_value:
+                return str(error_value)
+            if status == "failed":
+                return "초벌 번역에 실패했습니다. 다시 시도하세요."
+            return None
+
+        def completion_message(
+            status: str,
+            result: dict[str, Any] | None,
+        ) -> str:
+            if status != "succeeded":
+                return "초벌 번역에 실패했습니다."
+            qa = result.get("qa") if isinstance(result, dict) else None
+            qa_errors = (
+                qa.get("error_count")
+                if isinstance(qa, dict)
+                else None
+            )
+            if isinstance(qa_errors, int) and qa_errors > 0:
+                return (
+                    "초벌 번역이 완료되었습니다. "
+                    f"번역 검수에서 {qa_errors}개 오류를 확인하세요."
                 )
-                current_job.progress_message = (
-                    (
-                        "초벌 번역이 완료되었습니다. "
-                        f"번역 검수에서 {qa_errors}개 오류를 확인하세요."
-                    )
-                    if isinstance(qa_errors, int) and qa_errors > 0
-                    else "초벌 번역과 검수 파일 생성이 완료되었습니다."
-                )
-                current_job.progress_current = current_job.progress_total
-            else:
-                current_job.progress_message = "초벌 번역에 실패했습니다."
-            self._persist_translation(current_job)
+            return "초벌 번역과 검수 파일 생성이 완료되었습니다."
+
+        self._execute_job(
+            self._translation_jobs,
+            job_id=job_id,
+            project_id=project_id,
+            running_message="초벌 번역을 시작했습니다.",
+            run=run,
+            terminal_statuses=frozenset({"succeeded", "failed"}),
+            invalid_status_message=(
+                "Translation job runner returned an invalid terminal status."
+            ),
+            result_error=result_error,
+            exception_error=lambda caught, job: _safe_translation_error(
+                caught,
+                job.model,
+            ),
+            completion_message=completion_message,
+            complete_progress_on_success=True,
+        )
 
     def close(self) -> None:
         with self._lock:
