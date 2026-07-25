@@ -125,7 +125,10 @@ class SourceQaServiceTests(unittest.TestCase):
             blocks = [make_block(1, "Deal 10 {DMGR}.")]
             write_blocks(location.path / ".glk/segments/source.jsonl", blocks)
             prompt_path = location.path / "01_input/images/ocr_prompt.txt"
-            prompt_path.write_text("Eight-point burst: {DMGR}", encoding="utf-8")
+            prompt_path.write_text(
+                "Eight-point burst: {DMGR}\nKeep line order.\n",
+                encoding="utf-8",
+            )
 
             first = run_project_source_qa(
                 project="qa_project", workspace_root=workspace_root
@@ -138,6 +141,11 @@ class SourceQaServiceTests(unittest.TestCase):
             human_report = (location.path / "02_source/qa.md").read_text(encoding="utf-8")
             self.assertIn("발견된 의심 항목이 없습니다", human_report)
 
+            prompt_path.write_bytes(
+                prompt_path.read_text(encoding="utf-8")
+                .replace("\n", "\r\n")
+                .encode("utf-8")
+            )
             cached = run_project_source_qa(
                 project="qa_project", workspace_root=workspace_root
             )

@@ -97,6 +97,7 @@ class DashboardJobManagerTests(unittest.TestCase):
         state = json.loads(state_path.read_text(encoding="utf-8"))
         self.assertEqual(state["job_id"], started["job_id"])
         self.assertEqual(state["status"], "succeeded")
+        self.assertEqual(state["schema_version"], 1)
         manager.close()
 
     def test_rejects_a_second_job_while_one_is_running(self) -> None:
@@ -140,7 +141,7 @@ class DashboardJobManagerTests(unittest.TestCase):
             json.dumps(
                 {
                     "job_id": "old-job",
-                    "project_id": "background_job",
+                    "project_id": "untrusted_project_id",
                     "source_type": "pdf",
                     "model": "gemini-test",
                     "status": "running",
@@ -161,9 +162,61 @@ class DashboardJobManagerTests(unittest.TestCase):
         manager = DashboardJobManager(self.workspace_root)
 
         job = manager.list_jobs()[0]
+        self.assertEqual(job["project_id"], "background_job")
         self.assertEqual(job["status"], "interrupted")
         self.assertIsNotNone(job["finished_at"])
         self.assertIn("종료", job["progress_message"])
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["project_id"], "background_job")
+        self.assertEqual(persisted["schema_version"], 1)
+        manager.close()
+
+    def test_ignores_saved_job_with_invalid_field_types_or_status(self) -> None:
+        state_path = WorkspacePaths(
+            self.location.path
+        ).dashboard_source_job_state
+        base_state = {
+            "schema_version": 1,
+            "job_id": "invalid-job",
+            "project_id": "background_job",
+            "source_type": "pdf",
+            "model": "gemini-test",
+            "status": "succeeded",
+            "progress_message": "done",
+            "progress_current": 1,
+            "progress_total": 1,
+            "result": {"ok": True},
+            "error": None,
+            "created_at": "2026-07-24T00:00:00Z",
+            "started_at": "2026-07-24T00:00:01Z",
+            "finished_at": "2026-07-24T00:00:02Z",
+            "updated_at": "2026-07-24T00:00:02Z",
+        }
+        for invalid_field, invalid_value in (
+            ("schema_version", 2),
+            ("status", "unknown"),
+            ("progress_current", "1"),
+            ("result", []),
+            ("created_at", "not-a-timestamp"),
+        ):
+            with self.subTest(field=invalid_field):
+                state = dict(base_state)
+                state[invalid_field] = invalid_value
+                state_path.write_text(
+                    json.dumps(state),
+                    encoding="utf-8",
+                )
+
+                manager = DashboardJobManager(self.workspace_root)
+
+                self.assertEqual(manager.list_jobs(), [])
+                manager.close()
+
+        state = dict(base_state)
+        del state["job_id"]
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        manager = DashboardJobManager(self.workspace_root)
+        self.assertEqual(manager.list_jobs(), [])
         manager.close()
 
     def test_upgrades_a_saved_generic_partial_record(self) -> None:

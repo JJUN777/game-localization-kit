@@ -13,7 +13,7 @@ class ErrorResponseTests(unittest.TestCase):
         )
 
         self.assertEqual(error.code, "TRANSLATION_FAILED")
-        self.assertIn("용어집", error.message)
+        self.assertEqual(error.message, "초벌 번역에 실패했습니다.")
         self.assertEqual(error.detail, "Termbase is not current.")
         self.assertEqual(
             error.to_dict(),
@@ -34,6 +34,16 @@ class ErrorResponseTests(unittest.TestCase):
         self.assertEqual(error.code, "REVIEW_CONFLICT")
         self.assertIn("새로고침", error.message)
         self.assertIn("changed after", error.detail or "")
+
+    def test_explicit_code_message_precedes_detail_inference(self) -> None:
+        error = make_http_error_response(
+            409,
+            "Translation review is stale.",
+            code="INVALID_REQUEST",
+        )
+
+        self.assertEqual(error.code, "INVALID_REQUEST")
+        self.assertEqual(error.message, "요청 형식이 올바르지 않습니다.")
 
     def test_unknown_error_code_uses_safe_korean_fallback(self) -> None:
         error = make_error_response("UNKNOWN_FAILURE", "technical failure")

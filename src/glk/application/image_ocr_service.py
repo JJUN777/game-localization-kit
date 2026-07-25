@@ -12,6 +12,7 @@ from PIL import Image, ImageOps
 from glk.application._cache import invalid_cache, read_json_object
 from glk.application._hashing import sha256_bytes as _sha256_bytes
 from glk.application._hashing import sha256_file as _sha256_file
+from glk.application._hashing import sha256_text as _sha256_text
 from glk.application._io import copy_file_atomic as _copy_file_atomic
 from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application._io import write_json_atomic as _write_json_atomic
@@ -241,7 +242,7 @@ def ocr_project_images(
         registered_prompt = paths.input_ocr_prompt
 
     common_instructions = _read_text(registered_prompt)
-    common_prompt_hash = _sha256_bytes(common_instructions.encode("utf-8"))
+    common_prompt_hash = _sha256_text(common_instructions)
     active_provider = provider or GeminiImageOcrProvider.from_environment(model_name)
     individual_dir = paths.ocr_individual
     results_dir = paths.ocr_results
@@ -260,7 +261,7 @@ def ocr_project_images(
         image_prompt_path = image_path.with_name(image_path.name + ".prompt.txt")
         image_instructions = _read_text(image_prompt_path)
         image_hash = _sha256_file(image_path)
-        image_prompt_hash = _sha256_bytes(image_instructions.encode("utf-8"))
+        image_prompt_hash = _sha256_text(image_instructions)
         notify(f"Image {index}/{len(registered_images)}: {relative_name}")
         try:
             ocr = None if force else _load_cached_result(

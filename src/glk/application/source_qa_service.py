@@ -11,6 +11,7 @@ import re
 from typing import Any
 
 from glk.application._cache import invalid_cache, read_json_object
+from glk.application._hashing import normalize_text_newlines
 from glk.application._hashing import sha256_bytes as _sha256_bytes
 from glk.application._hashing import sha256_file_if_exists as _sha256_file
 from glk.application._io import write_bytes_atomic as _write_bytes_atomic
@@ -108,7 +109,11 @@ def _load_allowed_tokens(project_path: Path) -> tuple[tuple[str, ...], bytes]:
         text = data.decode("utf-8")
     except UnicodeDecodeError as error:
         raise SourceQaError(f"OCR prompt is not valid UTF-8: {prompt_path}") from error
-    return tuple(sorted(set(_TOKEN_PATTERN.findall(text)))), data
+    normalized = normalize_text_newlines(text)
+    return (
+        tuple(sorted(set(_TOKEN_PATTERN.findall(normalized)))),
+        normalized.encode("utf-8"),
+    )
 
 
 def _qa_input_hash(source_data: bytes, prompt_data: bytes) -> str:

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-import json
 from pathlib import Path
 import re
 import threading
 from typing import Any, Callable
 from uuid import uuid4
 
+from glk.application._cache import read_json_object
 from glk.application._io import write_bytes_atomic, write_json_atomic
 from glk.application.extraction_service import extract_project_pdf
 from glk.application.glossary_service import (
@@ -47,6 +47,8 @@ ACTIVE_JOB_STATUSES = frozenset({"queued", "running"})
 TERMINAL_JOB_STATUSES = frozenset(
     {"succeeded", "partial", "failed", "interrupted"}
 )
+JOB_SCHEMA_VERSION = 1
+_JOB_STATUSES = ACTIVE_JOB_STATUSES | TERMINAL_JOB_STATUSES
 _PDF_PROGRESS = re.compile(r"^Page (\d+):")
 _IMAGE_PROGRESS = re.compile(r"^Image (\d+)/(\d+):")
 _TRANSLATION_PROGRESS = re.compile(r"^Chunk (\d+)/(\d+):")
@@ -74,6 +76,120 @@ class DashboardJobConflict(DashboardJobError):
     """Raised when a conflicting source job is already active."""
 
 
+_COMMON_JOB_FIELDS = frozenset(
+    {
+        "job_id",
+        "project_id",
+        "status",
+        "progress_message",
+        "progress_current",
+        "progress_total",
+        "result",
+        "error",
+        "created_at",
+        "started_at",
+        "finished_at",
+        "updated_at",
+    }
+)
+
+
+def _validated_job_payload(
+    value: dict[str, Any],
+    *,
+    expected_project_id: str,
+    extra_fields: frozenset[str],
+) -> dict[str, Any]:
+    fields = _COMMON_JOB_FIELDS | extra_fields
+    schema_version = value.get("schema_version", JOB_SCHEMA_VERSION)
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version != JOB_SCHEMA_VERSION
+    ):
+        raise DashboardJobError(
+            f"Unsupported dashboard job schema version: {schema_version!r}"
+        )
+    unknown = set(value) - fields - {"schema_version"}
+    missing = fields - set(value)
+    if missing:
+        raise DashboardJobError(
+            "Dashboard job state is missing fields: "
+            + ", ".join(sorted(missing))
+        )
+    if unknown:
+        raise DashboardJobError(
+            "Dashboard job state has unknown fields: "
+            + ", ".join(sorted(unknown))
+        )
+
+    payload = {name: value[name] for name in fields}
+    for name in ("job_id", "project_id", "status", "progress_message"):
+        if not isinstance(payload[name], str) or not payload[name]:
+            raise DashboardJobError(
+                f"Dashboard job field {name} must be a non-empty string."
+            )
+    if payload["status"] not in _JOB_STATUSES:
+        raise DashboardJobError(
+            f"Dashboard job status is invalid: {payload['status']!r}"
+        )
+    for name in ("progress_current", "progress_total"):
+        progress = payload[name]
+        if progress is not None and (
+            not isinstance(progress, int)
+            or isinstance(progress, bool)
+            or progress < 0
+        ):
+            raise DashboardJobError(
+                f"Dashboard job field {name} must be a non-negative integer or null."
+            )
+    current = payload["progress_current"]
+    total = payload["progress_total"]
+    if current is not None and total is not None and current > total:
+        raise DashboardJobError(
+            "Dashboard job progress_current must not exceed progress_total."
+        )
+    if payload["result"] is not None and not isinstance(payload["result"], dict):
+        raise DashboardJobError(
+            "Dashboard job result must be an object or null."
+        )
+    if payload["error"] is not None and not isinstance(payload["error"], str):
+        raise DashboardJobError(
+            "Dashboard job error must be a string or null."
+        )
+    for name in ("created_at", "updated_at"):
+        _validate_job_timestamp(payload[name], name, optional=False)
+    for name in ("started_at", "finished_at"):
+        _validate_job_timestamp(payload[name], name, optional=True)
+    payload["project_id"] = expected_project_id
+    return payload
+
+
+def _validate_job_timestamp(
+    value: Any,
+    name: str,
+    *,
+    optional: bool,
+) -> None:
+    if value is None and optional:
+        return
+    if not isinstance(value, str) or not value:
+        raise DashboardJobError(
+            f"Dashboard job field {name} must be an ISO-8601 timestamp"
+            + (" or null." if optional else ".")
+        )
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise DashboardJobError(
+            f"Dashboard job field {name} is not a valid ISO-8601 timestamp."
+        ) from error
+    if parsed.tzinfo is None:
+        raise DashboardJobError(
+            f"Dashboard job field {name} must include a timezone."
+        )
+
+
 @dataclass(slots=True)
 class DashboardSourceJob:
     job_id: str
@@ -92,7 +208,29 @@ class DashboardSourceJob:
     updated_at: str
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {"schema_version": JOB_SCHEMA_VERSION, **asdict(self)}
+
+    @classmethod
+    def from_dict(
+        cls,
+        value: dict[str, Any],
+        *,
+        expected_project_id: str,
+    ) -> DashboardSourceJob:
+        payload = _validated_job_payload(
+            value,
+            expected_project_id=expected_project_id,
+            extra_fields=frozenset({"source_type", "model"}),
+        )
+        if payload["source_type"] not in {"pdf", "images"}:
+            raise DashboardJobError(
+                "Dashboard source job source_type must be pdf or images."
+            )
+        if not isinstance(payload["model"], str) or not payload["model"]:
+            raise DashboardJobError(
+                "Dashboard source job model must be a non-empty string."
+            )
+        return cls(**payload)
 
 
 @dataclass(slots=True)
@@ -111,7 +249,22 @@ class DashboardGlossaryJob:
     updated_at: str
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {"schema_version": JOB_SCHEMA_VERSION, **asdict(self)}
+
+    @classmethod
+    def from_dict(
+        cls,
+        value: dict[str, Any],
+        *,
+        expected_project_id: str,
+    ) -> DashboardGlossaryJob:
+        return cls(
+            **_validated_job_payload(
+                value,
+                expected_project_id=expected_project_id,
+                extra_fields=frozenset(),
+            )
+        )
 
 
 @dataclass(slots=True)
@@ -133,7 +286,32 @@ class DashboardTranslationJob:
     updated_at: str
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {"schema_version": JOB_SCHEMA_VERSION, **asdict(self)}
+
+    @classmethod
+    def from_dict(
+        cls,
+        value: dict[str, Any],
+        *,
+        expected_project_id: str,
+    ) -> DashboardTranslationJob:
+        legacy = dict(value)
+        legacy.setdefault("force", False)
+        payload = _validated_job_payload(
+            legacy,
+            expected_project_id=expected_project_id,
+            extra_fields=frozenset({"model", "resume", "force"}),
+        )
+        if not isinstance(payload["model"], str) or not payload["model"]:
+            raise DashboardJobError(
+                "Dashboard translation job model must be a non-empty string."
+            )
+        for name in ("resume", "force"):
+            if not isinstance(payload[name], bool):
+                raise DashboardJobError(
+                    f"Dashboard translation job {name} must be a boolean."
+                )
+        return cls(**payload)
 
 
 def _utc_now() -> str:
@@ -575,6 +753,13 @@ class DashboardJobManager:
             job.to_dict(),
         )
 
+    def _record_project_id(self, state_path: Path) -> str:
+        project_id = state_path.parents[2].name
+        return load_workspace_project_id(
+            project_id,
+            self.workspace_root,
+        ).manifest.project_id
+
     def _upgrade_acquisition_failure(
         self,
         job: DashboardSourceJob,
@@ -636,8 +821,13 @@ class DashboardJobManager:
             "*/.glk/state/dashboard_source_job.json"
         ):
             try:
-                value = json.loads(state_path.read_text(encoding="utf-8"))
-                source_job = DashboardSourceJob(**value)
+                value = read_json_object(state_path)
+                if value is None:
+                    continue
+                source_job = DashboardSourceJob.from_dict(
+                    value,
+                    expected_project_id=self._record_project_id(state_path),
+                )
                 changed = False
                 if source_job.status in ACTIVE_JOB_STATUSES:
                     now = _utc_now()
@@ -661,7 +851,6 @@ class DashboardJobManager:
             except (
                 OSError,
                 UnicodeError,
-                json.JSONDecodeError,
                 TypeError,
                 ValueError,
             ):
@@ -670,8 +859,13 @@ class DashboardJobManager:
             "*/.glk/state/dashboard_glossary_job.json"
         ):
             try:
-                value = json.loads(state_path.read_text(encoding="utf-8"))
-                glossary_job = DashboardGlossaryJob(**value)
+                value = read_json_object(state_path)
+                if value is None:
+                    continue
+                glossary_job = DashboardGlossaryJob.from_dict(
+                    value,
+                    expected_project_id=self._record_project_id(state_path),
+                )
                 if glossary_job.status in ACTIVE_JOB_STATUSES:
                     now = _utc_now()
                     glossary_job.status = "interrupted"
@@ -690,7 +884,6 @@ class DashboardJobManager:
             except (
                 OSError,
                 UnicodeError,
-                json.JSONDecodeError,
                 TypeError,
                 ValueError,
             ):
@@ -699,10 +892,13 @@ class DashboardJobManager:
             "*/.glk/state/dashboard_translation_job.json"
         ):
             try:
-                value = json.loads(state_path.read_text(encoding="utf-8"))
-                if isinstance(value, dict):
-                    value.setdefault("force", False)
-                translation_job = DashboardTranslationJob(**value)
+                value = read_json_object(state_path)
+                if value is None:
+                    continue
+                translation_job = DashboardTranslationJob.from_dict(
+                    value,
+                    expected_project_id=self._record_project_id(state_path),
+                )
                 if translation_job.status in ACTIVE_JOB_STATUSES:
                     now = _utc_now()
                     translation_job.status = "interrupted"
@@ -726,7 +922,6 @@ class DashboardJobManager:
             except (
                 OSError,
                 UnicodeError,
-                json.JSONDecodeError,
                 TypeError,
                 ValueError,
             ):

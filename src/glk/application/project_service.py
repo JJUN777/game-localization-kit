@@ -12,6 +12,9 @@ from typing import Any
 
 from glk.application._cache import read_json_object
 from glk.application._hashing import sha256_file_if_exists as _sha256_file
+from glk.application._hashing import (
+    sha256_text_file_if_exists as _sha256_text_file,
+)
 from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.domain.project import (
     ProjectError,
@@ -505,7 +508,7 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
         or translation_state.get("approved_source_sha256") != approved_sha256
         or translation_state.get("termbase_sha256") != _sha256_file(termbase_path)
         or translation_state.get("project_prompt_sha256")
-        != _sha256_file(translation_prompt_path)
+        != _sha256_text_file(translation_prompt_path)
     ):
         translation_status = "stale"
         translated_blocks = translation_state.get("completed_blocks")

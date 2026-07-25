@@ -12,6 +12,7 @@ from typing import Any
 
 from glk.application._cache import read_json_object
 from glk.application._hashing import sha256_bytes as _sha256_bytes
+from glk.application._hashing import sha256_text as _sha256_text
 from glk.application._io import (
     write_bytes_atomic as _write_bytes_atomic,
     write_json_atomic as _write_json_atomic,
@@ -534,7 +535,7 @@ def translate_project(
     approved_hash = _sha256_bytes(approved_data)
     termbase_hash = _sha256_bytes(termbase_data)
     prompt_data = project_instructions.encode("utf-8")
-    prompt_hash = _sha256_bytes(prompt_data)
+    prompt_hash = _sha256_text(project_instructions)
     chunks = build_translation_chunks(blocks, max_characters=max_characters)
 
     if provider is not None:

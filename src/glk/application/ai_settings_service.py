@@ -11,6 +11,7 @@ from typing import Any, Mapping
 from dotenv import dotenv_values
 
 from glk.application._io import write_text_atomic
+from glk.config import resolve_settings_root
 from glk.infrastructure.gemini_layout import DEFAULT_MODEL
 
 
@@ -43,14 +44,14 @@ class AiSettingsService:
 
     def __init__(
         self,
-        settings_root: str | Path,
+        settings_root: str | Path | None = None,
         *,
         environment: Mapping[str, str] | None = None,
     ) -> None:
-        root = Path(settings_root).expanduser()
-        if not root.is_absolute():
-            root = Path.cwd() / root
-        self.settings_root = root.resolve()
+        self.settings_root = resolve_settings_root(
+            settings_root,
+            environment=environment,
+        )
         self.env_path = self.settings_root / ".env"
         source_environment = os.environ if environment is None else environment
         self._environment_api_key = source_environment.get(

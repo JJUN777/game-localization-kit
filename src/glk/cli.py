@@ -983,6 +983,7 @@ def _run_dashboard(args: argparse.Namespace) -> int:
     try:
         serve_dashboard(
             workspace_root=args.workspace_root,
+            settings_root=args.settings_root,
             port=args.port,
             open_browser=not args.no_open,
         )
@@ -1068,6 +1069,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--workspace-root",
         default="workspaces",
         help="Parent directory for project workspaces",
+    )
+    ui_parser.add_argument(
+        "--settings-root",
+        help=(
+            "Directory containing .env; defaults to GLK_SETTINGS_ROOT, "
+            "the editable project root, or the user config directory"
+        ),
     )
     ui_parser.add_argument(
         "--port",

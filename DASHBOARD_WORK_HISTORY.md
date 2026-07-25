@@ -720,6 +720,19 @@ git diff --check
 - 전체 212개 테스트, 설정된 16개 Python 파일 mypy, Python bytecode 컴파일과 `git diff --check`를 통과했습니다.
 - Orca에서 최신 서버의 완료 프로젝트 카드와 다운로드·검수 버튼이 정상적으로 표시되고 브라우저 콘솔 오류가 없음을 확인했습니다.
 
+### 2026-07-25 — 오류 코드·job 상태·AI 설정 경로·텍스트 해시 안정화
+
+- 명시적으로 전달한 오류 코드의 기본 한글 메시지가 detail 문자열 추론보다 우선하며, 코드가 없는 기존 review API는 구체적인 복구 안내를 유지합니다.
+- detail 기반 안내가 필요한 기존 dashboard 경계는 메시지를 명시적으로 전달하도록 바꿔 현재 HTTP 코드와 한글 문구 계약을 보존했습니다.
+- source·glossary·translation background job 상태에 schema version을 기록하고, 복원 전에 필수·미지 필드, 상태, 진행률, 결과, 오류, timestamp와 job별 필드를 검증합니다.
+- 저장된 `project_id`는 신뢰하지 않고 상태 파일 상위의 canonical 프로젝트 폴더 ID를 사용합니다.
+- AI 설정 경로는 `--settings-root`, `GLK_SETTINGS_ROOT`, 검증된 editable checkout, OS별 사용자 설정 디렉터리 순서로 결정합니다.
+- dashboard의 AI 설정 저장과 세 Gemini provider가 같은 `.env`를 사용하며, 일반 설치에서는 패키지 상위 디렉터리를 설정 경로로 오인하지 않습니다.
+- 사용자 프롬프트는 개행을 LF로 정규화한 UTF-8 text hash를 사용하고, byte 단위 동시성 검사가 필요한 검수 파일은 기존 byte hash를 유지합니다.
+- LF·CRLF 차이만으로 이미지 OCR, source QA와 번역 캐시가 무효화되거나 번역 상태가 stale로 바뀌지 않습니다.
+- 전체 222개 테스트, 설정된 16개 Python 파일 mypy, Python bytecode 컴파일과 `git diff --check`를 통과했습니다.
+- Orca에서 기존 `.env`의 API 키·모델이 그대로 복원되고 새 설정 경로 안내가 표시되며 브라우저 콘솔 오류가 없음을 확인했습니다.
+
 ---
 
 ## 다른 컴퓨터에서 작업 재개

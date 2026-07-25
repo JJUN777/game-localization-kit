@@ -160,7 +160,9 @@ glk run --project cards --input-type images --folder card_images/
 확인할 수 있습니다.
 
 대시보드 오른쪽 위 `AI 설정`에서 Gemini API 키와 공통 모델을 설정할 수
-있습니다. 값은 저장소 최상위 `.env`에 저장되며 API 키는 설정 여부만 화면에
+있습니다. source checkout에서는 저장소 최상위, 일반 설치에서는 OS별 사용자
+설정 디렉터리의 `.env`에 저장되며 `GLK_SETTINGS_ROOT` 또는
+`--settings-root`로 경로를 고정할 수 있습니다. API 키는 설정 여부만 화면에
 표시합니다. 키 입력칸을 비우고 저장하면 기존 키가 유지됩니다. 셸 환경변수가
 있으면 `.env`보다 우선하므로 대시보드에 우선 적용 안내를 표시합니다. 모델
 드롭다운은 실제 API 모델 ID를 표시하며 목록은

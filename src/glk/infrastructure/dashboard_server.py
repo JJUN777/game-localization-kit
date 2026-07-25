@@ -64,7 +64,8 @@ from glk.application.translation_prompt_service import (
     TranslationPromptError,
     save_project_translation_prompt,
 )
-from glk.error_response import make_http_error_response
+from glk.config import resolve_settings_root
+from glk.error_response import localized_detail_message, make_http_error_response
 from glk.infrastructure.glossary_review_server import (
     create_glossary_review_server,
 )
@@ -616,6 +617,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST,
                 error,
                 code=error_code,
+                message=localized_detail_message(error),
             )
             return
         except (OSError, RuntimeError) as error:
@@ -942,8 +944,14 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 if path == "/api/jobs/translation"
                 else "INVALID_REQUEST"
             )
-            self._send_error_json(HTTPStatus.BAD_REQUEST, error, code=code)
+            self._send_error_json(
+                HTTPStatus.BAD_REQUEST,
+                error,
+                code=code,
+                message=localized_detail_message(error),
+            )
             return
+
         self._send_json(HTTPStatus.OK, {"ok": True, "url": url})
 
     def do_PUT(self) -> None:
@@ -1122,6 +1130,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                     if prompt_kind == "ocr"
                     else "TRANSLATION_PROMPT_UPDATE_FAILED"
                 ),
+                message=localized_detail_message(error),
             )
             return
         except (OSError, RuntimeError) as error:
@@ -1238,7 +1247,7 @@ def create_dashboard_server(
         ("127.0.0.1", port),
         _DashboardHandler,
         workspace_root=workspace_root,
-        settings_root=Path.cwd() if settings_root is None else settings_root,
+        settings_root=resolve_settings_root(settings_root),
         source_job_runner=source_job_runner,
         glossary_job_runner=glossary_job_runner,
         translation_job_runner=translation_job_runner,

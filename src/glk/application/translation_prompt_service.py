@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-import hashlib
 from pathlib import Path
 from typing import Any
 
+from glk.application._hashing import normalize_text_newlines, sha256_text
 from glk.application._io import write_json_atomic, write_text_atomic
 from glk.application.project_service import (
     ProjectLocation,
@@ -51,10 +51,6 @@ class TranslationPromptSaveResult:
         return value
 
 
-def _sha256(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
 def _canonical_prompt(value: str) -> str:
     if not isinstance(value, str):
         raise TranslationPromptError("번역 프롬프트는 문자열이어야 합니다.")
@@ -62,7 +58,8 @@ def _canonical_prompt(value: str) -> str:
         raise TranslationPromptError("번역 프롬프트를 입력하세요.")
     if "\x00" in value:
         raise TranslationPromptError("번역 프롬프트에 null 문자를 넣을 수 없습니다.")
-    canonical = value if value.endswith("\n") else value + "\n"
+    normalized = normalize_text_newlines(value)
+    canonical = normalized if normalized.endswith("\n") else normalized + "\n"
     if len(canonical.encode("utf-8")) > MAX_TRANSLATION_PROMPT_BYTES:
         raise TranslationPromptError("번역 프롬프트는 64 KiB 이하여야 합니다.")
     return canonical
@@ -78,7 +75,7 @@ def load_translation_prompt_document(
         return TranslationPromptDocument(
             value=value,
             saved=False,
-            sha256=_sha256(value.encode("utf-8")),
+            sha256=sha256_text(value),
         )
     try:
         value = prompt_path.read_text(encoding="utf-8")
@@ -89,7 +86,7 @@ def load_translation_prompt_document(
     return TranslationPromptDocument(
         value=value,
         saved=True,
-        sha256=_sha256(value.encode("utf-8")),
+        sha256=sha256_text(value),
     )
 
 
@@ -134,7 +131,7 @@ def save_project_translation_prompt(
                 "previous_prompt": current.value,
                 "previous_prompt_sha256": current.sha256,
                 "new_prompt": canonical,
-                "new_prompt_sha256": _sha256(prompt_data),
+                "new_prompt_sha256": sha256_text(canonical),
             },
         )
     prompt_path = WorkspacePaths(location.path).translation_prompt
@@ -142,7 +139,7 @@ def save_project_translation_prompt(
     return TranslationPromptSaveResult(
         project_path=str(location.path),
         prompt_file=WorkspacePaths(location.path).relative(prompt_path),
-        sha256=_sha256(prompt_path.read_bytes()),
+        sha256=sha256_text(canonical),
         changed=changed,
         translation_status_before=status_before,
         translation_invalidated=invalidated,

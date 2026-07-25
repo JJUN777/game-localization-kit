@@ -54,7 +54,8 @@ class ImageOcrServiceTests(unittest.TestCase):
             image_folder.mkdir()
             Image.new("RGB", (20, 10), "white").save(image_folder / "card-1.png")
             (image_folder / "ocr_prompt.txt").write_text(
-                "Eight-point burst is {DMGR}.", encoding="utf-8"
+                "Eight-point burst is {DMGR}.\nKeep line order.\n",
+                encoding="utf-8",
             )
             (image_folder / "card-1.png.prompt.txt").write_text(
                 "Read the footer.", encoding="utf-8"
@@ -86,6 +87,12 @@ class ImageOcrServiceTests(unittest.TestCase):
             self.assertEqual(
                 (project_path / "02_source/ocr/combined.txt").read_text().strip(),
                 "[card-1.txt]\nDeal 1{DMGR}.\n\n======================",
+            )
+            prompt_path = project_path / "01_input/images/ocr_prompt.txt"
+            prompt_path.write_bytes(
+                prompt_path.read_text(encoding="utf-8")
+                .replace("\n", "\r\n")
+                .encode("utf-8")
             )
 
             cached_provider = FakeImageOcrProvider(fail_if_called=True)

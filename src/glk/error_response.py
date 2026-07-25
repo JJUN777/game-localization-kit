@@ -139,6 +139,13 @@ def _message_for_detail(detail: str) -> str | None:
     return None
 
 
+def localized_detail_message(
+    detail: str | BaseException,
+) -> str | None:
+    """Return a known recovery message for callers migrating to explicit codes."""
+    return _message_for_detail(str(detail))
+
+
 def make_error_response(
     code: str,
     detail: str | BaseException | None = None,
@@ -149,8 +156,8 @@ def make_error_response(
     detail_text = None if detail is None else str(detail).strip() or None
     localized = (
         message
-        or (_message_for_detail(detail_text) if detail_text else None)
         or _CODE_MESSAGES.get(code)
+        or (_message_for_detail(detail_text) if detail_text else None)
         or "요청을 처리하지 못했습니다."
     )
     return ErrorResponse(code=code, message=localized, detail=detail_text)
@@ -166,6 +173,7 @@ def make_http_error_response(
     """Build a browser API error while preserving the original diagnostic."""
     detail_text = str(detail)
     normalized = detail_text.casefold()
+    explicit_code = code is not None
     if code is None:
         if "changed after" in normalized or "stale" in normalized:
             code = "REVIEW_CONFLICT"
@@ -181,4 +189,6 @@ def make_http_error_response(
                 409: "REVIEW_CONFLICT",
                 500: "INTERNAL_ERROR",
             }.get(int(status), "INTERNAL_ERROR")
+    if not explicit_code and message is None:
+        message = _message_for_detail(detail_text)
     return make_error_response(code, detail_text, message=message)

@@ -23,7 +23,11 @@ from glk.application.glossary_service import (
     GlossaryImportError,
     import_project_glossary,
 )
-from glk.error_response import make_error_response, make_http_error_response
+from glk.error_response import (
+    localized_detail_message,
+    make_error_response,
+    make_http_error_response,
+)
 
 
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
@@ -236,6 +240,7 @@ class _GlossaryReviewHandler(BaseHTTPRequestHandler):
                             make_error_response(
                                 "GLOSSARY_IMPORT_FAILED",
                                 error,
+                                message=localized_detail_message(error),
                             ).to_dict()
                         )
                         response["document"] = document

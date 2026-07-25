@@ -30,6 +30,33 @@ from tests.test_translation_service import (
 
 
 class TranslationPromptServiceTests(unittest.TestCase):
+    def test_newline_only_prompt_change_keeps_translation_current(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace_root = Path(temporary) / "workspaces"
+            blocks = sample_blocks()
+            project_path = create_translation_project(workspace_root, blocks)
+            translate_project(
+                project=project_path,
+                workspace_root=workspace_root,
+                provider=SequenceProvider([valid_response(blocks)]),
+            )
+            paths = WorkspacePaths(project_path)
+            prompt = paths.translation_prompt.read_text(encoding="utf-8")
+            self.assertIn("\n", prompt)
+            paths.translation_prompt.write_bytes(
+                prompt.replace("\n", "\r\n").encode("utf-8")
+            )
+
+            pipeline = inspect_project(project_path)["pipeline"]
+            cached = translate_project(
+                project=project_path,
+                workspace_root=workspace_root,
+                provider=SequenceProvider([]),
+            )
+
+            self.assertEqual(pipeline["translation_status"], "current")
+            self.assertTrue(cached.cached)
+
     def test_saves_default_prompt_without_running_translation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace_root = Path(temporary) / "workspaces"

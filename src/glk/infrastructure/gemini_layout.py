@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
@@ -12,6 +11,7 @@ from google import genai
 from google.genai import types
 from PIL import Image
 
+from glk.config import resolve_settings_root
 from glk.extraction.layout import (
     PROMPT_VERSION,
     RESPONSE_SCHEMA,
@@ -31,13 +31,14 @@ class GeminiConfigurationError(ValueError):
     """Raised when Gemini credentials or model settings are unavailable."""
 
 
-def load_gemini_environment() -> None:
-    """Load .env from the working directory or editable project root."""
-    working_env = Path.cwd() / ".env"
-    load_dotenv(working_env, override=False)
-    project_env = Path(__file__).resolve().parents[3] / ".env"
-    if project_env != working_env:
-        load_dotenv(project_env, override=False)
+def load_gemini_environment(
+    settings_root: str | os.PathLike[str] | None = None,
+) -> None:
+    """Load Gemini settings from the same stable root used by the dashboard."""
+    load_dotenv(
+        resolve_settings_root(settings_root) / ".env",
+        override=False,
+    )
 
 
 def resolve_model_name(model_name: str | None = None) -> str:

@@ -35,16 +35,21 @@ flowchart LR
 
 ### 1. Gemini API 키 설정
 
-[Google AI Studio](https://aistudio.google.com/apikey)에서 API 키를 발급받고, 저장소 최상위(`game-localization-kit/.env`)에 파일을 만듭니다.
+[Google AI Studio](https://aistudio.google.com/apikey)에서 API 키를 발급받고
+`glk ui`의 `AI 설정`에서 저장합니다. source checkout에서는 저장소 최상위
+`.env`를 사용하고, 일반 설치에서는 macOS
+`~/Library/Application Support/game-localization-kit`, Linux
+`${XDG_CONFIG_HOME:-~/.config}/game-localization-kit`, Windows
+`%APPDATA%\game-localization-kit` 아래의 `.env`를 사용합니다.
 
 ```dotenv
 GEMINI_API_KEY=발급받은_API_키
 GEMINI_MODEL=gemini-2.5-flash
 ```
 
-`glk ui`를 실행했다면 대시보드 오른쪽 위 `AI 설정`에서도 같은 값을 저장할
-수 있습니다. API 키는 저장 여부만 표시하고 저장된 값은 브라우저로 다시
-보내지 않습니다.
+경로를 직접 정하려면 `GLK_SETTINGS_ROOT` 환경변수 또는
+`glk ui --settings-root <디렉터리>`를 사용합니다. API 키는 저장 여부만
+표시하고 저장된 값은 브라우저로 다시 보내지 않습니다.
 
 ### 2. 프로젝트 생성
 
@@ -794,7 +799,10 @@ job으로 실행할 수 있으며 최종 번역 승인 후에는 결과 파일 �
 
 ### API 키를 찾지 못함
 
-`game-localization-kit/.env` 또는 셸 환경변수에 `GEMINI_API_KEY`가 있는지 확인합니다. `.env`가 저장소 최상위에 있어야 합니다.
+AI 설정 화면에서 키 적용 상태를 확인합니다. source checkout은 저장소 최상위
+`.env`, 일반 설치는 OS별 사용자 설정 디렉터리의 `.env`를 사용합니다.
+별도 경로를 사용했다면 모든 실행에서 같은 `GLK_SETTINGS_ROOT`를 지정했는지
+확인합니다.
 
 ### PDF 결과의 일부 문단 순서가 이상함
 

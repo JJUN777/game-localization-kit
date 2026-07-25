@@ -49,6 +49,8 @@ class CliTests(unittest.TestCase):
                     "ui",
                     "--workspace-root",
                     "custom-workspaces",
+                    "--settings-root",
+                    "custom-settings",
                     "--port",
                     "8765",
                     "--no-open",
@@ -59,6 +61,7 @@ class CliTests(unittest.TestCase):
             serve.call_args.kwargs,
             {
                 "workspace_root": "custom-workspaces",
+                "settings_root": "custom-settings",
                 "port": 8765,
                 "open_browser": False,
             },
