@@ -110,11 +110,67 @@ class LocalHttpRequestHandler(BaseHTTPRequestHandler):
     """Common localhost authorization, headers, and JSON request handling."""
 
     server: LocalHttpServer
+    server_version = "GLK"
+    sys_version = ""
     request_error_type: type[ValueError] = ValueError
     security_headers: Mapping[str, str] = LOCAL_SECURITY_HEADERS
+    allowed_methods: tuple[str, ...] = ("GET", "POST")
 
     def log_message(self, format: str, *args: Any) -> None:
         return
+
+    def version_string(self) -> str:
+        return self.server_version
+
+    def _send_method_not_allowed(self) -> None:
+        response = make_http_error_response(
+            HTTPStatus.METHOD_NOT_ALLOWED,
+            "Method not allowed.",
+            code="METHOD_NOT_ALLOWED",
+        )
+        data = (json.dumps(response.to_dict(), ensure_ascii=False) + "\n").encode(
+            "utf-8"
+        )
+        self.send_response(HTTPStatus.METHOD_NOT_ALLOWED)
+        self._send_standard_headers(
+            "application/json; charset=utf-8",
+            len(data),
+            extra_headers={"Allow": ", ".join(self.allowed_methods)},
+        )
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
+    def do_HEAD(self) -> None:
+        self._send_method_not_allowed()
+
+    def do_OPTIONS(self) -> None:
+        self._send_method_not_allowed()
+
+    def do_CONNECT(self) -> None:
+        self._send_method_not_allowed()
+
+    def do_TRACE(self) -> None:
+        self._send_method_not_allowed()
+
+    def send_error(
+        self,
+        code: int,
+        message: str | None = None,
+        explain: str | None = None,
+    ) -> None:
+        """Keep parser and unknown-method errors on the secured JSON path."""
+        if code == HTTPStatus.NOT_IMPLEMENTED:
+            self._send_method_not_allowed()
+            return
+        try:
+            status = HTTPStatus(code)
+        except ValueError:
+            status = HTTPStatus.INTERNAL_SERVER_ERROR
+        self._send_error_json(
+            status,
+            message or explain or status.phrase,
+        )
 
     def _host_is_local(self) -> bool:
         host = self.headers.get("Host", "").split(":", 1)[0].casefold()

@@ -1,11 +1,55 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
-from glk.infrastructure.dashboard_routes import match_dashboard_route
+from glk.infrastructure.dashboard_routes import (
+    DashboardRoute,
+    match_dashboard_route,
+    registered_dashboard_route_names,
+)
+from glk.infrastructure.dashboard_server import _DashboardHandler
 
 
 class DashboardRouteTests(unittest.TestCase):
+    def test_every_registered_route_has_one_handler_contract(self) -> None:
+        registered = registered_dashboard_route_names()
+
+        self.assertEqual(
+            registered,
+            _DashboardHandler.handled_route_names,
+        )
+        self.assertEqual(
+            set(registered),
+            set(_DashboardHandler.allowed_methods),
+        )
+
+    def test_unhandled_matched_route_returns_internal_error(self) -> None:
+        route = DashboardRoute(
+            name="future_route",
+            method="GET",
+            path="/future",
+            query="",
+            access="public",
+        )
+        handler = object.__new__(_DashboardHandler)
+        handler.path = "/future"
+
+        with (
+            patch(
+                "glk.infrastructure.dashboard_server.match_dashboard_route",
+                return_value=route,
+            ),
+            patch.object(
+                handler,
+                "_send_unhandled_route",
+            ) as send_unhandled,
+        ):
+            matched = handler._route_request("GET")
+
+        self.assertIsNone(matched)
+        send_unhandled.assert_called_once_with(route)
+
     def test_matches_static_routes_with_their_access_policy(self) -> None:
         cases = [
             ("GET", "/favicon.ico", "favicon", "public"),

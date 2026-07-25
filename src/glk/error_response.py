@@ -38,6 +38,7 @@ _CODE_MESSAGES = {
     "TRANSLATION_FINALIZE_FAILED": "최종 번역본을 만들지 못했습니다.",
     "TRANSLATION_REVIEW_SERVER_FAILED": "번역 검수 페이지를 열지 못했습니다.",
     "TRANSLATION_RETRY_FAILED": "문제가 있는 번역을 다시 번역하지 못했습니다.",
+    "METHOD_NOT_ALLOWED": "요청한 HTTP 메서드는 지원하지 않습니다.",
     "INVALID_REQUEST": "요청 형식이 올바르지 않습니다.",
     "REVIEW_CONFLICT": "다른 곳에서 검수 내용이 변경되었습니다. 페이지를 새로고침한 뒤 다시 시도하세요.",
     "REVIEW_SESSION_INVALID": "검수 세션이 만료되었거나 올바르지 않습니다. 검수 페이지를 다시 여세요.",

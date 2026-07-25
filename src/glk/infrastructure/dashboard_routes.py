@@ -45,6 +45,20 @@ _PROJECT_ROUTES: dict[tuple[str, str], str] = {
 }
 
 
+def registered_dashboard_route_names() -> dict[str, frozenset[str]]:
+    """Return the route names that each dashboard HTTP method can match."""
+    names: dict[str, set[str]] = {}
+    for (method, _path), (name, _access) in _STATIC_ROUTES.items():
+        names.setdefault(method, set()).add(name)
+    for (method, _action), name in _PROJECT_ROUTES.items():
+        names.setdefault(method, set()).add(name)
+    names.setdefault("DELETE", set()).add("project_delete")
+    return {
+        method: frozenset(method_names)
+        for method, method_names in names.items()
+    }
+
+
 def match_dashboard_route(
     method: str,
     request_target: str,

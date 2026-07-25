@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from email.message import Message
+from http import HTTPStatus
+from http.client import HTTPConnection
 from io import BytesIO
+import threading
 import unittest
 
 from glk.application.glossary_review_service import GlossaryReviewError
@@ -72,6 +75,75 @@ class LocalHttpFoundationTests(unittest.TestCase):
         for headers in (standard, source_review):
             self.assertEqual(headers["Cache-Control"], "no-store")
             self.assertEqual(headers["X-Frame-Options"], "DENY")
+
+    def test_all_handlers_secure_unsupported_method_responses(self) -> None:
+        handler_types = (
+            _DashboardHandler,
+            _SourceReviewHandler,
+            _GlossaryReviewHandler,
+            _TranslationReviewHandler,
+        )
+        for handler_type in handler_types:
+            with self.subTest(handler=handler_type.__name__):
+                server = LocalHttpServer(
+                    ("127.0.0.1", 0),
+                    handler_type,
+                )
+                thread = threading.Thread(
+                    target=server.serve_forever,
+                    daemon=True,
+                )
+                thread.start()
+                try:
+                    for method in ("HEAD", "OPTIONS", "BREW"):
+                        with self.subTest(method=method):
+                            connection = HTTPConnection(
+                                "127.0.0.1",
+                                server.server_port,
+                                timeout=3,
+                            )
+                            connection.request(method, "/")
+                            response = connection.getresponse()
+                            body = response.read()
+                            headers = dict(response.getheaders())
+                            connection.close()
+
+                            self.assertEqual(
+                                response.status,
+                                HTTPStatus.METHOD_NOT_ALLOWED,
+                            )
+                            self.assertEqual(headers["Server"], "GLK")
+                            self.assertNotIn(
+                                "Python",
+                                "\n".join(headers.values()),
+                            )
+                            self.assertEqual(
+                                headers["X-Frame-Options"],
+                                "DENY",
+                            )
+                            self.assertEqual(
+                                headers["Cache-Control"],
+                                "no-store",
+                            )
+                            self.assertIn(
+                                "Content-Security-Policy",
+                                headers,
+                            )
+                            self.assertEqual(
+                                headers["Allow"],
+                                ", ".join(handler_type.allowed_methods),
+                            )
+                            if method == "HEAD":
+                                self.assertEqual(body, b"")
+                            else:
+                                self.assertIn(
+                                    b"METHOD_NOT_ALLOWED",
+                                    body,
+                                )
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2)
 
     def test_port_validation_rejects_bool_and_out_of_range_values(self) -> None:
         self.assertEqual(validate_local_port(0), 0)

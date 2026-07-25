@@ -67,6 +67,7 @@ from glk.error_response import localized_detail_message
 from glk.infrastructure.dashboard_routes import (
     DashboardRoute,
     match_dashboard_route,
+    registered_dashboard_route_names,
 )
 from glk.infrastructure.glossary_review_server import (
     create_glossary_review_server,
@@ -201,6 +202,33 @@ class DashboardHttpServer(LocalHttpServer):
 class _DashboardHandler(LocalHttpRequestHandler):
     server: DashboardHttpServer
     request_error_type = DashboardError
+    allowed_methods = ("GET", "POST", "PUT", "PATCH", "DELETE")
+    registered_route_names = registered_dashboard_route_names()
+    handled_route_names = {
+        "GET": frozenset(
+            {
+                "favicon",
+                "dashboard_ui",
+                "dashboard",
+                "jobs",
+                "ai_settings",
+                "output",
+            }
+        ),
+        "POST": frozenset(
+            {
+                "source_upload",
+                "source_job",
+                "glossary_job",
+                "translation_job",
+                "projects",
+                "review_open",
+            }
+        ),
+        "PUT": frozenset({"ai_settings", "source_upload"}),
+        "PATCH": frozenset({"ocr_prompt", "translation_prompt"}),
+        "DELETE": frozenset({"project_delete"}),
+    }
 
     def _read_source_upload(
         self,
@@ -410,7 +438,17 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 "Invalid review session.",
             )
             return None
+        if route.name not in self.handled_route_names.get(method, frozenset()):
+            self._send_unhandled_route(route)
+            return None
         return route
+
+    def _send_unhandled_route(self, route: DashboardRoute) -> None:
+        self._send_error_json(
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+            f"Dashboard route has no handler: {route.method} {route.name}",
+            code="INTERNAL_ERROR",
+        )
 
     def _handle_source_upload(
         self,
@@ -615,6 +653,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 },
             )
             return
+        self._send_unhandled_route(route)
 
     def do_POST(self) -> None:
         route = self._route_request("POST")
@@ -723,6 +762,9 @@ class _DashboardHandler(LocalHttpRequestHandler):
                     },
                 )
                 return
+            if route.name != "review_open":
+                self._send_unhandled_route(route)
+                return
             project_id = request.get("project_id")
             review_type = request.get("review_type")
             if not isinstance(project_id, str) or not isinstance(review_type, str):
@@ -817,12 +859,18 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 {"ok": True, "settings": settings.to_dict()},
             )
             return
-        assert route.project_id is not None
-        self._handle_source_upload(route.project_id, replace=True)
+        if route.name == "source_upload":
+            assert route.project_id is not None
+            self._handle_source_upload(route.project_id, replace=True)
+            return
+        self._send_unhandled_route(route)
 
     def do_PATCH(self) -> None:
         route = self._route_request("PATCH")
         if route is None:
+            return
+        if route.name not in {"ocr_prompt", "translation_prompt"}:
+            self._send_unhandled_route(route)
             return
         prompt_kind = "ocr" if route.name == "ocr_prompt" else "translation"
         assert route.project_id is not None
@@ -962,6 +1010,9 @@ class _DashboardHandler(LocalHttpRequestHandler):
     def do_DELETE(self) -> None:
         route = self._route_request("DELETE")
         if route is None:
+            return
+        if route.name != "project_delete":
+            self._send_unhandled_route(route)
             return
         assert route.project_id is not None
         project_id = route.project_id

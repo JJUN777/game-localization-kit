@@ -306,7 +306,7 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
   - 검증: 정적·동적 경로, 1회 URL decode, query 분리, 잘못된 메서드·빈 ID·
     중첩 경로 단위 테스트를 포함한 전체 246개 테스트와 mypy 23개 파일 검사를
     통과했다.
-- [ ] `ROUTE-001` 라우터와 HTTP handler 분기의 불일치를 즉시 실패로
+- [x] `ROUTE-001` 라우터와 HTTP handler 분기의 불일치를 즉시 실패로
   감지한다.
   - 현재 등록된 route는 모두 처리되지만, 이후 라우터에 이름을 추가하고
     `do_GET`·`do_POST`·`do_PUT`·`do_PATCH` 분기를 빠뜨리면 응답을 쓰지 않은
@@ -316,6 +316,9 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
   - 완료 기준: 라우터가 반환한 이름을 handler가 처리하지 못하면 보안 헤더가
     포함된 500 또는 501 응답을 즉시 반환하고, 모든 등록 route가 정확히 하나의
     handler에 연결됐음을 단위 테스트로 고정해야 한다.
+  - 검증: 메서드별 등록 route와 handler 계약의 완전 일치, 미등록 route 이름의
+    즉시 500 fallback 및 GET·POST·PUT·PATCH·DELETE 분기 말단 응답을 고정했고
+    전체 288개 테스트와 mypy·ruff 검사를 통과했다.
 - [x] `ARCH-004` `translate_project`, `import_project_glossary`,
   `_inspect_pipeline_status` 등 대형 함수를 책임별로 분리한다.
   - [x] `_inspect_pipeline_status`를 원문, 용어, 번역 실행, 번역 검수 상태
@@ -379,7 +382,7 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     상수 시간 비교한다.
   - 검증: 네 HTTP handler와 source asset 인증이 모두 `compare_digest`를
     호출하는 전용 회귀 테스트를 통과한다.
-- [ ] `SECURITY-002` 공통 HTTP handler의 기본 오류 응답에도 보안 헤더를
+- [x] `SECURITY-002` 공통 HTTP handler의 기본 오류 응답에도 보안 헤더를
   적용하고 서버 버전 노출을 제거한다.
   - `HEAD`, `OPTIONS`와 그 밖의 미지원 메서드는
     `BaseHTTPRequestHandler`의 기본 501 응답을 사용해 공통 CSP·no-store
@@ -390,6 +393,9 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
   - 완료 기준: 네 localhost 서버의 `HEAD`, `OPTIONS`와 임의 미지원 메서드
     응답에 공통 보안 헤더가 있고, 응답 헤더 어디에도 Python 버전이 없어야
     한다. 정상 GET·POST 응답과 source의 Range 요청은 기존 계약을 유지한다.
+  - 검증: 네 handler의 `HEAD`, `OPTIONS`, 임의 `BREW` 요청이
+    `Server: GLK`, 공통 CSP·no-store·Allow 헤더가 포함된 405를 반환하고
+    Python 버전을 노출하지 않음을 확인했다.
 - [x] `QUALITY-001` ruff를 작은 규칙 집합부터 도입하고 포맷 변경은 별도 커밋으로
   분리한다.
   - 오류 가능성이 높은 `E4`, `E7`, `E9`, `F`만 `src`와 `tests`에 적용하고,
@@ -481,13 +487,12 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
 완료된 작업 순서는 각 항목의 상태와 검증 기록으로 보존합니다. 앞으로의 작업은
 서로 연관된 항목을 다음 순서로 나눠 커밋합니다.
 
-1. `SECURITY-002`, `ROUTE-001`: 공통 HTTP 기본 응답과 route 누락 방어
-2. `DOMAIN-002`: 검수 필요한 번역 segment를 `flagged`로 기록
-3. `QUALITY-004`: 확인된 3개 타입 오류 수정과 `follow_imports = "normal"` 전환
-4. `ERROR-003`: source·glossary·translation·review 순서로 문구 추론 제거
-5. `ARCH-006`: 선택한 use case를 각각 독립 커밋으로 분리
-6. `DOMAIN-001`: 하이픈 결합 경고의 검수 화면 표시 방법 확정과 구현
-7. 제품 기능 후속 항목의 우선순위 결정
+1. `DOMAIN-002`: 검수 필요한 번역 segment를 `flagged`로 기록
+2. `QUALITY-004`: 확인된 3개 타입 오류 수정과 `follow_imports = "normal"` 전환
+3. `ERROR-003`: source·glossary·translation·review 순서로 문구 추론 제거
+4. `ARCH-006`: 선택한 use case를 각각 독립 커밋으로 분리
+5. `DOMAIN-001`: 하이픈 결합 경고의 검수 화면 표시 방법 확정과 구현
+6. 제품 기능 후속 항목의 우선순위 결정
 
 `UPLOAD-001`은 실제 대용량 파일의 메모리 사용량을 측정하기 전까지, `REPO-002`는
 배포 정책과 라이선스를 결정하기 전까지 구현 순서에 넣지 않습니다.
