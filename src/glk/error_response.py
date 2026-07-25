@@ -161,6 +161,7 @@ def make_http_error_response(
     detail: str | BaseException,
     *,
     code: str | None = None,
+    message: str | None = None,
 ) -> ErrorResponse:
     """Build a browser API error while preserving the original diagnostic."""
     detail_text = str(detail)
@@ -180,4 +181,4 @@ def make_http_error_response(
                 409: "REVIEW_CONFLICT",
                 500: "INTERNAL_ERROR",
             }.get(int(status), "INTERNAL_ERROR")
-    return make_error_response(code, detail_text)
+    return make_error_response(code, detail_text, message=message)

@@ -9,6 +9,7 @@ from PIL import Image
 
 from glk.application.project_service import create_project, load_project
 from glk.application.source_registration_service import (
+    SourceRecoveryError,
     SourceRegistrationError,
     register_project_images,
     register_project_pdf,
@@ -251,6 +252,10 @@ class SourceRegistrationServiceTests(unittest.TestCase):
                 ).manifest.source_file,
                 "01_input/images",
             )
+            self.assertEqual(
+                list(location.path.glob(".glk/source-replacement-*")),
+                [],
+            )
 
     def test_rejects_replacement_after_source_processing_started(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -335,4 +340,101 @@ class SourceRegistrationServiceTests(unittest.TestCase):
                     workspace_root,
                 ).manifest.source_file,
                 "01_input/pdf/first.pdf",
+            )
+            self.assertEqual(
+                list(location.path.glob(".glk/source-replacement-*")),
+                [],
+            )
+
+    def test_failed_pdf_rollback_preserves_original_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace_root = root / "workspaces"
+            first_pdf = root / "first.pdf"
+            second_pdf = root / "second.pdf"
+            first_pdf.write_bytes(b"%PDF-1.4\nfirst\n")
+            second_pdf.write_bytes(b"%PDF-1.4\nsecond\n")
+            create_project(
+                name="Preserve PDF Backup",
+                workspace_root=workspace_root,
+            )
+            register_project_pdf(
+                project="preserve_pdf_backup",
+                file=first_pdf,
+                workspace_root=workspace_root,
+            )
+
+            with (
+                patch(
+                    "glk.application.source_registration_service."
+                    "copy_file_atomic",
+                    side_effect=OSError("replacement copy failed"),
+                ),
+                patch(
+                    "glk.application.source_registration_service."
+                    "shutil.copytree",
+                    side_effect=OSError("restore copy failed"),
+                ),
+            ):
+                with self.assertRaises(SourceRecoveryError) as caught:
+                    replace_project_pdf(
+                        project="preserve_pdf_backup",
+                        file=second_pdf,
+                        workspace_root=workspace_root,
+                    )
+
+            backup = caught.exception.backup_path
+            self.assertIn("백업 보존 위치", str(caught.exception))
+            self.assertTrue((backup / "pdf/first.pdf").is_file())
+            self.assertEqual(
+                (backup / "pdf/first.pdf").read_bytes(),
+                first_pdf.read_bytes(),
+            )
+
+    def test_failed_image_rollback_preserves_original_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace_root = root / "workspaces"
+            images = root / "images"
+            images.mkdir()
+            Image.new("RGB", (8, 8), "white").save(images / "card.png")
+            replacement_pdf = root / "replacement.pdf"
+            replacement_pdf.write_bytes(b"%PDF-1.4\nreplacement\n")
+            create_project(
+                name="Preserve Image Backup",
+                workspace_root=workspace_root,
+            )
+            register_project_images(
+                project="preserve_image_backup",
+                folder=images,
+                workspace_root=workspace_root,
+                ocr_prompt="Preserve this prompt.",
+            )
+
+            with (
+                patch(
+                    "glk.application.source_registration_service."
+                    "copy_file_atomic",
+                    side_effect=OSError("replacement copy failed"),
+                ),
+                patch(
+                    "glk.application.source_registration_service."
+                    "shutil.copytree",
+                    side_effect=OSError("restore copy failed"),
+                ),
+            ):
+                with self.assertRaises(SourceRecoveryError) as caught:
+                    replace_project_pdf(
+                        project="preserve_image_backup",
+                        file=replacement_pdf,
+                        workspace_root=workspace_root,
+                    )
+
+            backup = caught.exception.backup_path
+            self.assertTrue((backup / "images/card.png").is_file())
+            self.assertEqual(
+                (backup / "images/ocr_prompt.txt").read_text(
+                    encoding="utf-8"
+                ),
+                "Preserve this prompt.\n",
             )

@@ -32,6 +32,19 @@ class SourceRegistrationError(ValueError):
     """Raised when originals cannot be registered safely."""
 
 
+class SourceRecoveryError(SourceRegistrationError):
+    """Raised when source replacement fails and rollback is incomplete."""
+
+    def __init__(self, backup_path: Path, errors: list[str]) -> None:
+        self.backup_path = backup_path
+        self.errors = tuple(errors)
+        detail = "; ".join(errors)
+        super().__init__(
+            "원본 교체에 실패했고 기존 원본을 자동 복구하지 못했습니다. "
+            f"백업 보존 위치: {backup_path}. 복구 오류: {detail}"
+        )
+
+
 def validate_ocr_prompt(value: str) -> str:
     """Validate a project-wide OCR prompt supplied with image originals."""
     if not value.strip():
@@ -202,6 +215,7 @@ def _replace_input_directories(
     backup_pdf = backup_root / "pdf"
     backup_images = backup_root / "images"
     original_source = location.manifest.source_file
+    remove_backup = False
     backup_root.mkdir(parents=True)
     try:
         if paths.input_pdf_dir.exists():
@@ -216,22 +230,43 @@ def _replace_input_directories(
             copy_file_atomic(previous_prompt, paths.input_ocr_prompt)
 
         registered = register()
-    except Exception:
-        shutil.rmtree(paths.input_pdf_dir, ignore_errors=True)
-        shutil.rmtree(paths.input_images_dir, ignore_errors=True)
-        if backup_pdf.exists():
-            backup_pdf.rename(paths.input_pdf_dir)
-        else:
-            paths.input_pdf_dir.mkdir(parents=True, exist_ok=True)
-        if backup_images.exists():
-            backup_images.rename(paths.input_images_dir)
-        else:
-            paths.input_images_dir.mkdir(parents=True, exist_ok=True)
-        update_project_source(location, original_source)
+        remove_backup = True
+    except Exception as replacement_error:
+        recovery_errors: list[str] = []
+        for backup, destination in (
+            (backup_pdf, paths.input_pdf_dir),
+            (backup_images, paths.input_images_dir),
+        ):
+            if backup.exists():
+                try:
+                    if destination.exists():
+                        shutil.rmtree(destination)
+                    shutil.copytree(backup, destination)
+                except Exception as recovery_error:
+                    recovery_errors.append(
+                        f"{destination.name}: {recovery_error}"
+                    )
+            elif not destination.exists():
+                try:
+                    destination.mkdir(parents=True)
+                except Exception as recovery_error:
+                    recovery_errors.append(
+                        f"{destination.name}: {recovery_error}"
+                    )
+        try:
+            update_project_source(location, original_source)
+        except Exception as recovery_error:
+            recovery_errors.append(f"project.json: {recovery_error}")
+        if recovery_errors:
+            raise SourceRecoveryError(
+                backup_root.resolve(),
+                recovery_errors,
+            ) from replacement_error
+        remove_backup = True
         raise
     finally:
-        if backup_root.exists():
-            shutil.rmtree(backup_root)
+        if remove_backup and backup_root.exists():
+            shutil.rmtree(backup_root, ignore_errors=True)
     return registered
 
 

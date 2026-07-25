@@ -936,6 +936,184 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(duplicate["code"], "SOURCE_REGISTER_FAILED")
 
+    def test_rechecks_active_job_inside_project_mutation_lock(self) -> None:
+        upload_location = create_project(
+            name="Race Upload",
+            project_id="race_upload",
+            workspace_root=self.workspace_root,
+        )
+        upload_body, upload_type = self._multipart_upload(
+            "pdf",
+            [("new.pdf", b"%PDF-1.4\nnew\n", "application/pdf")],
+        )
+        with patch.object(
+            self.server.job_manager,
+            "is_project_active",
+            side_effect=[False, True],
+        ) as active:
+            status, blocked_upload = self._request(
+                "/api/projects/race_upload/source",
+                method="POST",
+                body=upload_body,
+                content_type=upload_type,
+            )
+        self.assertEqual(status, 409)
+        self.assertEqual(blocked_upload["code"], "SOURCE_JOB_CONFLICT")
+        self.assertEqual(active.call_count, 2)
+        self.assertFalse(
+            (upload_location.path / "01_input/pdf/new.pdf").exists()
+        )
+
+        old_pdf = Path(self.temporary_directory.name) / "old-race.pdf"
+        old_pdf.write_bytes(b"%PDF-1.4\nold\n")
+        register_project_pdf(
+            project="race_upload",
+            file=old_pdf,
+            workspace_root=self.workspace_root,
+        )
+        replacement_body, replacement_type = self._multipart_upload(
+            "pdf",
+            [("replacement.pdf", b"%PDF-1.4\nreplacement\n", "application/pdf")],
+        )
+        with patch.object(
+            self.server.job_manager,
+            "is_project_active",
+            side_effect=[False, True],
+        ) as active:
+            status, blocked_replace = self._request(
+                "/api/projects/race_upload/source",
+                method="PUT",
+                body=replacement_body,
+                content_type=replacement_type,
+            )
+        self.assertEqual(status, 409)
+        self.assertEqual(blocked_replace["code"], "SOURCE_JOB_CONFLICT")
+        self.assertEqual(active.call_count, 2)
+        self.assertTrue(
+            (upload_location.path / "01_input/pdf/old-race.pdf").is_file()
+        )
+        self.assertFalse(
+            (
+                upload_location.path
+                / "01_input/pdf/replacement.pdf"
+            ).exists()
+        )
+
+        prompt_location = create_project(
+            name="Race Prompt",
+            project_id="race_prompt",
+            workspace_root=self.workspace_root,
+        )
+        status, dashboard = self._request("/api/dashboard")
+        self.assertEqual(status, 200)
+        prompt_project = next(
+            item
+            for item in dashboard["projects"]
+            if item["project_id"] == "race_prompt"
+        )
+        prompt_path = prompt_location.path / "04_translation/prompt.txt"
+        prompt_before = (
+            prompt_path.read_bytes() if prompt_path.is_file() else None
+        )
+        with patch.object(
+            self.server.job_manager,
+            "is_project_active",
+            side_effect=[False, True],
+        ) as active:
+            status, blocked_prompt = self._request(
+                "/api/projects/race_prompt/translation-prompt",
+                method="PATCH",
+                payload={
+                    "translation_prompt": "Must not be saved.",
+                    "expected_sha256": (
+                        prompt_project["translation_prompt"]["sha256"]
+                    ),
+                },
+            )
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            blocked_prompt["code"],
+            "TRANSLATION_JOB_CONFLICT",
+        )
+        self.assertEqual(active.call_count, 2)
+        self.assertEqual(
+            prompt_path.read_bytes() if prompt_path.is_file() else None,
+            prompt_before,
+        )
+
+        delete_location = create_project(
+            name="Race Delete",
+            project_id="race_delete",
+            workspace_root=self.workspace_root,
+        )
+        with (
+            patch.object(
+                self.server.job_manager,
+                "is_project_active",
+                side_effect=[False, True],
+            ) as active,
+            patch(
+                "glk.infrastructure.dashboard_server.send2trash"
+            ) as mocked_send2trash,
+        ):
+            status, blocked_delete = self._request(
+                "/api/projects/race_delete",
+                method="DELETE",
+            )
+        self.assertEqual(status, 409)
+        self.assertEqual(blocked_delete["code"], "SOURCE_JOB_CONFLICT")
+        self.assertEqual(active.call_count, 2)
+        mocked_send2trash.assert_not_called()
+        self.assertTrue(delete_location.path.is_dir())
+
+    def test_failed_source_restore_reports_preserved_backup_path(self) -> None:
+        location = create_project(
+            name="Restore Failure",
+            project_id="restore_failure",
+            workspace_root=self.workspace_root,
+        )
+        old_pdf = Path(self.temporary_directory.name) / "restore-old.pdf"
+        old_pdf.write_bytes(b"%PDF-1.4\nold\n")
+        register_project_pdf(
+            project="restore_failure",
+            file=old_pdf,
+            workspace_root=self.workspace_root,
+        )
+        body, content_type = self._multipart_upload(
+            "pdf",
+            [("new.pdf", b"%PDF-1.4\nnew\n", "application/pdf")],
+        )
+
+        with (
+            patch(
+                "glk.application.source_registration_service."
+                "copy_file_atomic",
+                side_effect=OSError("replacement copy failed"),
+            ),
+            patch(
+                "glk.application.source_registration_service."
+                "shutil.copytree",
+                side_effect=OSError("restore copy failed"),
+            ),
+        ):
+            status, failed = self._request(
+                "/api/projects/restore_failure/source",
+                method="PUT",
+                body=body,
+                content_type=content_type,
+            )
+
+        self.assertEqual(status, 500)
+        self.assertEqual(failed["code"], "SOURCE_REPLACE_FAILED")
+        self.assertIn("백업 보존 위치", failed["message"])
+        backups = list(
+            (location.path / ".glk").glob("source-replacement-*")
+        )
+        self.assertEqual(len(backups), 1)
+        self.assertTrue(
+            (backups[0] / "pdf/restore-old.pdf").is_file()
+        )
+
     def test_registers_multiple_images_in_natural_order(self) -> None:
         create_project(
             name="Upload Images",

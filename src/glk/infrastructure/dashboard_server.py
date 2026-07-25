@@ -50,6 +50,7 @@ from glk.application.project_service import (
 from glk.application.source_registration_service import (
     MAX_OCR_PROMPT_BYTES,
     SUPPORTED_IMAGE_EXTENSIONS,
+    SourceRecoveryError,
     SourceRegistrationError,
     project_has_source_files,
     register_image_sources,
@@ -266,10 +267,16 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         detail: str | BaseException,
         *,
         code: str | None = None,
+        message: str | None = None,
     ) -> None:
         self._send_json(
             status,
-            make_http_error_response(status, detail, code=code).to_dict(),
+            make_http_error_response(
+                status,
+                detail,
+                code=code,
+                message=message,
+            ).to_dict(),
         )
 
     def _read_request_json(
@@ -565,6 +572,18 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         try:
             source_type, uploads, ocr_prompt = self._read_source_upload()
             with self.server.mutation_lock:
+                if self.server.job_manager.is_project_active(
+                    upload_project_id
+                ):
+                    self._send_error_json(
+                        HTTPStatus.CONFLICT,
+                        (
+                            "Source replacement is unavailable while "
+                            "a source job is running."
+                        ),
+                        code="SOURCE_JOB_CONFLICT",
+                    )
+                    return
                 source = self._register_uploaded_source(
                     upload_project_id,
                     source_type,
@@ -577,6 +596,14 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND,
                 error,
                 code="RESOURCE_NOT_FOUND",
+            )
+            return
+        except SourceRecoveryError as error:
+            self._send_error_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                error,
+                code="SOURCE_REPLACE_FAILED",
+                message=str(error),
             )
             return
         except (
@@ -1020,6 +1047,25 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 ),
             )
             with self.server.mutation_lock:
+                if self.server.job_manager.is_project_active(project_id):
+                    self._send_error_json(
+                        HTTPStatus.CONFLICT,
+                        (
+                            "OCR prompt editing is unavailable while "
+                            "a source job is running."
+                            if prompt_kind == "ocr"
+                            else (
+                                "번역 프롬프트는 백그라운드 작업 중에 "
+                                "수정할 수 없습니다."
+                            )
+                        ),
+                        code=(
+                            "SOURCE_JOB_CONFLICT"
+                            if prompt_kind == "ocr"
+                            else "TRANSLATION_JOB_CONFLICT"
+                        ),
+                    )
+                    return
                 location = load_workspace_project_id(
                     project_id,
                     self.server.workspace_root,
@@ -1127,6 +1173,16 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return
         try:
             with self.server.mutation_lock:
+                if self.server.job_manager.is_project_active(project_id):
+                    self._send_error_json(
+                        HTTPStatus.CONFLICT,
+                        (
+                            "Project deletion is unavailable while "
+                            "a source job is running."
+                        ),
+                        code="SOURCE_JOB_CONFLICT",
+                    )
+                    return
                 location = load_workspace_project_id(
                     project_id,
                     self.server.workspace_root,

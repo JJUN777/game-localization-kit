@@ -675,6 +675,17 @@ git diff --check
 - Orca 브라우저에서 블록별 용어 표시, 원문 강조·번역문 선택, 전체 용어집과 표기 변형 검색을 확인했습니다.
 - 전체 186개 테스트, 설정된 16개 Python 파일 mypy, 번역 검수 JavaScript 문법과 `git diff --check`를 통과했습니다.
 
+### 2026-07-25 — 원본 복구 보존과 project mutation 경합 제거
+
+- 원본 교체 전에 이동한 기존 PDF·이미지는 rollback이 완전히 끝날 때까지 독립 백업으로 유지합니다.
+- rollback 중 파일 복사가 실패하면 백업을 삭제하지 않고 `.glk/source-replacement-*`에 원본을 보존하며 오류 응답에 절대 백업 경로를 안내합니다.
+- 정상 교체와 정상 rollback이 끝난 경우에만 임시 백업을 정리합니다.
+- 원본 등록·교체, OCR·번역 프롬프트 수정과 프로젝트 삭제는 `mutation_lock`을 얻은 직후 활성 background job을 다시 검사합니다.
+- 최초 검사 뒤 job이 시작되어도 실제 workspace 변경 직전의 재검사에서 409로 차단합니다.
+- PDF·이미지 복구 실패와 네 project mutation 경합 회귀 테스트를 추가했습니다.
+- Orca에서 최신 서버의 대시보드와 원본 등록 모달이 정상적으로 열리고 브라우저 콘솔 오류가 없음을 확인했습니다.
+- 전체 190개 테스트, 설정된 16개 Python 파일 mypy, Python bytecode 컴파일과 `git diff --check`를 통과했습니다.
+
 ---
 
 ## 다른 컴퓨터에서 작업 재개
