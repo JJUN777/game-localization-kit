@@ -70,6 +70,8 @@ class TranslationRunResult:
     review_file: str | None
     review_status: str | None
     prompt_file: str | None
+    validation_issue_count: int = 0
+    validation_issue_blocks: int = 0
     cached: bool = False
     resumed: bool = False
     review_created: bool = False
@@ -326,12 +328,13 @@ def _validate_translated_text(
     ]
 
 
-def validate_translation_response(
+def parse_translation_response(
     *,
     response: Any,
     blocks: tuple[SourceBlock, ...],
     termbase_entries: list[dict[str, Any]],
 ) -> dict[str, str]:
+    """Validate response structure and restore protected keep terms."""
     if not isinstance(response, dict) or not isinstance(
         response.get("translations"), list
     ):
@@ -372,14 +375,45 @@ def validate_translation_response(
             f"response returned {len(response['translations'])} items; "
             f"expected {len(expected_ids)}"
         )
-    for block_id, text in translated.items():
-        errors.extend(
-            _validate_translated_text(
-                block=by_id[block_id],
-                translated_text=text,
-                termbase_entries=termbase_entries,
-            )
+    if errors:
+        raise TranslationValidationError("; ".join(errors))
+    return translated
+
+
+def _translation_content_errors(
+    *,
+    translated: dict[str, str],
+    blocks: tuple[SourceBlock, ...],
+    termbase_entries: list[dict[str, Any]],
+) -> list[str]:
+    return [
+        error
+        for block in blocks
+        for error in _validate_translated_text(
+            block=block,
+            translated_text=translated[block.id],
+            termbase_entries=termbase_entries,
         )
+    ]
+
+
+def validate_translation_response(
+    *,
+    response: Any,
+    blocks: tuple[SourceBlock, ...],
+    termbase_entries: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Strict validation used when a caller requires immediately clean output."""
+    translated = parse_translation_response(
+        response=response,
+        blocks=blocks,
+        termbase_entries=termbase_entries,
+    )
+    errors = _translation_content_errors(
+        translated=translated,
+        blocks=blocks,
+        termbase_entries=termbase_entries,
+    )
     if errors:
         raise TranslationValidationError("; ".join(errors))
     return translated
@@ -604,6 +638,12 @@ def translate_project(
                 review_file=str(review_path) if review_path.is_file() else None,
                 review_status=previous_state.get("review_status"),
                 prompt_file=str(canonical_prompt_path),
+                validation_issue_count=int(
+                    previous_state.get("validation_issue_count") or 0
+                ),
+                validation_issue_blocks=int(
+                    previous_state.get("validation_issue_blocks") or 0
+                ),
                 cached=True,
             )
         if existing_segments and not resume and not force:
@@ -647,6 +687,18 @@ def translate_project(
             )
 
     completed_chunks = 0
+    validation_issue_messages: list[str] = []
+    validation_issue_block_ids: set[str] = set()
+    for segment in existing_segments:
+        block = block_by_id[segment.source_block_id]
+        errors = _validate_translated_text(
+            block=block,
+            translated_text=segment.translated_text,
+            termbase_entries=termbase_entries,
+        )
+        if errors:
+            validation_issue_messages.extend(errors)
+            validation_issue_block_ids.add(block.id)
     for chunk_index, chunk in enumerate(chunks, start=1):
         if all(block.id in completed for block in chunk.blocks):
             completed_chunks += 1
@@ -659,6 +711,7 @@ def translate_project(
         notify(f"Chunk {chunk_index}/{len(chunks)}: requesting translation")
         feedback: str | None = None
         translated: dict[str, str] | None = None
+        structurally_valid: dict[str, str] | None = None
         try:
             for validation_attempt in range(2):
                 prompt = compile_translation_prompt(
@@ -668,18 +721,50 @@ def translate_project(
                     validation_feedback=feedback,
                 )
                 try:
-                    translated = validate_translation_response(
-                        response=active_provider.translate(prompt),
+                    response = active_provider.translate(prompt)
+                    candidate = parse_translation_response(
+                        response=response,
                         blocks=chunk.blocks,
                         termbase_entries=termbase_entries,
                     )
-                    break
                 except TranslationValidationError as error:
                     feedback = str(error)
                     notify(
-                        f"Chunk {chunk_index}/{len(chunks)}: validation failed "
+                        f"Chunk {chunk_index}/{len(chunks)}: "
+                        f"response structure validation failed "
                         f"({validation_attempt + 1}/2)"
                     )
+                    continue
+                except Exception:
+                    if structurally_valid is not None:
+                        notify(
+                            f"Chunk {chunk_index}/{len(chunks)}: "
+                            "content validation retry failed; "
+                            "preserving the reviewable response"
+                        )
+                        break
+                    raise
+                structurally_valid = candidate
+                content_errors = _translation_content_errors(
+                    translated=candidate,
+                    blocks=chunk.blocks,
+                    termbase_entries=termbase_entries,
+                )
+                if not content_errors:
+                    translated = candidate
+                    break
+                feedback = "; ".join(content_errors)
+                notify(
+                    f"Chunk {chunk_index}/{len(chunks)}: "
+                    f"content validation needs review "
+                    f"({validation_attempt + 1}/2)"
+                )
+            if translated is None and structurally_valid is not None:
+                translated = structurally_valid
+                notify(
+                    f"Chunk {chunk_index}/{len(chunks)}: "
+                    "saved with content issues for human review"
+                )
             if translated is None:
                 raise TranslationValidationError(
                     feedback or f"Chunk {chunk.id} failed response validation."
@@ -712,6 +797,8 @@ def translate_project(
                     "translation_output_sha256": output_hash,
                     "failed_chunk": chunk.id,
                     "failure_reason": str(error),
+                    "validation_issue_count": len(validation_issue_messages),
+                    "validation_issue_blocks": len(validation_issue_block_ids),
                     "updated_at": _utc_now(),
                 },
             )
@@ -722,6 +809,14 @@ def translate_project(
 
         for block in chunk.blocks:
             translated_text = translated[block.id]
+            content_errors = _validate_translated_text(
+                block=block,
+                translated_text=translated_text,
+                termbase_entries=termbase_entries,
+            )
+            if content_errors:
+                validation_issue_messages.extend(content_errors)
+                validation_issue_block_ids.add(block.id)
             source_hash = _sha256_bytes(block.effective_text.encode("utf-8"))
             translation_hash = _sha256_bytes(translated_text.encode("utf-8"))
             segment = TranslationSegment(
@@ -758,6 +853,7 @@ def translate_project(
                 "project_prompt_file": paths.relative(paths.translation_prompt),
                 "model": active_provider.model_name,
                 "provider_prompt_version": active_provider.prompt_version,
+                "hard_rules_version": TRANSLATION_HARD_RULES_VERSION,
                 "max_characters": max_characters,
                 "total_blocks": len(blocks),
                 "total_chunks": len(chunks),
@@ -766,6 +862,8 @@ def translate_project(
                 "translation_output_sha256": _sha256_bytes(current_data),
                 "failed_chunk": None,
                 "failure_reason": None,
+                "validation_issue_count": len(validation_issue_messages),
+                "validation_issue_blocks": len(validation_issue_block_ids),
                 "updated_at": _utc_now(),
             },
         )
@@ -821,6 +919,8 @@ def translate_project(
             "review_base_draft_sha256": review_base_draft_hash,
             "failed_chunk": None,
             "failure_reason": None,
+            "validation_issue_count": len(validation_issue_messages),
+            "validation_issue_blocks": len(validation_issue_block_ids),
             "updated_at": _utc_now(),
         },
     )
@@ -840,6 +940,8 @@ def translate_project(
         review_file=str(review_path),
         review_status=review_status,
         prompt_file=str(canonical_prompt_path),
+        validation_issue_count=len(validation_issue_messages),
+        validation_issue_blocks=len(validation_issue_block_ids),
         resumed=bool(existing_segments),
         review_created=review_created,
     )

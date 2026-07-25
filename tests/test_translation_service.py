@@ -470,13 +470,52 @@ class TranslationFoundationTests(unittest.TestCase):
             self.assertIn("VALIDATION FEEDBACK", provider.prompts[1])
             self.assertIn("확정 용어", provider.prompts[1])
 
-    def test_preserves_partial_state_and_resumes_after_validation_failure(self) -> None:
+    def test_preserves_content_issues_for_human_review_after_retry(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
             blocks = sample_blocks()
             project_path = create_translation_project(workspace_root, blocks)
             invalid = valid_response(blocks)
-            invalid["translations"][2]["text"] = "사냥꾼들은 11을 사용할 수 있습니다."
+            invalid["translations"][2]["text"] = (
+                "사냥꾼들은 11을 사용할 수 있습니다."
+            )
+            provider = SequenceProvider([invalid, invalid])
+
+            result = translate_project(
+                project="translation_project",
+                workspace_root=workspace_root,
+                provider=provider,
+            )
+
+            self.assertEqual(result.completed_blocks, 3)
+            self.assertEqual(result.validation_issue_blocks, 1)
+            self.assertGreaterEqual(result.validation_issue_count, 2)
+            self.assertEqual(len(provider.prompts), 2)
+            self.assertIn("VALIDATION FEEDBACK", provider.prompts[1])
+            state = json.loads(
+                (project_path / ".glk/state/translation.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(state["status"], "complete")
+            self.assertEqual(state["validation_issue_blocks"], 1)
+            self.assertTrue(
+                (project_path / "04_translation/review.txt").is_file()
+            )
+            qa = run_project_translation_qa(
+                project="translation_project",
+                workspace_root=workspace_root,
+                dry_run=True,
+            )
+            self.assertFalse(qa.passed)
+            self.assertGreaterEqual(qa.error_count, 2)
+
+    def test_preserves_partial_state_and_resumes_after_validation_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            blocks = sample_blocks()
+            project_path = create_translation_project(workspace_root, blocks)
+            invalid = {"translations": []}
             provider = SequenceProvider([invalid, invalid])
             with self.assertRaisesRegex(TranslationError, "use --resume"):
                 translate_project(
@@ -493,7 +532,7 @@ class TranslationFoundationTests(unittest.TestCase):
                 state["hard_rules_version"],
                 "translation-hard-rules-v3",
             )
-            self.assertIn("숫자 구성이 원문과 다릅니다", state["failure_reason"])
+            self.assertIn("missing ids", state["failure_reason"])
             self.assertEqual(
                 inspect_project("translation_project", workspace_root)["pipeline"][
                     "translation_status"

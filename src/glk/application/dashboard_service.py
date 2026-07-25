@@ -194,7 +194,14 @@ def _review_availability(pipeline: dict[str, Any]) -> dict[str, ReviewAvailabili
         translation_status == "current"
         and translation_review not in {"not_ready", "stale"}
     )
-    if translation_enabled:
+    if translation_review == "qa_failed":
+        issue_count = pipeline.get("translation_qa_issues")
+        translation_reason = (
+            f"번역 QA 오류 {issue_count}개를 검수 화면에서 수정하세요."
+            if isinstance(issue_count, int)
+            else "번역 QA 오류를 검수 화면에서 수정하세요."
+        )
+    elif translation_enabled:
         translation_reason = "번역 검수 화면을 열 수 있습니다."
     elif translation_review == "stale":
         translation_reason = "번역 검수 데이터가 오래되었습니다. 번역 검수를 다시 준비하세요."

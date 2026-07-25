@@ -725,6 +725,23 @@
       overflow-wrap: anywhere;
     }
 
+    .translation-review-attention {
+      grid-column: 1 / -1;
+      display: grid;
+      gap: 4px;
+      padding: 12px 13px;
+      border: 1px solid rgb(201 123 31 / 32%);
+      border-radius: 11px;
+      color: #7a480f;
+      background: rgb(201 123 31 / 9%);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .translation-review-attention strong {
+      font-size: 12px;
+    }
+
     .job-summary {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2242,6 +2259,18 @@
       </div>`;
     }
 
+    function translationReviewAttention(project) {
+      if (project.stage !== "translation_qa_failed") return "";
+      const count = project.pipeline.translation_qa_issues;
+      const countLabel = Number.isInteger(count)
+        ? `${count}개 오류`
+        : "확인 필요 항목";
+      return `<div class="translation-review-attention" role="status">
+        <strong>초벌 번역 완료 · ${escapeHtml(countLabel)}</strong>
+        <span>번역 결과는 보존했습니다. 번역 검수에서 표시된 블록을 수정한 뒤 다시 검사하세요.</span>
+      </div>`;
+    }
+
     function translationJobButton(project) {
       const status = project.pipeline.translation_status;
       if (
@@ -2785,6 +2814,7 @@
           ${sourceJobStatus(project)}
           ${glossaryJobStatus(project)}
           ${translationJobStatus(project)}
+          ${translationReviewAttention(project)}
           ${sourceJobButton(project)}
           ${glossaryJobButton(project)}
           ${translationPromptEditButton(project)}

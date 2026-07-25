@@ -33,6 +33,7 @@ from glk.application.translation_restart_service import (
 )
 from glk.application.translation_review_service import (
     prepare_project_translation_review,
+    run_project_translation_qa,
 )
 from glk.application.translation_service import translate_project
 from glk.domain.workspace import (
@@ -481,11 +482,28 @@ def run_translation_pipeline(
             force=True,
         )
         review_reset = True
-    progress("초벌 번역과 검수 파일 생성이 완료되었습니다.", total, total)
+    qa_result = None
+    if result.validation_issue_count:
+        progress("번역 결과의 확인 필요 항목을 정리하고 있습니다.", total, total)
+        qa_result = run_project_translation_qa(
+            project=project_id,
+            workspace_root=workspace_root,
+        )
+        progress(
+            (
+                "초벌 번역이 완료되었습니다. "
+                f"번역 검수에서 {qa_result.error_count}개 오류를 확인하세요."
+            ),
+            total,
+            total,
+        )
+    else:
+        progress("초벌 번역과 검수 파일 생성이 완료되었습니다.", total, total)
     return {
         "ok": True,
         "status": "succeeded",
         "translation": result.to_dict(),
+        "qa": qa_result.to_dict() if qa_result is not None else None,
         "revision_path": (
             WorkspacePaths(location.path).relative(revision_path)
             if location is not None and revision_path is not None
@@ -1256,8 +1274,19 @@ class DashboardJobManager:
             current_job.finished_at = now
             current_job.updated_at = now
             if status == "succeeded":
+                qa = result.get("qa") if isinstance(result, dict) else None
+                qa_errors = (
+                    qa.get("error_count")
+                    if isinstance(qa, dict)
+                    else None
+                )
                 current_job.progress_message = (
-                    "초벌 번역과 검수 파일 생성이 완료되었습니다."
+                    (
+                        "초벌 번역이 완료되었습니다. "
+                        f"번역 검수에서 {qa_errors}개 오류를 확인하세요."
+                    )
+                    if isinstance(qa_errors, int) and qa_errors > 0
+                    else "초벌 번역과 검수 파일 생성이 완료되었습니다."
                 )
                 current_job.progress_current = current_job.progress_total
             else:

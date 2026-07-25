@@ -17,6 +17,7 @@ from glk.application.source_registration_service import (
 )
 from glk.application.translation_review_service import (
     finalize_project_translation_review,
+    run_project_translation_qa,
 )
 from glk.application.translation_service import translate_project
 from tests.test_translation_service import (
@@ -183,6 +184,40 @@ class DashboardServiceTests(unittest.TestCase):
                     output_path="05_output/rulebook_kor.txt",
                     workspace_root=workspace_root,
                 )
+
+    def test_marks_reviewable_translation_errors_as_attention(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace_root = Path(temporary) / "workspaces"
+            blocks = sample_blocks()
+            create_translation_project(workspace_root, blocks)
+            invalid = valid_response(blocks)
+            invalid["translations"][2]["text"] = (
+                "사냥꾼들은 11을 사용할 수 있습니다."
+            )
+            translate_project(
+                project="translation_project",
+                workspace_root=workspace_root,
+                provider=SequenceProvider([invalid, invalid]),
+            )
+            qa = run_project_translation_qa(
+                project="translation_project",
+                workspace_root=workspace_root,
+            )
+
+            document = get_dashboard_document(workspace_root)
+            project = document["projects"][0]
+
+            self.assertGreaterEqual(qa.error_count, 2)
+            self.assertEqual(project["stage"], "translation_qa_failed")
+            self.assertEqual(
+                project["pipeline"]["translation_qa_issues"],
+                qa.error_count,
+            )
+            self.assertIn(
+                f"오류 {qa.error_count}개",
+                project["reviews"]["translation"]["reason"],
+            )
+            self.assertEqual(document["summary"]["needs_attention"], 1)
 
     def test_lists_combined_and_per_image_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

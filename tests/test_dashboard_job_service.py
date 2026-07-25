@@ -679,6 +679,7 @@ class DashboardJobManagerTests(unittest.TestCase):
     def test_translation_pipeline_reports_chunk_progress(self) -> None:
         planned = SimpleNamespace(total_chunks=2)
         translated = SimpleNamespace(
+            validation_issue_count=0,
             to_dict=lambda: {
                 "completed_blocks": 3,
                 "completed_chunks": 2,
@@ -701,6 +702,7 @@ class DashboardJobManagerTests(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "succeeded")
+        self.assertIsNone(result["qa"])
         self.assertEqual(translate.call_count, 2)
         self.assertTrue(translate.call_args_list[0].kwargs["dry_run"])
         self.assertFalse(translate.call_args_list[1].kwargs["resume"])
@@ -710,6 +712,65 @@ class DashboardJobManagerTests(unittest.TestCase):
         )
         self.assertIn(
             ("Chunk 2/2: requesting translation", 1, 2),
+            progress,
+        )
+
+    def test_translation_pipeline_runs_qa_for_reviewable_content_issues(
+        self,
+    ) -> None:
+        planned = SimpleNamespace(total_chunks=1)
+        translated = SimpleNamespace(
+            validation_issue_count=2,
+            to_dict=lambda: {
+                "completed_blocks": 3,
+                "completed_chunks": 1,
+                "validation_issue_count": 2,
+                "validation_issue_blocks": 1,
+            },
+        )
+        qa_result = SimpleNamespace(
+            error_count=2,
+            to_dict=lambda: {
+                "error_count": 2,
+                "warning_count": 0,
+                "passed": False,
+            },
+        )
+        progress: list[tuple[str, int | None, int | None]] = []
+        with (
+            patch(
+                "glk.application.dashboard_job_service.translate_project",
+                side_effect=[planned, translated],
+            ),
+            patch(
+                "glk.application.dashboard_job_service.run_project_translation_qa",
+                return_value=qa_result,
+            ) as qa,
+        ):
+            result = run_translation_pipeline(
+                "translation_project",
+                self.workspace_root,
+                "gemini-test",
+                False,
+                False,
+                lambda message, current, total: progress.append(
+                    (message, current, total)
+                ),
+            )
+
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["qa"]["error_count"], 2)
+        qa.assert_called_once_with(
+            project="translation_project",
+            workspace_root=self.workspace_root,
+        )
+        self.assertIn(
+            (
+                "초벌 번역이 완료되었습니다. "
+                "번역 검수에서 2개 오류를 확인하세요.",
+                1,
+                1,
+            ),
             progress,
         )
 

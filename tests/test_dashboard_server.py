@@ -255,6 +255,8 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("data-edit-translation-prompt", html)
         self.assertIn("변경된 프롬프트로 전체 재번역", html)
         self.assertIn("청크마다 API를 호출", html)
+        self.assertIn("초벌 번역 완료 ·", html)
+        self.assertIn("translation-review-attention", html)
         self.assertIn("최종 번역 결과", html)
         self.assertIn("data-download-output", html)
         self.assertIn("휴지통으로 이동", html)
