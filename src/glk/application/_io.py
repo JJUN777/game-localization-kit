@@ -24,9 +24,22 @@ def _temporary_path(path: Path) -> Path:
 def _replace_from_temporary(path: Path, temporary_path: Path) -> None:
     try:
         os.replace(temporary_path, path)
+        _fsync_parent(path)
     except Exception:
         temporary_path.unlink(missing_ok=True)
         raise
+
+
+def _fsync_parent(path: Path) -> None:
+    """Persist a replaced or newly created directory entry where supported."""
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    descriptor = os.open(path.parent, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def write_bytes_atomic(path: Path, value: bytes) -> None:
@@ -41,6 +54,20 @@ def write_bytes_atomic(path: Path, value: bytes) -> None:
     except Exception:
         temporary_path.unlink(missing_ok=True)
         raise
+
+
+def append_bytes_durable(path: Path, value: bytes) -> None:
+    """Append bytes, fsync the file, and persist a newly created entry."""
+    if not value:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    created = not path.exists()
+    with path.open("ab") as file:
+        file.write(value)
+        file.flush()
+        os.fsync(file.fileno())
+    if created:
+        _fsync_parent(path)
 
 
 def write_text_atomic(path: Path, value: str) -> None:

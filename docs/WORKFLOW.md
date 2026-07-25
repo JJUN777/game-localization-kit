@@ -436,6 +436,12 @@ glk translate --project primal --resume   # 중단 후 완료된 청크부터 �
 
 승인 원문, termbase, project prompt, 모델, hard rule 버전이나 청크 설정이 달라지면 기존 결과를 stale로 처리합니다.
 
+완료된 청크는 `.glk/segments/translation.jsonl`에 append하고 state에 파일 byte
+길이와 SHA-256 checkpoint를 함께 기록합니다. state 갱신 전에 프로세스가
+중단되어 미확정 꼬리가 남으면 `--resume`이 마지막 checkpoint로 되돌린 뒤
+계속합니다. 모든 청크가 저장된 뒤 draft·review 생성 중 중단된 경우에는 Gemini를
+다시 호출하지 않고 저장된 청크로 산출물을 완성합니다.
+
 ### 생성 파일
 
 | 파일 | 역할 |

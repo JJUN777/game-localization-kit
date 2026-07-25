@@ -8,9 +8,10 @@ import shutil
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Callable
 
 from glk.application._cache import read_json_object
+from glk.application._hashing import FileHashCache
 from glk.application._hashing import sha256_file_if_exists as _sha256_file
 from glk.application._hashing import (
     sha256_text_file_if_exists as _sha256_text_file,
@@ -100,6 +101,19 @@ class ProjectListResult:
             "projects": [project.to_dict() for project in self.projects],
             "warnings": [warning.to_dict() for warning in self.warnings],
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectInspection:
+    summary: ProjectSummary
+    status: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectScanResult:
+    workspace_root: str
+    inspections: tuple[ProjectInspection, ...]
+    warnings: tuple[ProjectListWarning, ...]
 
 
 def _resolve_path(path: str | Path) -> Path:
@@ -265,7 +279,10 @@ def source_processing_started(location: ProjectLocation) -> bool:
 
 
 def inspect_project(
-    project: str | Path, workspace_root: str | Path = DEFAULT_WORKSPACE_ROOT
+    project: str | Path,
+    workspace_root: str | Path = DEFAULT_WORKSPACE_ROOT,
+    *,
+    hash_cache: FileHashCache | None = None,
 ) -> dict[str, Any]:
     location = load_project(project, workspace_root)
     missing_paths = [
@@ -273,7 +290,7 @@ def inspect_project(
         for relative_path in PROJECT_DIRECTORIES
         if not (location.path / relative_path).is_dir()
     ]
-    pipeline = _inspect_pipeline_status(location)
+    pipeline = _inspect_pipeline_status(location, hash_cache=hash_cache)
     return {
         "ok": not missing_paths,
         "project_path": str(location.path),
@@ -327,17 +344,19 @@ def _project_source_type(project_path: Path, pipeline: dict[str, Any]) -> str | 
     return None
 
 
-def list_projects(
+def scan_projects(
     workspace_root: str | Path = DEFAULT_WORKSPACE_ROOT,
-) -> ProjectListResult:
-    """List valid project workspaces without letting one damaged project abort the scan."""
+    *,
+    hash_cache: FileHashCache | None = None,
+) -> ProjectScanResult:
+    """Inspect valid projects once without letting one damaged project abort the scan."""
     root = _resolve_path(workspace_root)
     if not root.exists():
-        return ProjectListResult(str(root), (), ())
+        return ProjectScanResult(str(root), (), ())
     if not root.is_dir():
         raise ProjectError(f"Workspace root is not a directory: {root}")
 
-    projects: list[ProjectSummary] = []
+    inspections: list[ProjectInspection] = []
     warnings: list[ProjectListWarning] = []
     for candidate in sorted(root.iterdir(), key=lambda path: path.name.casefold()):
         if (
@@ -347,20 +366,23 @@ def list_projects(
         ):
             continue
         try:
-            status = inspect_project(candidate)
+            status = inspect_project(candidate, hash_cache=hash_cache)
             manifest = status["manifest"]
             pipeline = status["pipeline"]
-            projects.append(
-                ProjectSummary(
-                    project_id=manifest["project_id"],
-                    name=manifest["name"],
-                    source_type=_project_source_type(candidate, pipeline),
-                    stage=_project_stage(pipeline),
-                    final_translation_approved=bool(
-                        pipeline["final_translation_approved"]
+            inspections.append(
+                ProjectInspection(
+                    summary=ProjectSummary(
+                        project_id=manifest["project_id"],
+                        name=manifest["name"],
+                        source_type=_project_source_type(candidate, pipeline),
+                        stage=_project_stage(pipeline),
+                        final_translation_approved=bool(
+                            pipeline["final_translation_approved"]
+                        ),
+                        path=str(candidate.resolve()),
                     ),
-                    path=str(candidate.resolve()),
-                )
+                    status=status,
+                ),
             )
         except (
             ProjectError,
@@ -374,8 +396,22 @@ def list_projects(
             warnings.append(
                 ProjectListWarning(directory=candidate.name, message=str(error))
             )
-    projects.sort(key=lambda project: project.project_id.casefold())
-    return ProjectListResult(str(root), tuple(projects), tuple(warnings))
+    inspections.sort(
+        key=lambda inspection: inspection.summary.project_id.casefold()
+    )
+    return ProjectScanResult(str(root), tuple(inspections), tuple(warnings))
+
+
+def list_projects(
+    workspace_root: str | Path = DEFAULT_WORKSPACE_ROOT,
+) -> ProjectListResult:
+    """List valid project workspaces without letting one damaged project abort the scan."""
+    scanned = scan_projects(workspace_root)
+    return ProjectListResult(
+        scanned.workspace_root,
+        tuple(inspection.summary for inspection in scanned.inspections),
+        scanned.warnings,
+    )
 
 
 def _read_optional_json(path: Path) -> dict[str, Any] | None:
@@ -386,6 +422,8 @@ def _final_translation_files_current(
     project_path: Path,
     state: dict[str, Any],
     legacy_path: Path,
+    *,
+    file_hash: Callable[[Path], str | None] = _sha256_file,
 ) -> bool:
     final_files = state.get("final_files")
     if isinstance(final_files, dict) and final_files:
@@ -397,17 +435,31 @@ def _final_translation_files_current(
                 relative_path.is_absolute()
                 or ".." in relative_path.parts
                 or relative_path.parts[:1] != ("05_output",)
-                or _sha256_file(project_path / Path(*relative_path.parts))
+                or file_hash(project_path / Path(*relative_path.parts))
                 != expected_hash
             ):
                 return False
         return True
-    return state.get("final_sha256") == _sha256_file(legacy_path)
+    return state.get("final_sha256") == file_hash(legacy_path)
 
 
-def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
+def _inspect_pipeline_status(
+    location: ProjectLocation,
+    *,
+    hash_cache: FileHashCache | None = None,
+) -> dict[str, Any]:
     project_path = location.path
     paths = WorkspacePaths(project_path)
+    file_hash = (
+        hash_cache.sha256_file_if_exists
+        if hash_cache is not None
+        else _sha256_file
+    )
+    text_file_hash = (
+        hash_cache.sha256_text_file_if_exists
+        if hash_cache is not None
+        else _sha256_text_file
+    )
     if is_pdf_source_file(location.manifest.source_file):
         acquisition = _read_optional_json(paths.pdf_acquisition_state)
         source_type = "pdf"
@@ -424,7 +476,7 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
     )
 
     source_blocks_path = paths.source_segments
-    source_sha256 = _sha256_file(source_blocks_path)
+    source_sha256 = file_hash(source_blocks_path)
     review_source_ready = source_sha256 is not None
 
     qa_state = _read_optional_json(paths.source_qa_state)
@@ -445,15 +497,15 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
     review_state = _read_optional_json(paths.source_review_state)
     final_path = paths.source_final
     approved_path = paths.approved_source_segments
-    approved_sha256 = _sha256_file(approved_path)
+    approved_sha256 = file_hash(approved_path)
     if not review_path.is_file() or review_state is None:
         human_review = "not_ready"
     elif review_state.get("source_sha256") != source_sha256:
         human_review = "stale"
     elif (
         review_state.get("status") == "approved"
-        and review_state.get("review_sha256") == _sha256_file(review_path)
-        and review_state.get("final_sha256") == _sha256_file(final_path)
+        and review_state.get("review_sha256") == file_hash(review_path)
+        and review_state.get("final_sha256") == file_hash(final_path)
         and review_state.get("approved_blocks_sha256") == approved_sha256
     ):
         human_review = "approved"
@@ -487,8 +539,8 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
         or termbase_state.get("status") != "complete"
         or termbase_state.get("version") != TERMBASE_IMPORT_VERSION
         or termbase_state.get("approved_source_sha256") != approved_sha256
-        or termbase_state.get("review_tsv_sha256") != _sha256_file(glossary_path)
-        or termbase_state.get("termbase_sha256") != _sha256_file(termbase_path)
+        or termbase_state.get("review_tsv_sha256") != file_hash(glossary_path)
+        or termbase_state.get("termbase_sha256") != file_hash(termbase_path)
     ):
         termbase_status = "stale"
         termbase_entries = termbase_state.get("entry_count")
@@ -506,9 +558,9 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
         termbase_status != "current"
         or translation_state.get("version") != TRANSLATION_RUN_VERSION
         or translation_state.get("approved_source_sha256") != approved_sha256
-        or translation_state.get("termbase_sha256") != _sha256_file(termbase_path)
+        or translation_state.get("termbase_sha256") != file_hash(termbase_path)
         or translation_state.get("project_prompt_sha256")
-        != _sha256_text_file(translation_prompt_path)
+        != text_file_hash(translation_prompt_path)
     ):
         translation_status = "stale"
         translated_blocks = translation_state.get("completed_blocks")
@@ -519,7 +571,7 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
         translation_state.get("status") != "complete"
         or not translation_path.is_file()
         or translation_state.get("translation_output_sha256")
-        != _sha256_file(translation_path)
+        != file_hash(translation_path)
     ):
         translation_status = "stale"
         translated_blocks = translation_state.get("completed_blocks")
@@ -552,7 +604,7 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
         translation_state is None
         or translation_state.get("review_status") != "current"
         or translation_state.get("review_base_draft_sha256")
-        != _sha256_file(translation_draft_path)
+        != file_hash(translation_draft_path)
     ):
         translation_review_status = "stale"
         translation_qa_issues = None
@@ -562,17 +614,17 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
     elif (
         translation_review_state.get("version") != TRANSLATION_REVIEW_VERSION
         or translation_review_state.get("translation_output_sha256")
-        != _sha256_file(translation_path)
+        != file_hash(translation_path)
         or translation_review_state.get("termbase_sha256")
-        != _sha256_file(termbase_path)
+        != file_hash(termbase_path)
         or translation_review_state.get("draft_sha256")
-        != _sha256_file(translation_draft_path)
+        != file_hash(translation_draft_path)
         or translation_review_state.get("review_sha256")
-        != _sha256_file(translation_review_path)
+        != file_hash(translation_review_path)
         or translation_review_state.get("qa_json_sha256")
-        != _sha256_file(translation_qa_json_path)
+        != file_hash(translation_qa_json_path)
         or translation_review_state.get("qa_markdown_sha256")
-        != _sha256_file(translation_qa_markdown_path)
+        != file_hash(translation_qa_markdown_path)
     ):
         translation_review_status = "stale"
         translation_qa_issues = translation_review_state.get("error_count")
@@ -590,6 +642,7 @@ def _inspect_pipeline_status(location: ProjectLocation) -> dict[str, Any]:
             project_path,
             translation_review_state,
             final_translation_path,
+            file_hash=file_hash,
         )
     ):
         translation_review_status = "approved"

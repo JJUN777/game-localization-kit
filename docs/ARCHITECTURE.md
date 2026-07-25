@@ -154,7 +154,7 @@ review TXT는 `[PAGE]` 또는 `[SOURCE]`, `[BLOCK]`, `[[GLK_END ...]]` marker로
 - 자동 생성 결과가 stale이면 재생성합니다.
 - 사람이 편집한 review와 glossary TSV는 덮어쓰지 않고 stale 표시만 합니다.
 
-**파일 확정:** application service는 `_io.py`의 공통 writer를 사용합니다. 대상과 같은 폴더에 충돌하지 않는 고유 임시 파일을 만든 뒤 `flush`/`fsync` → `os.replace`로 교체하고, 실패하면 임시 파일을 정리합니다. 내용 hash는 `_hashing.py`, 번역과 선택 재번역이 공유하는 원문·termbase·prompt 로딩은 `_translation_context.py`가 담당합니다.
+**파일 확정:** application service는 `_io.py`의 공통 writer를 사용합니다. 대상과 같은 폴더에 충돌하지 않는 고유 임시 파일을 만든 뒤 `flush`/`fsync` → `os.replace`로 교체하고, 지원 운영체제에서는 부모 디렉터리도 fsync합니다. 실패하면 임시 파일을 정리합니다. 내용 hash는 `_hashing.py`가 담당하며 대시보드의 한 snapshot 안에서는 `FileHashCache`가 같은 파일의 byte·정규화 text hash를 재사용합니다. 번역과 선택 재번역이 공유하는 원문·termbase·prompt 로딩은 `_translation_context.py`가 담당합니다.
 
 **원본 교체:** 원문 추출·OCR이 시작되기 전만 허용합니다. 기존 PDF·이미지 입력
 폴더를 프로젝트 내부 임시 위치로 먼저 이동한 뒤 새 원본을 등록하고, 실패하면
@@ -263,6 +263,8 @@ ID·순서·숫자·token·HTML·용어 검증
 ## 로컬 대시보드와 HTML 검수 서버 보안
 
 `glk ui` 대시보드는 `dashboard_service`가 만든 읽기 전용 프로젝트 상태를 표시하고, 준비된 기존 `source`, `glossary`, `translation` 검수 서버를 필요할 때 실행합니다. 프로젝트 생성과 삭제 요청은 application service의 규칙을 재사용합니다. PDF·이미지 최초 등록은 `source_registration_service`가 CLI와 GUI에 같은 복사·manifest 규칙을 제공하며 AI 작업은 실행하지 않습니다. `dashboard_job_service`는 등록 원본의 acquisition·segmentation·source QA, 승인 원문 기반 용어 후보 생성과 termbase 기반 초벌 번역을 HTTP 요청과 분리된 단일 active worker 정책으로 실행합니다. 최신 실행 상태는 각각 `.glk/state/dashboard_source_job.json`, `.glk/state/dashboard_glossary_job.json`, `.glk/state/dashboard_translation_job.json`에 저장하며 schema와 상위 프로젝트 경로를 검증한 뒤 복원합니다. 용어 후보 생성은 기존 `glossary_service`의 로컬 규칙만 재사용하며 Gemini API를 호출하지 않습니다. `translation_prompt_service`는 초벌 번역과 분리해 프로젝트 prompt를 저장하고 개행 정규화 SHA-256으로 동시 편집 충돌을 차단합니다. 초벌 번역은 기존 `translation_service`의 청크 저장과 resume 규칙을 재사용하고, partial 상태에서 prompt가 바뀌면 이어하기 대신 명시적 전체 재번역만 허용합니다. 전체 재번역은 `translation_restart_service`가 기존 번역·검수·승인·최종 출력 snapshot을 먼저 revisions에 보관하고 성공한 경우에만 새 draft로 검수 상태를 초기화합니다. 번역 검수의 오류 문장 선택 재번역은 `translation_retry_job_service`가 검수 HTTP 요청과 분리해 실행합니다. 시작 요청은 현재 편집을 저장한 뒤 즉시 반환하고 검수 화면은 진행 상태를 조회하며, 실행 중 동시 편집은 잠그지 않고 UI에서 차단한 뒤 최종 저장 시 review hash로 변경 충돌을 거부합니다. 최종 번역이 current이면 승인 state의 `final_files`를 다시 검사해 다운로드 가능한 출력 목록을 read model에 포함합니다. `ai_settings_service`와 Gemini provider는 `config.resolve_settings_root`가 선택한 동일한 `.env`를 사용합니다. 명시적 경로, `GLK_SETTINGS_ROOT`, 검증된 editable checkout, OS별 사용자 설정 디렉터리 순으로 해석하며 키와 모델만 원자적으로 갱신하고 다른 항목과 주석을 보존합니다. `ai_model_catalog`는 패키지의 `data/gemini_models.json`을 검증해 드롭다운 모델 ID와 설명을 제공합니다. API 응답에는 키 값이 아니라 설정 여부와 적용 출처만 포함합니다. 삭제할 때는 정규화된 ID, workspace 바로 아래 경로와 manifest ID를 다시 확인한 뒤 검증된 프로젝트 폴더만 `send2trash`로 운영체제 휴지통에 이동합니다. 대시보드에서 연 검수 서버는 같은 프로젝트와 종류에 대해 재사용하며 대시보드 종료 시 함께 종료합니다.
+
+대시보드 snapshot은 프로젝트별 `inspect_project()` 결과를 목록 요약과 카드가 공유하며, 같은 snapshot에서 필요한 파일 hash도 한 번만 계산합니다. 번역 청크 JSONL은 누적 전체를 다시 쓰지 않고 durable append한 뒤 byte 길이와 SHA-256 checkpoint를 state에 기록합니다. state commit 전에 중단되어 파일 끝에 미확정 데이터가 남으면 `--resume`이 마지막 checkpoint까지 되돌리고, 모든 청크 뒤 draft·review 기록이 끊긴 경우에도 저장된 청크를 재호출 없이 다시 완성합니다. 용어 후보 생성은 `writing/failed` state와 예상 출력 hash를 사용해 출력과 state 사이 중단을 복구합니다.
 
 대시보드와 세 검수 서버가 공유하는 보안 경계:
 

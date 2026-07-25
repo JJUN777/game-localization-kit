@@ -8,11 +8,11 @@ from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
 
-from glk.application._hashing import sha256_file_if_exists
+from glk.application._hashing import FileHashCache, sha256_file_if_exists
 from glk.application.project_service import (
     inspect_project,
-    list_projects,
     load_workspace_project_id,
+    scan_projects,
 )
 from glk.application.source_registration_service import discover_source_images
 from glk.application.translation_prompt_service import (
@@ -81,7 +81,11 @@ class DashboardOutput:
         }
 
 
-def _approved_outputs(project_path: Path) -> tuple[DashboardOutput, ...]:
+def _approved_outputs(
+    project_path: Path,
+    *,
+    hash_cache: FileHashCache | None = None,
+) -> tuple[DashboardOutput, ...]:
     paths = WorkspacePaths(project_path)
     try:
         state = json.loads(
@@ -121,7 +125,12 @@ def _approved_outputs(project_path: Path) -> tuple[DashboardOutput, ...]:
             ) from error
         if (
             not candidate.is_file()
-            or sha256_file_if_exists(candidate) != expected_hash
+            or (
+                hash_cache.sha256_file_if_exists(candidate)
+                if hash_cache is not None
+                else sha256_file_if_exists(candidate)
+            )
+            != expected_hash
         ):
             raise DashboardOutputError(
                 "최종 번역 파일이 승인 이후 변경되었습니다."
@@ -160,10 +169,11 @@ def get_project_dashboard_output(
     if not isinstance(output_path, str) or not output_path:
         raise DashboardOutputError("다운로드할 결과 파일을 선택하세요.")
     location = load_workspace_project_id(project_id, workspace_root)
-    status = inspect_project(location.path)
+    hash_cache = FileHashCache()
+    status = inspect_project(location.path, hash_cache=hash_cache)
     if not status["pipeline"]["final_translation_approved"]:
         raise DashboardOutputError("현재 승인된 최종 번역 결과가 없습니다.")
-    for output in _approved_outputs(location.path):
+    for output in _approved_outputs(location.path, hash_cache=hash_cache):
         if output.relative_path == output_path:
             return output
     raise DashboardOutputError("다운로드할 결과 파일을 찾지 못했습니다.")
@@ -261,13 +271,21 @@ def _project_translation_prompt(summary: Any) -> dict[str, Any]:
         return {"value": "", "saved": True, "sha256": ""}
 
 
-def _project_document(summary: Any, status: dict[str, Any]) -> dict[str, Any]:
+def _project_document(
+    summary: Any,
+    status: dict[str, Any],
+    *,
+    hash_cache: FileHashCache,
+) -> dict[str, Any]:
     pipeline = status["pipeline"]
     reviews = _review_availability(pipeline)
     outputs: tuple[DashboardOutput, ...] = ()
     if pipeline["final_translation_approved"]:
         try:
-            outputs = _approved_outputs(Path(summary.path))
+            outputs = _approved_outputs(
+                Path(summary.path),
+                hash_cache=hash_cache,
+            )
         except DashboardOutputError:
             outputs = ()
     replacement_allowed = bool(
@@ -324,21 +342,18 @@ def get_dashboard_document(
     workspace_root: str | Path = "workspaces",
 ) -> dict[str, Any]:
     """Return a read-only snapshot of every valid project workspace."""
-    listed = list_projects(workspace_root)
+    hash_cache = FileHashCache()
+    scanned = scan_projects(workspace_root, hash_cache=hash_cache)
     projects: list[dict[str, Any]] = []
-    warnings = [warning.to_dict() for warning in listed.warnings]
-    for summary in listed.projects:
-        try:
-            status = inspect_project(summary.path)
-        except (OSError, TypeError, ValueError) as error:
-            warnings.append(
-                {
-                    "directory": summary.project_id,
-                    "message": str(error),
-                }
+    warnings = [warning.to_dict() for warning in scanned.warnings]
+    for inspection in scanned.inspections:
+        projects.append(
+            _project_document(
+                inspection.summary,
+                inspection.status,
+                hash_cache=hash_cache,
             )
-            continue
-        projects.append(_project_document(summary, status))
+        )
 
     completed = sum(
         bool(project["pipeline"]["final_translation_approved"])
@@ -356,7 +371,7 @@ def get_dashboard_document(
     return {
         "ok": True,
         "schema_version": DASHBOARD_SCHEMA_VERSION,
-        "workspace_root": listed.workspace_root,
+        "workspace_root": scanned.workspace_root,
         "summary": {
             "projects": len(projects),
             "in_progress": in_progress,

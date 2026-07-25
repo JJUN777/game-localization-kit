@@ -6,6 +6,26 @@ import hashlib
 from pathlib import Path
 
 
+class FileHashCache:
+    """Reuse byte and normalized-text hashes within one read-only snapshot."""
+
+    def __init__(self) -> None:
+        self._byte_hashes: dict[Path, str | None] = {}
+        self._text_hashes: dict[Path, str | None] = {}
+
+    def sha256_file_if_exists(self, path: Path) -> str | None:
+        candidate = Path(path)
+        if candidate not in self._byte_hashes:
+            self._byte_hashes[candidate] = sha256_file_if_exists(candidate)
+        return self._byte_hashes[candidate]
+
+    def sha256_text_file_if_exists(self, path: Path) -> str | None:
+        candidate = Path(path)
+        if candidate not in self._text_hashes:
+            self._text_hashes[candidate] = sha256_text_file_if_exists(candidate)
+        return self._text_hashes[candidate]
+
+
 def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 

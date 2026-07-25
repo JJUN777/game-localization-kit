@@ -636,11 +636,59 @@ def build_project_glossary_candidates(
     }
     state_matches = bool(
         state
+        and state.get("status") == "complete"
         and state.get("version") == GLOSSARY_BUILD_VERSION
         and state.get("approved_source_sha256") == approved_hash
         and state.get("parameters") == parameters
     )
     exists = output_path.is_file()
+    recoverable_state = bool(
+        state
+        and state.get("status") in {"writing", "failed"}
+        and state.get("version") == GLOSSARY_BUILD_VERSION
+        and state.get("approved_source_sha256") == approved_hash
+        and state.get("parameters") == parameters
+    )
+    if recoverable_state and not dry_run:
+        output_data = _render_review_tsv(candidates)
+        output_hash = _sha256_bytes(output_data)
+        if exists and _sha256_bytes(output_path.read_bytes()) != output_hash:
+            if not force:
+                return GlossaryBuildResult(
+                    project_path=str(location.path),
+                    approved_source_sha256=approved_hash,
+                    candidate_count=len(candidates),
+                    output_file=str(output_path),
+                    status="stale",
+                )
+        else:
+            if not exists:
+                _write_bytes_atomic(output_path, output_data)
+            _write_json_atomic(
+                state_path,
+                {
+                    "schema_version": 1,
+                    "status": "complete",
+                    "version": GLOSSARY_BUILD_VERSION,
+                    "input_file": paths.relative(
+                        paths.approved_source_segments
+                    ),
+                    "approved_source_sha256": approved_hash,
+                    "parameters": parameters,
+                    "candidate_count": len(candidates),
+                    "output_file": paths.relative(paths.glossary_review),
+                    "baseline_output_sha256": output_hash,
+                    "updated_at": _utc_now(),
+                },
+            )
+            return GlossaryBuildResult(
+                project_path=str(location.path),
+                approved_source_sha256=approved_hash,
+                candidate_count=len(candidates),
+                output_file=str(output_path),
+                status="current",
+                created=not exists,
+            )
     if exists and not force:
         status = "current" if state_matches else "stale"
         return GlossaryBuildResult(
@@ -667,7 +715,47 @@ def build_project_glossary_candidates(
         )
 
     output_data = _render_review_tsv(candidates)
-    _write_bytes_atomic(output_path, output_data)
+    output_hash = _sha256_bytes(output_data)
+    _write_json_atomic(
+        state_path,
+        {
+            "schema_version": 1,
+            "status": "writing",
+            "version": GLOSSARY_BUILD_VERSION,
+            "input_file": paths.relative(paths.approved_source_segments),
+            "approved_source_sha256": approved_hash,
+            "parameters": parameters,
+            "candidate_count": len(candidates),
+            "output_file": paths.relative(paths.glossary_review),
+            "baseline_output_sha256": output_hash,
+            "updated_at": _utc_now(),
+        },
+    )
+    try:
+        _write_bytes_atomic(output_path, output_data)
+    except Exception as error:
+        try:
+            _write_json_atomic(
+                state_path,
+                {
+                    "schema_version": 1,
+                    "status": "failed",
+                    "version": GLOSSARY_BUILD_VERSION,
+                    "input_file": paths.relative(
+                        paths.approved_source_segments
+                    ),
+                    "approved_source_sha256": approved_hash,
+                    "parameters": parameters,
+                    "candidate_count": len(candidates),
+                    "output_file": paths.relative(paths.glossary_review),
+                    "baseline_output_sha256": output_hash,
+                    "failure_reason": str(error),
+                    "updated_at": _utc_now(),
+                },
+            )
+        except OSError:
+            pass
+        raise
     _write_json_atomic(
         state_path,
         {
@@ -679,7 +767,7 @@ def build_project_glossary_candidates(
             "parameters": parameters,
             "candidate_count": len(candidates),
             "output_file": paths.relative(paths.glossary_review),
-            "baseline_output_sha256": _sha256_bytes(output_data),
+            "baseline_output_sha256": output_hash,
             "updated_at": _utc_now(),
         },
     )
@@ -753,12 +841,15 @@ def _manual_candidate_id(source_term: str) -> str:
     return "manual-" + _sha256_bytes(key.encode("utf-8"))[:12]
 
 
-def _term_evidence(blocks: list[SourceBlock], source_term: str) -> dict[str, Any] | None:
+def _term_evidence(
+    occurrence_index: dict[str, list[_Occurrence]],
+    source_term: str,
+) -> dict[str, Any] | None:
     words = _WORD_PATTERN.findall(unicodedata.normalize("NFKC", source_term))
     key = _candidate_key(source_term)
     if not words or not key:
         return None
-    occurrences = _collect_occurrences(blocks, max_words=len(words)).get(key, [])
+    occurrences = occurrence_index.get(key, [])
     if not occurrences:
         return None
     ordered = sorted(occurrences, key=lambda item: item.source_order)
@@ -842,6 +933,21 @@ def import_project_glossary(
 
     input_path = _resolve_review_tsv(file, location.path)
     input_rows = _parse_review_tsv(input_path.read_bytes())
+    evidence_max_words = max(
+        (
+            len(
+                _WORD_PATTERN.findall(
+                    unicodedata.normalize("NFKC", raw_row["source_term"])
+                )
+            )
+            for _record_number, raw_row in input_rows
+        ),
+        default=1,
+    )
+    occurrence_index = _collect_occurrences(
+        blocks,
+        max_words=max(evidence_max_words, 1),
+    )
     seen_terms: dict[str, int] = {}
     seen_term_keys: dict[str, int] = {}
     seen_ids: dict[str, int] = {}
@@ -930,7 +1036,7 @@ def import_project_glossary(
             )
         seen_ids[candidate_id] = record_number
 
-        evidence = _term_evidence(blocks, source_term)
+        evidence = _term_evidence(occurrence_index, source_term)
         source_verified = evidence is not None
         if evidence is None:
             if origin != "manual" or not allow_missing_terms:

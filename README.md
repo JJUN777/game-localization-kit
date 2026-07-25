@@ -589,6 +589,10 @@ glk translate --project primal --prompt prompts/primal_translation.txt
 glk translate --project primal --resume   # 중단 후 이어서 실행
 ```
 
+완료 청크는 append와 SHA-256 checkpoint로 보존됩니다. checkpoint 반영 전에
+중단된 파일 꼬리는 이어서 실행할 때 자동으로 제거하며, 청크 번역이 끝난 뒤
+검수 파일 생성 중 끊긴 경우 Gemini를 다시 호출하지 않고 산출물만 완성합니다.
+
 생성 파일:
 
 | 파일 | 역할 |

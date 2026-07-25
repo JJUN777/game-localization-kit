@@ -744,6 +744,18 @@ git diff --check
 - 전체 223개 테스트, 설정된 17개 Python 파일 mypy, Python bytecode 컴파일과 `git diff --check`를 통과했습니다.
 - Orca에서 진행 상태·블록 진행률·입력 잠금과 실패 사유·재시도 버튼을 확인했으며 브라우저 콘솔 오류가 없었습니다.
 
+### 2026-07-25 — 대시보드·용어·번역 성능과 중단 복구
+
+- 대시보드 snapshot은 프로젝트별 `inspect_project()`를 한 번만 실행하고 목록 요약과 카드가 같은 결과를 사용합니다.
+- `FileHashCache`가 한 snapshot 안의 동일 파일 byte·정규화 text hash를 재사용하며 최종 출력 확인도 같은 cache를 공유합니다.
+- 용어 import는 각 행마다 승인 원문 전체를 다시 순회하지 않고 한 번 생성한 occurrence index에서 evidence를 찾습니다.
+- 24개 단일 block 청크 실측에서 번역 JSONL 쓰기량은 최종 15,501 bytes 대비 209,061 bytes, 13.49배였습니다.
+- 누적 전체 재작성 대신 durable append와 byte 길이·SHA-256 checkpoint를 적용해 같은 실측의 쓰기량을 15,501 bytes, 1.00배로 줄였습니다.
+- state commit 전에 중단된 append 꼬리는 resume 때 마지막 checkpoint로 되돌리고, 모든 청크 뒤 draft·review 기록이 중단된 경우 Gemini 재호출 없이 완성합니다.
+- 용어 후보 생성은 `writing/failed` state와 예상 출력 hash로 출력 뒤 state commit 중단을 복구하며, hash가 다른 사용자 편집은 덮어쓰지 않습니다.
+- atomic replace와 새 append 파일은 지원 운영체제에서 부모 디렉터리까지 fsync합니다.
+- 전체 231개 테스트, 설정된 17개 Python 파일 mypy, Python bytecode 컴파일과 `git diff --check`를 통과했습니다.
+
 ---
 
 ## 다른 컴퓨터에서 작업 재개

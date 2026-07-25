@@ -6,6 +6,7 @@ import io
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from glk.application.glossary_service import (
@@ -183,6 +184,60 @@ class GlossaryCandidateRuleTests(unittest.TestCase):
 
 
 class GlossaryBuildServiceTests(unittest.TestCase):
+    def test_recovers_completed_output_after_interrupted_state_commit(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            project_path = create_approved_project(
+                workspace_root,
+                sample_blocks(),
+            )
+            from glk.application import glossary_service
+
+            original = glossary_service._write_json_atomic
+            state_writes = 0
+
+            def interrupt_complete(path: Path, value: object) -> None:
+                nonlocal state_writes
+                state_writes += 1
+                if state_writes == 2:
+                    raise OSError("simulated interruption")
+                original(path, value)
+
+            with (
+                patch(
+                    "glk.application.glossary_service._write_json_atomic",
+                    side_effect=interrupt_complete,
+                ),
+                self.assertRaisesRegex(OSError, "simulated interruption"),
+            ):
+                build_project_glossary_candidates(
+                    project="glossary_project",
+                    workspace_root=workspace_root,
+                )
+
+            state_path = project_path / ".glk/state/glossary_build.json"
+            interrupted_state = json.loads(
+                state_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(interrupted_state["status"], "writing")
+            output_path = (
+                project_path / "03_terminology/glossary_review.tsv"
+            )
+            self.assertTrue(output_path.is_file())
+
+            recovered = build_project_glossary_candidates(
+                project="glossary_project",
+                workspace_root=workspace_root,
+            )
+
+            self.assertEqual(recovered.status, "current")
+            completed_state = json.loads(
+                state_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(completed_state["status"], "complete")
+
     def test_builds_editable_tsv_and_preserves_human_edits(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
@@ -256,6 +311,36 @@ class GlossaryBuildServiceTests(unittest.TestCase):
 
 
 class GlossaryImportServiceTests(unittest.TestCase):
+    def test_builds_one_source_occurrence_index_for_import_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            project_path = create_approved_project(
+                workspace_root,
+                sample_blocks(),
+            )
+            build_project_glossary_candidates(
+                project="glossary_project",
+                workspace_root=workspace_root,
+            )
+            review_path = project_path / "03_terminology/glossary_review.tsv"
+            rows = read_review_rows(review_path)
+            reject_all(rows)
+            write_review_rows(review_path, rows)
+
+            from glk.application import glossary_service
+
+            with patch(
+                "glk.application.glossary_service._collect_occurrences",
+                wraps=glossary_service._collect_occurrences,
+            ) as collect:
+                import_project_glossary(
+                    project="glossary_project",
+                    file=review_path,
+                    workspace_root=workspace_root,
+                )
+
+            self.assertEqual(collect.call_count, 2)
+
     def test_imports_empty_review_when_source_has_no_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"

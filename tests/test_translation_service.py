@@ -7,7 +7,10 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
+from glk.application import translation_service
+from glk.application._io import append_bytes_durable
 from glk.application.glossary_service import GLOSSARY_BUILD_VERSION
 from glk.application.project_service import create_project, inspect_project
 from glk.application.translation_service import (
@@ -231,6 +234,179 @@ class SequenceProvider:
 
 
 class TranslationFoundationTests(unittest.TestCase):
+    def test_writes_translation_segments_once_instead_of_rewriting_prefixes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            blocks = [
+                make_block(index, f"Rule {index}: resolve this effect.")
+                for index in range(1, 13)
+            ]
+            project_path = create_translation_project(workspace_root, blocks)
+            responses = [
+                {
+                    "translations": [
+                        {
+                            "id": block.id,
+                            "text": f"규칙 {index}: 이 효과를 해결합니다.",
+                        }
+                    ]
+                }
+                for index, block in enumerate(blocks, start=1)
+            ]
+            output_writes: list[int] = []
+            original_atomic = translation_service._write_bytes_atomic
+            original_append = translation_service._append_bytes_durable
+
+            def measured_atomic(path: Path, value: bytes) -> None:
+                if path.name == "translation.jsonl":
+                    output_writes.append(len(value))
+                original_atomic(path, value)
+
+            def measured_append(path: Path, value: bytes) -> None:
+                if path.name == "translation.jsonl":
+                    output_writes.append(len(value))
+                original_append(path, value)
+
+            with (
+                patch(
+                    "glk.application.translation_service._write_bytes_atomic",
+                    side_effect=measured_atomic,
+                ),
+                patch(
+                    "glk.application.translation_service._append_bytes_durable",
+                    side_effect=measured_append,
+                ),
+            ):
+                result = translate_project(
+                    project="translation_project",
+                    workspace_root=workspace_root,
+                    provider=SequenceProvider(responses),
+                    max_characters=1,
+                )
+
+            output_path = (
+                project_path / ".glk/segments/translation.jsonl"
+            )
+            self.assertEqual(result.total_chunks, len(blocks))
+            self.assertEqual(sum(output_writes), output_path.stat().st_size)
+            self.assertEqual(len(output_writes), len(blocks))
+
+    def test_resume_discards_uncheckpointed_append_tail(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            blocks = sample_blocks()
+            project_path = create_translation_project(workspace_root, blocks)
+            translations = {
+                blocks[0].id: "전투",
+                blocks[1].id: "각 사냥꾼은 스태미나 2를 얻습니다.",
+                blocks[2].id: "사냥꾼들은 {HP} 10을 사용할 수 있습니다.",
+            }
+
+            def response_for(block: SourceBlock) -> dict[str, Any]:
+                return {
+                    "translations": [
+                        {"id": block.id, "text": translations[block.id]}
+                    ]
+                }
+
+            invalid = {"translations": []}
+            with self.assertRaisesRegex(TranslationError, "use --resume"):
+                translate_project(
+                    project="translation_project",
+                    workspace_root=workspace_root,
+                    provider=SequenceProvider(
+                        [response_for(blocks[0]), invalid, invalid]
+                    ),
+                    max_characters=20,
+                )
+            output_path = (
+                project_path / ".glk/segments/translation.jsonl"
+            )
+            state_path = project_path / ".glk/state/translation.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            checkpoint_bytes = state["translation_output_bytes"]
+            self.assertEqual(checkpoint_bytes, output_path.stat().st_size)
+
+            append_bytes_durable(output_path, b'{"interrupted":')
+            self.assertGreater(output_path.stat().st_size, checkpoint_bytes)
+
+            resumed = translate_project(
+                project="translation_project",
+                workspace_root=workspace_root,
+                provider=SequenceProvider(
+                    [response_for(blocks[1]), response_for(blocks[2])]
+                ),
+                max_characters=20,
+                resume=True,
+            )
+
+            self.assertTrue(resumed.resumed)
+            self.assertEqual(resumed.completed_blocks, len(blocks))
+            self.assertNotIn(b"interrupted", output_path.read_bytes())
+            completed_state = json.loads(
+                state_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                completed_state["translation_output_bytes"],
+                output_path.stat().st_size,
+            )
+
+    def test_resume_finishes_artifacts_after_interrupted_final_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            blocks = sample_blocks()
+            project_path = create_translation_project(workspace_root, blocks)
+            draft_path = project_path / "04_translation/draft.txt"
+            original_atomic = translation_service._write_bytes_atomic
+            interrupted = False
+
+            def interrupt_draft(path: Path, value: bytes) -> None:
+                nonlocal interrupted
+                if path == draft_path and not interrupted:
+                    interrupted = True
+                    raise OSError("simulated interruption")
+                original_atomic(path, value)
+
+            with (
+                patch(
+                    "glk.application.translation_service._write_bytes_atomic",
+                    side_effect=interrupt_draft,
+                ),
+                self.assertRaisesRegex(OSError, "simulated interruption"),
+            ):
+                translate_project(
+                    project="translation_project",
+                    workspace_root=workspace_root,
+                    provider=SequenceProvider([valid_response(blocks)]),
+                )
+
+            state_path = project_path / ".glk/state/translation.json"
+            partial_state = json.loads(
+                state_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(partial_state["status"], "partial")
+            self.assertEqual(
+                partial_state["completed_blocks"],
+                len(blocks),
+            )
+            self.assertFalse(draft_path.exists())
+
+            resumed = translate_project(
+                project="translation_project",
+                workspace_root=workspace_root,
+                provider=SequenceProvider([]),
+                resume=True,
+            )
+
+            self.assertTrue(resumed.resumed)
+            self.assertTrue(draft_path.is_file())
+            completed_state = json.loads(
+                state_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(completed_state["status"], "complete")
+
     def test_chunks_preserve_block_boundaries_and_order(self) -> None:
         blocks = sample_blocks()
         chunks = build_translation_chunks(blocks, max_characters=20)

@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import replace
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
+from glk.application import project_service
+from glk.application import _hashing
 from glk.application.dashboard_service import (
     DashboardOutputError,
     get_dashboard_document,
@@ -29,6 +32,52 @@ from tests.test_translation_service import (
 
 
 class DashboardServiceTests(unittest.TestCase):
+    def test_inspects_each_project_once_per_dashboard_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace_root = Path(temporary) / "workspaces"
+            create_project(name="First Game", workspace_root=workspace_root)
+            create_project(name="Second Game", workspace_root=workspace_root)
+
+            with patch(
+                "glk.application.project_service.inspect_project",
+                wraps=project_service.inspect_project,
+            ) as inspect:
+                document = get_dashboard_document(workspace_root)
+
+            self.assertEqual(document["summary"]["projects"], 2)
+            self.assertEqual(inspect.call_count, 2)
+
+    def test_reuses_file_hashes_within_dashboard_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace_root = Path(temporary) / "workspaces"
+            blocks = sample_blocks()
+            create_translation_project(workspace_root, blocks)
+            translate_project(
+                project="translation_project",
+                workspace_root=workspace_root,
+                provider=SequenceProvider([valid_response(blocks)]),
+            )
+            finalize_project_translation_review(
+                project="translation_project",
+                workspace_root=workspace_root,
+            )
+            calls: dict[Path, int] = {}
+            original = _hashing.sha256_file
+
+            def measured(path: Path) -> str:
+                calls[path] = calls.get(path, 0) + 1
+                return original(path)
+
+            with patch(
+                "glk.application._hashing.sha256_file",
+                side_effect=measured,
+            ):
+                document = get_dashboard_document(workspace_root)
+
+            self.assertEqual(document["summary"]["projects"], 1)
+            self.assertTrue(calls)
+            self.assertEqual(max(calls.values()), 1)
+
     def test_empty_workspace_returns_a_stable_empty_document(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace_root = Path(temporary) / "workspaces"

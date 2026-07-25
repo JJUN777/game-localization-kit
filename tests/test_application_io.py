@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from glk.application._hashing import sha256_bytes, sha256_file, sha256_file_if_exists
 from glk.application._io import (
+    append_bytes_durable,
     copy_file_atomic,
     write_bytes_atomic,
     write_json_atomic,
@@ -16,6 +17,15 @@ from glk.application._io import (
 
 
 class ApplicationIoTests(unittest.TestCase):
+    def test_durable_append_creates_parent_and_preserves_existing_bytes(self) -> None:
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "nested/events.jsonl"
+
+            append_bytes_durable(path, b"first\n")
+            append_bytes_durable(path, b"second\n")
+
+            self.assertEqual(path.read_bytes(), b"first\nsecond\n")
+
     def test_atomic_writers_create_parents_and_leave_no_temporary_files(self) -> None:
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

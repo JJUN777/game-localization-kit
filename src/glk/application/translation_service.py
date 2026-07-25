@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -14,6 +15,7 @@ from glk.application._cache import read_json_object
 from glk.application._hashing import sha256_bytes as _sha256_bytes
 from glk.application._hashing import sha256_text as _sha256_text
 from glk.application._io import (
+    append_bytes_durable as _append_bytes_durable,
     write_bytes_atomic as _write_bytes_atomic,
     write_json_atomic as _write_json_atomic,
 )
@@ -422,19 +424,17 @@ def _serialize_segments(segments: list[TranslationSegment]) -> bytes:
     ).encode("utf-8")
 
 
-def _load_segments(path: Path) -> list[TranslationSegment]:
-    if not path.is_file():
-        return []
+def _parse_segments(data: bytes) -> list[TranslationSegment]:
     segments: list[TranslationSegment] = []
     line_number = 0
     try:
         for line_number, line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), start=1
+            data.decode("utf-8").splitlines(), start=1
         ):
             if line.strip():
                 segments.append(TranslationSegment.from_dict(json.loads(line)))
     except (
-        OSError,
+        UnicodeDecodeError,
         json.JSONDecodeError,
         TranslationSegmentValidationError,
         TypeError,
@@ -445,6 +445,17 @@ def _load_segments(path: Path) -> list[TranslationSegment]:
     if len({segment.source_block_id for segment in segments}) != len(segments):
         raise TranslationError("Translation segment JSONL contains duplicate block IDs.")
     return segments
+
+
+def _load_segments(path: Path) -> list[TranslationSegment]:
+    if not path.is_file():
+        return []
+    try:
+        return _parse_segments(path.read_bytes())
+    except OSError as error:
+        raise TranslationError(
+            f"Could not read translation segment JSONL: {error}"
+        ) from error
 
 
 def _render_translation_review(segments: list[TranslationSegment]) -> bytes:
@@ -587,18 +598,49 @@ def translate_project(
     review_path = paths.translation_review
     previous_state = _read_json(state_path)
     existing_segments: list[TranslationSegment] = []
+    existing_output_data = b""
     state_matches = bool(
         previous_state
         and previous_state.get("version") == TRANSLATION_RUN_VERSION
         and previous_state.get("input_sha256") == input_hash
     )
-    if state_matches and output_path.is_file():
-        existing_segments = _load_segments(output_path)
-        output_hash = _sha256_bytes(output_path.read_bytes())
-        if previous_state.get("translation_output_sha256") != output_hash:
-            raise TranslationError(
-                "Translation output does not match its state. Use --force after review."
+    empty_partial_checkpoint = bool(
+        state_matches
+        and previous_state
+        and previous_state.get("status") == "partial"
+        and previous_state.get("completed_blocks") == 0
+        and previous_state.get("translation_output_sha256") is None
+        and resume
+    )
+    if state_matches and output_path.is_file() and not empty_partial_checkpoint:
+        existing_output_data = output_path.read_bytes()
+        output_hash = _sha256_bytes(existing_output_data)
+        expected_output_hash = previous_state.get("translation_output_sha256")
+        if expected_output_hash != output_hash:
+            checkpoint_bytes = previous_state.get("translation_output_bytes")
+            can_restore_checkpoint = (
+                previous_state.get("status") == "partial"
+                and resume
+                and isinstance(checkpoint_bytes, int)
+                and not isinstance(checkpoint_bytes, bool)
+                and 0 <= checkpoint_bytes <= len(existing_output_data)
             )
+            checkpoint_data = (
+                existing_output_data[:checkpoint_bytes]
+                if can_restore_checkpoint
+                else b""
+            )
+            if (
+                not can_restore_checkpoint
+                or _sha256_bytes(checkpoint_data) != expected_output_hash
+            ):
+                raise TranslationError(
+                    "Translation output does not match its state. "
+                    "Use --force after review."
+                )
+            _write_bytes_atomic(output_path, checkpoint_data)
+            existing_output_data = checkpoint_data
+        existing_segments = _parse_segments(existing_output_data)
         block_by_id = {block.id: block for block in blocks}
         if any(
             (block := block_by_id.get(segment.source_block_id)) is None
@@ -662,10 +704,13 @@ def translate_project(
 
     if force:
         existing_segments = []
+        existing_output_data = b""
     active_provider = provider or GeminiTranslationProvider.from_environment(model_name)
     completed = {
         segment.source_block_id: segment for segment in existing_segments
     }
+    output_digest = hashlib.sha256(existing_output_data)
+    output_bytes = len(existing_output_data)
     block_by_id = {block.id: block for block in blocks}
     for segment in existing_segments:
         block = block_by_id.get(segment.source_block_id)
@@ -681,6 +726,36 @@ def translate_project(
             raise TranslationError(
                 "Partial translation segments do not match current inputs. Use --force."
             )
+
+    if not existing_segments:
+        _write_json_atomic(
+            state_path,
+            {
+                "schema_version": 1,
+                "status": "partial",
+                "version": TRANSLATION_RUN_VERSION,
+                "input_sha256": input_hash,
+                "approved_source_sha256": approved_hash,
+                "termbase_sha256": termbase_hash,
+                "project_prompt_sha256": prompt_hash,
+                "project_prompt_file": paths.relative(paths.translation_prompt),
+                "model": active_provider.model_name,
+                "provider_prompt_version": active_provider.prompt_version,
+                "hard_rules_version": TRANSLATION_HARD_RULES_VERSION,
+                "max_characters": max_characters,
+                "total_blocks": len(blocks),
+                "total_chunks": len(chunks),
+                "completed_blocks": 0,
+                "completed_chunks": 0,
+                "translation_output_sha256": None,
+                "translation_output_bytes": 0,
+                "failed_chunk": None,
+                "failure_reason": None,
+                "validation_issue_count": 0,
+                "validation_issue_blocks": 0,
+                "updated_at": _utc_now(),
+            },
+        )
 
     completed_chunks = 0
     validation_issue_messages: list[str] = []
@@ -766,11 +841,9 @@ def translate_project(
                     feedback or f"Chunk {chunk.id} failed response validation."
                 )
         except Exception as error:
-            current_data = _serialize_segments(list(completed.values()))
-            output_hash = None
-            if current_data:
-                _write_bytes_atomic(output_path, current_data)
-                output_hash = _sha256_bytes(current_data)
+            output_hash = (
+                output_digest.hexdigest() if output_bytes > 0 else None
+            )
             _write_json_atomic(
                 state_path,
                 {
@@ -791,6 +864,7 @@ def translate_project(
                     "completed_blocks": len(completed),
                     "completed_chunks": completed_chunks,
                     "translation_output_sha256": output_hash,
+                    "translation_output_bytes": output_bytes,
                     "failed_chunk": chunk.id,
                     "failure_reason": str(error),
                     "validation_issue_count": len(validation_issue_messages),
@@ -803,6 +877,7 @@ def translate_project(
                 f"fix the issue and use --resume. Cause: {error}"
             ) from error
 
+        chunk_segments: list[TranslationSegment] = []
         for block in chunk.blocks:
             translated_text = translated[block.id]
             content_errors = _validate_translated_text(
@@ -833,9 +908,15 @@ def translate_project(
             )
             segment.validate()
             completed[block.id] = segment
+            chunk_segments.append(segment)
         completed_chunks += 1
-        current_data = _serialize_segments(list(completed.values()))
-        _write_bytes_atomic(output_path, current_data)
+        chunk_data = _serialize_segments(chunk_segments)
+        if output_bytes:
+            _append_bytes_durable(output_path, chunk_data)
+        else:
+            _write_bytes_atomic(output_path, chunk_data)
+        output_digest.update(chunk_data)
+        output_bytes += len(chunk_data)
         _write_json_atomic(
             state_path,
             {
@@ -855,7 +936,8 @@ def translate_project(
                 "total_chunks": len(chunks),
                 "completed_blocks": len(completed),
                 "completed_chunks": completed_chunks,
-                "translation_output_sha256": _sha256_bytes(current_data),
+                "translation_output_sha256": output_digest.hexdigest(),
+                "translation_output_bytes": output_bytes,
                 "failed_chunk": None,
                 "failure_reason": None,
                 "validation_issue_count": len(validation_issue_messages),
@@ -868,9 +950,20 @@ def translate_project(
     if len(ordered_segments) != len(blocks):
         raise TranslationError("Translation completed without every approved source block.")
     output_data = _serialize_segments(ordered_segments)
+    if output_bytes == 0:
+        _write_bytes_atomic(output_path, output_data)
+        output_digest = hashlib.sha256(output_data)
+        output_bytes = len(output_data)
+    output_hash = output_digest.hexdigest()
+    if (
+        output_bytes != len(output_data)
+        or output_hash != _sha256_bytes(output_data)
+    ):
+        raise TranslationError(
+            "Translation checkpoint does not match completed segments."
+        )
     review_data = _render_translation_review(ordered_segments)
     draft_hash = _sha256_bytes(review_data)
-    _write_bytes_atomic(output_path, output_data)
     _write_bytes_atomic(draft_path, review_data)
 
     review_created = not review_path.is_file()
@@ -907,7 +1000,8 @@ def translate_project(
             "completed_blocks": len(ordered_segments),
             "completed_chunks": len(chunks),
             "translation_output_file": paths.relative(paths.translation_segments),
-            "translation_output_sha256": _sha256_bytes(output_data),
+            "translation_output_sha256": output_hash,
+            "translation_output_bytes": output_bytes,
             "draft_file": paths.relative(paths.translation_draft),
             "draft_sha256": draft_hash,
             "review_file": paths.relative(paths.translation_review),
