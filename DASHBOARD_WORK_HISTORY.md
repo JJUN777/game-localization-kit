@@ -768,6 +768,16 @@ git diff --check
 - 전체 233개 테스트, 설정된 21개 Python 파일 mypy, Python bytecode 컴파일과
   `git diff --check`를 통과했습니다.
 
+### 2026-07-25 — 로컬 서버 세션 토큰 상수 시간 비교
+
+- dashboard, source, glossary, translation API의 `X-GLK-Token` 비교를
+  `secrets.compare_digest`로 변경했습니다.
+- source 검수 이미지 asset URL의 query token도 같은 방식으로 비교합니다.
+- 누락된 token은 기존처럼 403으로 거부하고, 네 handler와 asset 인증이 모두
+  상수 시간 비교를 호출하는 회귀 테스트를 추가했습니다.
+- 전체 235개 테스트, 설정된 21개 Python 파일 mypy, Python bytecode 컴파일과
+  `git diff --check`를 통과했습니다.
+
 ---
 
 ## 다른 컴퓨터에서 작업 재개

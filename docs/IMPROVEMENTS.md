@@ -222,7 +222,11 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
   - 검증: 세 provider의 공통 환경 생성·누락 키 오류·timeout 설정 회귀 테스트와
     공통 기반 및 세 provider의 mypy 검사를 통과한다.
 - [ ] `API-001` 결과 객체의 `ok` 의미를 통일하거나 상수 필드를 제거한다.
-- [ ] `SECURITY-001` 세션 토큰 비교에 `secrets.compare_digest`를 사용한다.
+- [x] `SECURITY-001` 세션 토큰 비교에 `secrets.compare_digest`를 사용한다.
+  - dashboard, source, glossary, translation API와 source asset URL의 토큰을
+    상수 시간 비교한다.
+  - 검증: 네 HTTP handler와 source asset 인증이 모두 `compare_digest`를
+    호출하는 전용 회귀 테스트를 통과한다.
 - [ ] `QUALITY-001` ruff를 작은 규칙 집합부터 도입하고 포맷 변경은 별도 커밋으로
   분리한다.
 - [ ] `QUALITY-002` mypy 대상을 도메인 계층부터 점진적으로 확대한다.

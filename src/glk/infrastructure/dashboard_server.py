@@ -234,10 +234,12 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         }
 
     def _api_authorized(self) -> bool:
+        supplied_token = self.headers.get("X-GLK-Token")
         return (
             self._host_is_local()
             and self._origin_allowed()
-            and self.headers.get("X-GLK-Token") == self.server.auth_token
+            and isinstance(supplied_token, str)
+            and secrets.compare_digest(supplied_token, self.server.auth_token)
         )
 
     def _send_bytes(

@@ -123,7 +123,11 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
     def _api_authorized(self) -> bool:
         if not self._host_is_local():
             return False
-        if self.headers.get("X-GLK-Token") != self.server.auth_token:
+        supplied_token = self.headers.get("X-GLK-Token")
+        if not isinstance(supplied_token, str) or not secrets.compare_digest(
+            supplied_token,
+            self.server.auth_token,
+        ):
             return False
         origin = self.headers.get("Origin")
         if origin and origin not in {

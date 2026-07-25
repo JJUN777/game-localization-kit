@@ -273,7 +273,7 @@ translation provider는 각 작업의 prompt·응답 schema·결과 검증만 �
 대시보드와 세 검수 서버가 공유하는 보안 경계:
 
 - `127.0.0.1`에만 bind하고 외부 interface 노출 불가
-- 요청별 임의 session token과 Host·Origin 검사
+- 요청별 임의 session token의 상수 시간 비교와 Host·Origin 검사
 - 대시보드가 원문·용어·번역 검수 서버에 전달하는 복귀 URL은 localhost HTTP만 허용
 - AI 설정 응답에서 API 키 값을 제외하고 설정 여부만 제공
 - `.env`를 Git에서 제외하고 POSIX 저장 권한을 `0600`으로 제한
