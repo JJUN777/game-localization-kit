@@ -303,11 +303,17 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     명시한 전체 범위에서 mypy 오류가 없어야 한다.
   - 검증: 전체 48개 파일의 mypy 검사, 88개 Python 파일의 ruff 검사와
     전체 248개 테스트를 통과했다.
-- [ ] `QUALITY-003` 결정적 규칙부터 전용 단위 테스트를 보강한다.
-  - `domain/translation_qa.py`
-  - `extraction/layout.py`
-  - `domain/approved_translation.py`
-  - `domain/translation_segment.py`
+- [x] `QUALITY-003` 결정적 규칙부터 전용 단위 테스트를 보강한다.
+  - `domain/translation_qa.py`: token·태그·숫자 보존, 용어 variant·경계와
+    원문 유지 규칙을 직접 검사한다.
+  - `extraction/layout.py`: fragment 누락·추가·중복, block 필드, text 결합과
+    문단 merge 경계를 직접 검사한다.
+  - `domain/approved_translation.py`, `domain/translation_segment.py`: 정상
+    round-trip과 스키마·ID·상태·고정 길이 hash 검증 실패를 직접 검사한다.
+  - 완료 기준: 네 모듈의 핵심 규칙을 외부 파일·AI 호출 없이 재현하고,
+    잘못된 입력의 구체적인 실패 조건까지 고정해야 한다.
+  - 검증: 전용 단위 테스트 21개를 추가해 전체 269개 테스트, mypy 48개 파일과
+    ruff 91개 Python 파일 검사를 통과했다.
 - [ ] `REPO-001` 테스트 샘플을 저장소 최상위에서 `docs/samples/` 또는
   `tests/fixtures/`로 옮긴다.
 - [ ] `REPO-002` 배포·공개 범위를 결정한 뒤 LICENSE를 추가한다.
