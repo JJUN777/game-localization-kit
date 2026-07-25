@@ -91,6 +91,32 @@ class TranslationRunResult:
         return value
 
 
+@dataclass(frozen=True, slots=True)
+class _TranslationInputs:
+    project_path: Path
+    paths: WorkspacePaths
+    blocks: tuple[SourceBlock, ...]
+    termbase_entries: tuple[dict[str, Any], ...]
+    project_instructions: str
+    prompt_path: Path | None
+    prompt_data: bytes
+    prompt_needs_write: bool
+    approved_hash: str
+    termbase_hash: str
+    prompt_hash: str
+    chunks: tuple[TranslationChunk, ...]
+    active_model: str
+    provider_prompt_version: str
+    input_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class _TranslationCheckpoint:
+    previous_state: dict[str, Any] | None
+    existing_segments: tuple[TranslationSegment, ...]
+    existing_output_data: bytes
+
+
 def _utc_now() -> str:
     return (
         datetime.now(timezone.utc)
@@ -513,20 +539,15 @@ def _translation_input_hash(
     )
 
 
-def translate_project(
+def _prepare_translation_inputs(
     *,
     project: str | Path,
-    workspace_root: str | Path = "workspaces",
-    prompt_file: str | Path | None = None,
-    model_name: str | None = None,
-    max_characters: int = 10000,
-    resume: bool = False,
-    force: bool = False,
-    dry_run: bool = False,
-    provider: TranslationProvider | None = None,
-    progress: ProgressCallback | None = None,
-) -> TranslationRunResult:
-    notify = progress or (lambda _: None)
+    workspace_root: str | Path,
+    prompt_file: str | Path | None,
+    model_name: str | None,
+    max_characters: int,
+    provider: TranslationProvider | None,
+) -> _TranslationInputs:
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
     pipeline = inspect_project(location.path)["pipeline"]
@@ -540,15 +561,17 @@ def translate_project(
         )
     blocks, approved_data = _load_approved_blocks(location.path)
     termbase_entries, termbase_data = _load_termbase(location.path)
-    project_instructions, canonical_prompt_path, prompt_needs_write = _resolve_prompt(
-        prompt_file, location.path
+    project_instructions, prompt_path, prompt_needs_write = _resolve_prompt(
+        prompt_file,
+        location.path,
     )
     approved_hash = _sha256_bytes(approved_data)
     termbase_hash = _sha256_bytes(termbase_data)
-    prompt_data = project_instructions.encode("utf-8")
     prompt_hash = _sha256_text(project_instructions)
-    chunks = build_translation_chunks(blocks, max_characters=max_characters)
-
+    chunks = build_translation_chunks(
+        blocks,
+        max_characters=max_characters,
+    )
     if provider is not None:
         active_model = provider.model_name
         provider_prompt_version = provider.prompt_version
@@ -563,46 +586,120 @@ def translate_project(
         provider_prompt_version=provider_prompt_version,
         max_characters=max_characters,
     )
-    if dry_run:
-        return TranslationRunResult(
-            project_path=str(location.path),
-            model=active_model,
-            approved_source_sha256=approved_hash,
-            termbase_sha256=termbase_hash,
-            project_prompt_sha256=prompt_hash,
-            input_sha256=input_hash,
-            total_blocks=len(blocks),
-            total_chunks=len(chunks),
-            completed_blocks=0,
-            completed_chunks=0,
-            output_file=None,
-            draft_file=None,
-            review_file=None,
-            review_status=None,
-            prompt_file=(
-                str(canonical_prompt_path)
-                if canonical_prompt_path and canonical_prompt_path.is_file()
-                else None
-            ),
-            dry_run=True,
+    return _TranslationInputs(
+        project_path=location.path,
+        paths=paths,
+        blocks=tuple(blocks),
+        termbase_entries=tuple(termbase_entries),
+        project_instructions=project_instructions,
+        prompt_path=prompt_path,
+        prompt_data=project_instructions.encode("utf-8"),
+        prompt_needs_write=prompt_needs_write,
+        approved_hash=approved_hash,
+        termbase_hash=termbase_hash,
+        prompt_hash=prompt_hash,
+        chunks=tuple(chunks),
+        active_model=active_model,
+        provider_prompt_version=provider_prompt_version,
+        input_hash=input_hash,
+    )
+
+
+def _dry_run_translation_result(
+    inputs: _TranslationInputs,
+) -> TranslationRunResult:
+    prompt_path = inputs.prompt_path
+    return TranslationRunResult(
+        project_path=str(inputs.project_path),
+        model=inputs.active_model,
+        approved_source_sha256=inputs.approved_hash,
+        termbase_sha256=inputs.termbase_hash,
+        project_prompt_sha256=inputs.prompt_hash,
+        input_sha256=inputs.input_hash,
+        total_blocks=len(inputs.blocks),
+        total_chunks=len(inputs.chunks),
+        completed_blocks=0,
+        completed_chunks=0,
+        output_file=None,
+        draft_file=None,
+        review_file=None,
+        review_status=None,
+        prompt_file=(
+            str(prompt_path)
+            if prompt_path is not None and prompt_path.is_file()
+            else None
+        ),
+        dry_run=True,
+    )
+
+
+def _ensure_translation_prompt(inputs: _TranslationInputs) -> Path:
+    prompt_path = inputs.prompt_path
+    if prompt_path is None:
+        raise TranslationError(
+            "Could not determine the project translation prompt path."
         )
+    if inputs.prompt_needs_write or not prompt_path.is_file():
+        _write_bytes_atomic(prompt_path, inputs.prompt_data)
+    return prompt_path
 
-    if canonical_prompt_path is None:
-        raise TranslationError("Could not determine the project translation prompt path.")
-    if prompt_needs_write or not canonical_prompt_path.is_file():
-        _write_bytes_atomic(canonical_prompt_path, prompt_data)
 
-    output_path = paths.translation_segments
-    state_path = paths.translation_state
-    draft_path = paths.translation_draft
-    review_path = paths.translation_review
-    previous_state = _read_json(state_path)
+def _cached_translation_result(
+    inputs: _TranslationInputs,
+    prompt_path: Path,
+    previous_state: dict[str, Any],
+    existing_segments: list[TranslationSegment],
+) -> TranslationRunResult:
+    paths = inputs.paths
+    return TranslationRunResult(
+        project_path=str(inputs.project_path),
+        model=inputs.active_model,
+        approved_source_sha256=inputs.approved_hash,
+        termbase_sha256=inputs.termbase_hash,
+        project_prompt_sha256=inputs.prompt_hash,
+        input_sha256=inputs.input_hash,
+        total_blocks=len(inputs.blocks),
+        total_chunks=len(inputs.chunks),
+        completed_blocks=len(existing_segments),
+        completed_chunks=len(inputs.chunks),
+        output_file=str(paths.translation_segments),
+        draft_file=(
+            str(paths.translation_draft)
+            if paths.translation_draft.is_file()
+            else None
+        ),
+        review_file=(
+            str(paths.translation_review)
+            if paths.translation_review.is_file()
+            else None
+        ),
+        review_status=previous_state.get("review_status"),
+        prompt_file=str(prompt_path),
+        validation_issue_count=int(
+            previous_state.get("validation_issue_count") or 0
+        ),
+        validation_issue_blocks=int(
+            previous_state.get("validation_issue_blocks") or 0
+        ),
+        cached=True,
+    )
+
+
+def _restore_translation_checkpoint(
+    inputs: _TranslationInputs,
+    prompt_path: Path,
+    *,
+    resume: bool,
+    force: bool,
+) -> _TranslationCheckpoint | TranslationRunResult:
+    output_path = inputs.paths.translation_segments
+    previous_state = _read_json(inputs.paths.translation_state)
     existing_segments: list[TranslationSegment] = []
     existing_output_data = b""
     state_matches = bool(
         previous_state
         and previous_state.get("version") == TRANSLATION_RUN_VERSION
-        and previous_state.get("input_sha256") == input_hash
+        and previous_state.get("input_sha256") == inputs.input_hash
     )
     empty_partial_checkpoint = bool(
         state_matches
@@ -612,7 +709,12 @@ def translate_project(
         and previous_state.get("translation_output_sha256") is None
         and resume
     )
-    if state_matches and output_path.is_file() and not empty_partial_checkpoint:
+    if (
+        previous_state is not None
+        and state_matches
+        and output_path.is_file()
+        and not empty_partial_checkpoint
+    ):
         existing_output_data = output_path.read_bytes()
         output_hash = _sha256_bytes(existing_output_data)
         expected_output_hash = previous_state.get("translation_output_sha256")
@@ -641,15 +743,15 @@ def translate_project(
             _write_bytes_atomic(output_path, checkpoint_data)
             existing_output_data = checkpoint_data
         existing_segments = _parse_segments(existing_output_data)
-        block_by_id = {block.id: block for block in blocks}
+        block_by_id = {block.id: block for block in inputs.blocks}
         if any(
             (block := block_by_id.get(segment.source_block_id)) is None
             or segment.source_text != block.effective_text
             or segment.source_sha256
             != _sha256_bytes(block.effective_text.encode("utf-8"))
-            or segment.model != active_model
-            or segment.prompt_sha256 != prompt_hash
-            or segment.termbase_sha256 != termbase_hash
+            or segment.model != inputs.active_model
+            or segment.prompt_sha256 != inputs.prompt_hash
+            or segment.termbase_sha256 != inputs.termbase_hash
             for segment in existing_segments
         ):
             raise TranslationError(
@@ -657,32 +759,14 @@ def translate_project(
             )
         if (
             previous_state.get("status") == "complete"
-            and len(existing_segments) == len(blocks)
+            and len(existing_segments) == len(inputs.blocks)
             and not force
         ):
-            return TranslationRunResult(
-                project_path=str(location.path),
-                model=active_model,
-                approved_source_sha256=approved_hash,
-                termbase_sha256=termbase_hash,
-                project_prompt_sha256=prompt_hash,
-                input_sha256=input_hash,
-                total_blocks=len(blocks),
-                total_chunks=len(chunks),
-                completed_blocks=len(existing_segments),
-                completed_chunks=len(chunks),
-                output_file=str(output_path),
-                draft_file=str(draft_path) if draft_path.is_file() else None,
-                review_file=str(review_path) if review_path.is_file() else None,
-                review_status=previous_state.get("review_status"),
-                prompt_file=str(canonical_prompt_path),
-                validation_issue_count=int(
-                    previous_state.get("validation_issue_count") or 0
-                ),
-                validation_issue_blocks=int(
-                    previous_state.get("validation_issue_blocks") or 0
-                ),
-                cached=True,
+            return _cached_translation_result(
+                inputs,
+                prompt_path,
+                previous_state,
+                existing_segments,
             )
         if existing_segments and not resume and not force:
             raise TranslationError(
@@ -701,10 +785,66 @@ def translate_project(
             "Existing translation inputs are stale or incomplete. Compare existing "
             "outputs, then use --force to restart."
         )
-
     if force:
         existing_segments = []
         existing_output_data = b""
+    return _TranslationCheckpoint(
+        previous_state=previous_state,
+        existing_segments=tuple(existing_segments),
+        existing_output_data=existing_output_data,
+    )
+
+
+def translate_project(
+    *,
+    project: str | Path,
+    workspace_root: str | Path = "workspaces",
+    prompt_file: str | Path | None = None,
+    model_name: str | None = None,
+    max_characters: int = 10000,
+    resume: bool = False,
+    force: bool = False,
+    dry_run: bool = False,
+    provider: TranslationProvider | None = None,
+    progress: ProgressCallback | None = None,
+) -> TranslationRunResult:
+    notify = progress or (lambda _: None)
+    inputs = _prepare_translation_inputs(
+        project=project,
+        workspace_root=workspace_root,
+        prompt_file=prompt_file,
+        model_name=model_name,
+        max_characters=max_characters,
+        provider=provider,
+    )
+    if dry_run:
+        return _dry_run_translation_result(inputs)
+    canonical_prompt_path = _ensure_translation_prompt(inputs)
+    paths = inputs.paths
+    blocks = list(inputs.blocks)
+    termbase_entries = list(inputs.termbase_entries)
+    project_instructions = inputs.project_instructions
+    approved_hash = inputs.approved_hash
+    termbase_hash = inputs.termbase_hash
+    prompt_hash = inputs.prompt_hash
+    chunks = list(inputs.chunks)
+    input_hash = inputs.input_hash
+
+    output_path = paths.translation_segments
+    state_path = paths.translation_state
+    draft_path = paths.translation_draft
+    review_path = paths.translation_review
+    restored = _restore_translation_checkpoint(
+        inputs,
+        canonical_prompt_path,
+        resume=resume,
+        force=force,
+    )
+    if isinstance(restored, TranslationRunResult):
+        return restored
+    previous_state = restored.previous_state
+    existing_segments = list(restored.existing_segments)
+    existing_output_data = restored.existing_output_data
     active_provider = provider or GeminiTranslationProvider.from_environment(model_name)
     completed = {
         segment.source_block_id: segment for segment in existing_segments
@@ -1015,7 +1155,7 @@ def translate_project(
         },
     )
     return TranslationRunResult(
-        project_path=str(location.path),
+        project_path=str(inputs.project_path),
         model=active_provider.model_name,
         approved_source_sha256=approved_hash,
         termbase_sha256=termbase_hash,
