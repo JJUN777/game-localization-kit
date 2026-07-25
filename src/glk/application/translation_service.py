@@ -795,6 +795,121 @@ def _restore_translation_checkpoint(
     )
 
 
+def _request_translation_chunk(
+    chunk: TranslationChunk,
+    *,
+    chunk_index: int,
+    total_chunks: int,
+    provider: TranslationProvider,
+    termbase_entries: list[dict[str, Any]],
+    project_instructions: str,
+    notify: ProgressCallback,
+) -> dict[str, str]:
+    feedback: str | None = None
+    structurally_valid: dict[str, str] | None = None
+    for validation_attempt in range(2):
+        prompt = compile_translation_prompt(
+            blocks=chunk.blocks,
+            termbase_entries=termbase_entries,
+            project_instructions=project_instructions,
+            validation_feedback=feedback,
+        )
+        try:
+            response = provider.translate(prompt)
+            candidate = parse_translation_response(
+                response=response,
+                blocks=chunk.blocks,
+                termbase_entries=termbase_entries,
+            )
+        except TranslationValidationError as error:
+            feedback = str(error)
+            notify(
+                f"Chunk {chunk_index}/{total_chunks}: "
+                f"response structure validation failed "
+                f"({validation_attempt + 1}/2)"
+            )
+            continue
+        except Exception:
+            if structurally_valid is not None:
+                notify(
+                    f"Chunk {chunk_index}/{total_chunks}: "
+                    "content validation retry failed; "
+                    "preserving the reviewable response"
+                )
+                break
+            raise
+        structurally_valid = candidate
+        content_errors = _translation_content_errors(
+            translated=candidate,
+            blocks=chunk.blocks,
+            termbase_entries=termbase_entries,
+        )
+        if not content_errors:
+            return candidate
+        feedback = "; ".join(content_errors)
+        notify(
+            f"Chunk {chunk_index}/{total_chunks}: "
+            f"content validation needs review "
+            f"({validation_attempt + 1}/2)"
+        )
+    if structurally_valid is not None:
+        notify(
+            f"Chunk {chunk_index}/{total_chunks}: "
+            "saved with content issues for human review"
+        )
+        return structurally_valid
+    raise TranslationValidationError(
+        feedback or f"Chunk {chunk.id} failed response validation."
+    )
+
+
+def _build_translation_segments(
+    chunk: TranslationChunk,
+    translated: dict[str, str],
+    *,
+    provider: TranslationProvider,
+    termbase_entries: list[dict[str, Any]],
+    prompt_hash: str,
+    termbase_hash: str,
+) -> tuple[list[TranslationSegment], list[str], set[str]]:
+    chunk_segments: list[TranslationSegment] = []
+    issue_messages: list[str] = []
+    issue_block_ids: set[str] = set()
+    for block in chunk.blocks:
+        translated_text = translated[block.id]
+        content_errors = _validate_translated_text(
+            block=block,
+            translated_text=translated_text,
+            termbase_entries=termbase_entries,
+        )
+        if content_errors:
+            issue_messages.extend(content_errors)
+            issue_block_ids.add(block.id)
+        segment = TranslationSegment(
+            schema_version=TRANSLATION_SEGMENT_SCHEMA_VERSION,
+            source_block_id=block.id,
+            source_file=block.source_file,
+            page=block.page,
+            source_order=block.source_order,
+            block_type=block.block_type,
+            source_text=block.effective_text,
+            source_sha256=_sha256_bytes(
+                block.effective_text.encode("utf-8")
+            ),
+            translated_text=translated_text,
+            translation_sha256=_sha256_bytes(
+                translated_text.encode("utf-8")
+            ),
+            status="translated",
+            model=provider.model_name,
+            prompt_sha256=prompt_hash,
+            termbase_sha256=termbase_hash,
+        )
+        segment.validate()
+        chunk_segments.append(segment)
+    return chunk_segments, issue_messages, issue_block_ids
+
+
 def translate_project(
     *,
     project: str | Path,
@@ -920,66 +1035,16 @@ def translate_project(
                 f"Chunk {chunk.id} is only partially stored. Use --force to restart."
             )
         notify(f"Chunk {chunk_index}/{len(chunks)}: requesting translation")
-        feedback: str | None = None
-        translated: dict[str, str] | None = None
-        structurally_valid: dict[str, str] | None = None
         try:
-            for validation_attempt in range(2):
-                prompt = compile_translation_prompt(
-                    blocks=chunk.blocks,
-                    termbase_entries=termbase_entries,
-                    project_instructions=project_instructions,
-                    validation_feedback=feedback,
-                )
-                try:
-                    response = active_provider.translate(prompt)
-                    candidate = parse_translation_response(
-                        response=response,
-                        blocks=chunk.blocks,
-                        termbase_entries=termbase_entries,
-                    )
-                except TranslationValidationError as error:
-                    feedback = str(error)
-                    notify(
-                        f"Chunk {chunk_index}/{len(chunks)}: "
-                        f"response structure validation failed "
-                        f"({validation_attempt + 1}/2)"
-                    )
-                    continue
-                except Exception:
-                    if structurally_valid is not None:
-                        notify(
-                            f"Chunk {chunk_index}/{len(chunks)}: "
-                            "content validation retry failed; "
-                            "preserving the reviewable response"
-                        )
-                        break
-                    raise
-                structurally_valid = candidate
-                content_errors = _translation_content_errors(
-                    translated=candidate,
-                    blocks=chunk.blocks,
-                    termbase_entries=termbase_entries,
-                )
-                if not content_errors:
-                    translated = candidate
-                    break
-                feedback = "; ".join(content_errors)
-                notify(
-                    f"Chunk {chunk_index}/{len(chunks)}: "
-                    f"content validation needs review "
-                    f"({validation_attempt + 1}/2)"
-                )
-            if translated is None and structurally_valid is not None:
-                translated = structurally_valid
-                notify(
-                    f"Chunk {chunk_index}/{len(chunks)}: "
-                    "saved with content issues for human review"
-                )
-            if translated is None:
-                raise TranslationValidationError(
-                    feedback or f"Chunk {chunk.id} failed response validation."
-                )
+            translated = _request_translation_chunk(
+                chunk,
+                chunk_index=chunk_index,
+                total_chunks=len(chunks),
+                provider=active_provider,
+                termbase_entries=termbase_entries,
+                project_instructions=project_instructions,
+                notify=notify,
+            )
         except Exception as error:
             output_hash = (
                 output_digest.hexdigest() if output_bytes > 0 else None
@@ -1017,38 +1082,20 @@ def translate_project(
                 f"fix the issue and use --resume. Cause: {error}"
             ) from error
 
-        chunk_segments: list[TranslationSegment] = []
-        for block in chunk.blocks:
-            translated_text = translated[block.id]
-            content_errors = _validate_translated_text(
-                block=block,
-                translated_text=translated_text,
+        chunk_segments, issue_messages, issue_block_ids = (
+            _build_translation_segments(
+                chunk,
+                translated,
+                provider=active_provider,
                 termbase_entries=termbase_entries,
+                prompt_hash=prompt_hash,
+                termbase_hash=termbase_hash,
             )
-            if content_errors:
-                validation_issue_messages.extend(content_errors)
-                validation_issue_block_ids.add(block.id)
-            source_hash = _sha256_bytes(block.effective_text.encode("utf-8"))
-            translation_hash = _sha256_bytes(translated_text.encode("utf-8"))
-            segment = TranslationSegment(
-                schema_version=TRANSLATION_SEGMENT_SCHEMA_VERSION,
-                source_block_id=block.id,
-                source_file=block.source_file,
-                page=block.page,
-                source_order=block.source_order,
-                block_type=block.block_type,
-                source_text=block.effective_text,
-                source_sha256=source_hash,
-                translated_text=translated_text,
-                translation_sha256=translation_hash,
-                status="translated",
-                model=active_provider.model_name,
-                prompt_sha256=prompt_hash,
-                termbase_sha256=termbase_hash,
-            )
-            segment.validate()
-            completed[block.id] = segment
-            chunk_segments.append(segment)
+        )
+        validation_issue_messages.extend(issue_messages)
+        validation_issue_block_ids.update(issue_block_ids)
+        for segment in chunk_segments:
+            completed[segment.source_block_id] = segment
         completed_chunks += 1
         chunk_data = _serialize_segments(chunk_segments)
         if output_bytes:

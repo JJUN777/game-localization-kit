@@ -253,8 +253,12 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
       기존 checkpoint 검증·꼬리 복구·cache 반환을 분리했다.
       - 검증: dry-run·cache·partial resume·append 꼬리 복구·force 재시작을
         포함한 전체 246개 테스트와 mypy 26개 파일 검사를 통과했다.
-    - [ ] 초기·실패·진행 state 기록, 청크 요청·검증·저장과 최종 review
-      생성을 분리한다.
+    - [x] 청크 요청·2회 구조/내용 검증과 `TranslationSegment` 생성을
+      분리했다.
+      - 검증: 구조 오류 재시도, 내용 경고 보존과 provider 실패 resume를
+        포함한 전체 246개 테스트와 mypy 26개 파일 검사를 통과했다.
+    - [ ] 초기·실패·진행 state 기록, 청크 append와 최종 review 생성을
+      분리한다.
   - 완료 기준: 세 진입 함수는 한 use case의 순서만 조정하고, 각 하위 함수는
     독립된 상태 판정·검증·저장 책임 하나만 가져야 한다.
 - [x] `ARCH-005` 세 Gemini provider의 공통 동작을 기반 모듈로 추출한다.
