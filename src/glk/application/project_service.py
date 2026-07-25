@@ -89,13 +89,8 @@ class ProjectListResult:
     projects: tuple[ProjectSummary, ...]
     warnings: tuple[ProjectListWarning, ...]
 
-    @property
-    def ok(self) -> bool:
-        return True
-
     def to_dict(self) -> dict[str, Any]:
         return {
-            "ok": self.ok,
             "workspace_root": self.workspace_root,
             "count": len(self.projects),
             "projects": [project.to_dict() for project in self.projects],

@@ -96,13 +96,8 @@ class SourceRegistrationResult:
     source_file: str
     files: tuple[str, ...]
 
-    @property
-    def ok(self) -> bool:
-        return True
-
     def to_dict(self) -> dict[str, Any]:
         return {
-            "ok": self.ok,
             "project_path": self.project_path,
             "source_type": self.source_type,
             "source_file": self.source_file,

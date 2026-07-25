@@ -272,7 +272,14 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     `from_environment`와 공통 재시도 실행을 담당한다.
   - 검증: 세 provider의 공통 환경 생성·누락 키 오류·timeout 설정 회귀 테스트와
     공통 기반 및 세 provider의 mypy 검사를 통과한다.
-- [ ] `API-001` 결과 객체의 `ok` 의미를 통일하거나 상수 필드를 제거한다.
+- [x] `API-001` 결과 객체의 `ok` 의미를 통일하거나 상수 필드를 제거한다.
+  - 성공하거나 예외를 던지는 결과 객체는 상수 `ok`를 노출하지 않는다.
+  - 일부 실패나 QA 불합격처럼 정상 반환 안에 실제 결과 차이가 있는 객체만
+    계산된 `ok`를 유지하고, HTTP 응답 envelope의 `ok`와 구분한다.
+  - 완료 기준: application 결과 객체에 상수 `ok`가 남아 있지 않고, 계산된
+    `ok`는 해당 결과의 성공·실패 값과 함께 바뀌어야 한다.
+  - 검증: 성공 전용 11개 결과와 QA 결과의 직렬화 계약 테스트를 포함한 전체
+    248개 테스트와 mypy 26개 파일 검사를 통과했다.
 - [x] `SECURITY-001` 세션 토큰 비교에 `secrets.compare_digest`를 사용한다.
   - dashboard, source, glossary, translation API와 source asset URL의 토큰을
     상수 시간 비교한다.

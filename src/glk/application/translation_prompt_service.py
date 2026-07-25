@@ -46,9 +46,7 @@ class TranslationPromptSaveResult:
     revision_file: str | None
 
     def to_dict(self) -> dict[str, Any]:
-        value = asdict(self)
-        value["ok"] = True
-        return value
+        return asdict(self)
 
 
 def _canonical_prompt(value: str) -> str:

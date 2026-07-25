@@ -80,14 +80,8 @@ class TranslationReviewPrepareResult:
     review_status: str
     dry_run: bool = False
 
-    @property
-    def ok(self) -> bool:
-        return True
-
     def to_dict(self) -> dict[str, Any]:
-        value = asdict(self)
-        value["ok"] = self.ok
-        return value
+        return asdict(self)
 
 
 @dataclass(frozen=True, slots=True)
