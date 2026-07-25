@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import random
-import time
 from typing import Any
 
 from google import genai
@@ -17,29 +15,16 @@ from glk.extraction.image_ocr import (
     OCR_RESPONSE_SCHEMA,
     validate_ocr_result,
 )
+from glk.infrastructure.gemini_common import (
+    DEFAULT_REQUEST_TIMEOUT_MS,
+    gemini_http_options,
+    run_with_gemini_retry,
+)
 from glk.infrastructure.gemini_layout import (
     GeminiConfigurationError,
     load_gemini_environment,
     resolve_model_name,
 )
-
-
-_NON_RETRYABLE_STATUS_CODES = {400, 401, 403, 404}
-
-
-def _is_retryable_error(error: Exception) -> bool:
-    message = str(error).lower()
-    if any(str(code) in message for code in _NON_RETRYABLE_STATUS_CODES):
-        return False
-    return not any(
-        marker in message
-        for marker in (
-            "invalid api key",
-            "permission denied",
-            "not found",
-            "invalid argument",
-        )
-    )
 
 
 class GeminiImageOcrProvider:
@@ -54,13 +39,18 @@ class GeminiImageOcrProvider:
         model_name: str,
         max_retries: int = 3,
         base_delay: float = 2,
+        request_timeout_ms: int = DEFAULT_REQUEST_TIMEOUT_MS,
     ) -> None:
         if not api_key.strip():
             raise GeminiConfigurationError("GEMINI_API_KEY is not configured.")
         self.model_name = model_name
         self.max_retries = max_retries
         self.base_delay = base_delay
-        self.client = genai.Client(api_key=api_key)
+        self.request_timeout_ms = request_timeout_ms
+        self.client = genai.Client(
+            api_key=api_key,
+            http_options=gemini_http_options(request_timeout_ms),
+        )
 
     @classmethod
     def from_environment(
@@ -82,19 +72,19 @@ class GeminiImageOcrProvider:
             response_mime_type="application/json",
             response_json_schema=OCR_RESPONSE_SCHEMA,
         )
-        for attempt in range(self.max_retries):
-            try:
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=[prompt, image],
-                    config=config,
-                )
-                if not response.text:
-                    raise ValueError("Gemini returned an empty OCR response.")
-                return validate_ocr_result(json.loads(response.text))
-            except Exception as error:
-                if attempt == self.max_retries - 1 or not _is_retryable_error(error):
-                    raise
-                delay = self.base_delay * (2**attempt) + random.uniform(0, 0.5)
-                time.sleep(delay)
-        raise RuntimeError("Gemini OCR retry loop ended unexpectedly.")
+
+        def request() -> dict[str, Any]:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[prompt, image],
+                config=config,
+            )
+            if not response.text:
+                raise ValueError("Gemini returned an empty OCR response.")
+            return validate_ocr_result(json.loads(response.text))
+
+        return run_with_gemini_retry(
+            request,
+            max_attempts=self.max_retries,
+            base_delay=self.base_delay,
+        )

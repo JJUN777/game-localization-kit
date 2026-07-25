@@ -1107,7 +1107,7 @@ class DashboardJobManager:
         except Exception as caught:
             result = None
             status = "failed"
-            error = str(caught) or caught.__class__.__name__
+            error = _safe_provider_error([str(caught)], job.model)
 
         with self._lock:
             current_job = self._jobs.get(project_id)
@@ -1179,10 +1179,13 @@ class DashboardJobManager:
                     else None
                 )
             )
-        except Exception as caught:
+        except Exception:
             result = None
             status = "failed"
-            error = str(caught) or caught.__class__.__name__
+            error = (
+                "용어 후보 생성에 실패했습니다. "
+                "승인 원문 상태를 확인한 뒤 다시 시도하세요."
+            )
 
         with self._lock:
             current_job = self._glossary_jobs.get(project_id)

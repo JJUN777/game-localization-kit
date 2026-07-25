@@ -1,0 +1,200 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+from google.genai import errors
+
+from glk.infrastructure.gemini_common import (
+    DEFAULT_REQUEST_TIMEOUT_MS,
+    gemini_http_options,
+    gemini_retry_delay,
+    is_retryable_gemini_error,
+    retry_after_seconds,
+    run_with_gemini_retry,
+)
+from glk.infrastructure.gemini_layout import GeminiLayoutProvider
+from glk.infrastructure.gemini_ocr import GeminiImageOcrProvider
+from glk.infrastructure.gemini_translation import GeminiTranslationProvider
+
+
+def api_error(
+    code: int,
+    *,
+    headers: dict[str, str] | None = None,
+) -> errors.APIError:
+    response = SimpleNamespace(headers=headers or {})
+    return errors.APIError(
+        code,
+        {
+            "error": {
+                "code": code,
+                "status": "TEST_STATUS",
+                "message": "test failure",
+            }
+        },
+        response,  # type: ignore[arg-type]
+    )
+
+
+class GeminiCommonPolicyTests(unittest.TestCase):
+    def test_builds_finite_http_options_without_sdk_retries(self) -> None:
+        options = gemini_http_options()
+
+        self.assertEqual(options.timeout, DEFAULT_REQUEST_TIMEOUT_MS)
+        self.assertIsNotNone(options.retry_options)
+        self.assertEqual(options.retry_options.attempts, 1)
+
+    def test_classifies_api_errors_by_status_code(self) -> None:
+        for code in (400, 401, 403, 404, 422):
+            with self.subTest(code=code):
+                self.assertFalse(is_retryable_gemini_error(api_error(code)))
+        for code in (408, 429, 500, 502, 503, 599):
+            with self.subTest(code=code):
+                self.assertTrue(is_retryable_gemini_error(api_error(code)))
+
+        self.assertTrue(
+            is_retryable_gemini_error(
+                RuntimeError(
+                    "503 transport failure with request 12404 and 400 tokens"
+                )
+            )
+        )
+
+    def test_honors_retry_after_and_bounds_large_values(self) -> None:
+        limited = api_error(429, headers={"Retry-After": "125"})
+        excessive = api_error(429, headers={"retry-after": "999"})
+        invalid = api_error(429, headers={"Retry-After": "nan"})
+        now = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+        dated = api_error(
+            503,
+            headers={
+                "Retry-After": format_datetime(
+                    now + timedelta(seconds=90),
+                    usegmt=True,
+                )
+            },
+        )
+
+        self.assertEqual(retry_after_seconds(limited), 125)
+        self.assertEqual(retry_after_seconds(excessive), 300)
+        self.assertIsNone(retry_after_seconds(invalid))
+        self.assertEqual(retry_after_seconds(dated, now=now), 90)
+        self.assertEqual(
+            gemini_retry_delay(
+                limited,
+                attempt=0,
+                base_delay=2,
+                jitter_seconds=0.4,
+            ),
+            125,
+        )
+
+    def test_uses_long_fallback_for_rate_limit_without_header(self) -> None:
+        delay = gemini_retry_delay(
+            api_error(429),
+            attempt=0,
+            base_delay=2,
+            jitter_seconds=0,
+        )
+
+        self.assertEqual(delay, 60)
+
+    def test_retries_then_returns_and_does_not_retry_permanent_error(
+        self,
+    ) -> None:
+        attempts = 0
+        sleeps: list[float] = []
+
+        def transient_operation() -> str:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise api_error(429, headers={"Retry-After": "7"})
+            return "ok"
+
+        result = run_with_gemini_retry(
+            transient_operation,
+            max_attempts=3,
+            base_delay=2,
+            sleep=sleeps.append,
+            jitter=lambda _start, _end: 0,
+        )
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(attempts, 2)
+        self.assertEqual(sleeps, [7])
+
+        permanent_attempts = 0
+
+        def permanent_operation() -> str:
+            nonlocal permanent_attempts
+            permanent_attempts += 1
+            raise api_error(404)
+
+        with self.assertRaises(errors.APIError):
+            run_with_gemini_retry(
+                permanent_operation,
+                max_attempts=3,
+                base_delay=2,
+                sleep=sleeps.append,
+                jitter=lambda _start, _end: 0,
+            )
+        self.assertEqual(permanent_attempts, 1)
+
+    def test_timeout_exception_stops_after_bounded_attempts(self) -> None:
+        attempts = 0
+        sleeps: list[float] = []
+
+        def operation() -> str:
+            nonlocal attempts
+            attempts += 1
+            raise TimeoutError("request timed out")
+
+        with self.assertRaises(TimeoutError):
+            run_with_gemini_retry(
+                operation,
+                max_attempts=3,
+                base_delay=2,
+                sleep=sleeps.append,
+                jitter=lambda _start, _end: 0,
+            )
+
+        self.assertEqual(attempts, 3)
+        self.assertEqual(sleeps, [2, 4])
+
+    def test_all_providers_apply_the_same_client_timeout(self) -> None:
+        providers = (
+            (
+                "glk.infrastructure.gemini_layout.genai.Client",
+                GeminiLayoutProvider,
+            ),
+            (
+                "glk.infrastructure.gemini_ocr.genai.Client",
+                GeminiImageOcrProvider,
+            ),
+            (
+                "glk.infrastructure.gemini_translation.genai.Client",
+                GeminiTranslationProvider,
+            ),
+        )
+        for target, provider_type in providers:
+            with self.subTest(provider=provider_type.__name__):
+                with patch(target) as client:
+                    provider = provider_type(
+                        api_key="test-key",
+                        model_name="test-model",
+                        request_timeout_ms=12_345,
+                    )
+
+                options = client.call_args.kwargs["http_options"]
+                self.assertEqual(provider.request_timeout_ms, 12_345)
+                self.assertEqual(options.timeout, 12_345)
+                self.assertEqual(options.retry_options.attempts, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -409,6 +409,84 @@ class DashboardJobManagerTests(unittest.TestCase):
         )
         manager.close()
 
+    def test_source_runner_exception_is_sanitized_before_persisting(
+        self,
+    ) -> None:
+        completed = threading.Event()
+
+        def runner(
+            project_id: str,
+            workspace_root: str | Path,
+            model: str,
+            progress: object,
+        ) -> dict[str, object]:
+            completed.set()
+            raise RuntimeError(
+                "/Users/private/project/source.pdf: sdk internal failure"
+            )
+
+        manager = DashboardJobManager(
+            self.workspace_root,
+            runner=runner,
+        )
+        manager.start_source_job(
+            project_id="background_job",
+            model="gemini-test",
+        )
+        self.assertTrue(completed.wait(timeout=2))
+        for _ in range(100):
+            job = manager.list_jobs()[0]
+            if job["status"] == "failed":
+                break
+            threading.Event().wait(0.01)
+
+        self.assertEqual(job["status"], "failed")
+        self.assertEqual(
+            job["error"],
+            "원본을 처리하지 못했습니다. 원본 파일을 확인한 뒤 다시 시도하세요.",
+        )
+        self.assertNotIn("/Users/private", job["error"])
+        manager.close()
+
+    def test_glossary_runner_exception_is_sanitized_before_persisting(
+        self,
+    ) -> None:
+        create_approved_project(self.workspace_root, sample_blocks())
+        completed = threading.Event()
+
+        def glossary_runner(
+            project_id: str,
+            workspace_root: str | Path,
+            progress: object,
+        ) -> dict[str, object]:
+            completed.set()
+            raise RuntimeError(
+                "/Users/private/project/approved.jsonl: parse failure"
+            )
+
+        manager = DashboardJobManager(
+            self.workspace_root,
+            glossary_runner=glossary_runner,
+        )
+        manager.start_glossary_job(project_id="glossary_project")
+        self.assertTrue(completed.wait(timeout=2))
+        for _ in range(100):
+            job = manager.list_glossary_jobs()[0]
+            if job["status"] == "failed":
+                break
+            threading.Event().wait(0.01)
+
+        self.assertEqual(job["status"], "failed")
+        self.assertEqual(
+            job["error"],
+            (
+                "용어 후보 생성에 실패했습니다. "
+                "승인 원문 상태를 확인한 뒤 다시 시도하세요."
+            ),
+        )
+        self.assertNotIn("/Users/private", job["error"])
+        manager.close()
+
     def test_runs_and_persists_a_successful_glossary_job(self) -> None:
         create_approved_project(self.workspace_root, sample_blocks())
         completed = threading.Event()

@@ -696,6 +696,18 @@ git diff --check
 - Orca에서 partial 번역 카드가 `번역 진행 중`, `78%`와 같은 너비의 진행 막대로 렌더링되고 브라우저 콘솔 오류가 없음을 확인했습니다.
 - 전체 195개 테스트, 설정된 16개 Python 파일 mypy, Python bytecode 컴파일과 `git diff --check`를 통과했습니다.
 
+### 2026-07-25 — Gemini timeout·상태 코드·429 재시도 정책 통합
+
+- layout, 이미지 OCR과 번역 provider가 공통 `gemini_common.py`의 timeout·재시도 정책을 사용합니다.
+- 모든 Gemini 요청에 180초 timeout을 적용하고 SDK 자체 재시도는 1회 시도로 비활성화해 애플리케이션 정책과 중복되지 않게 했습니다.
+- 재시도 여부는 예외 문자열이 아니라 SDK `APIError.code`로 판정합니다. 400·401·403·404 등 영구 4xx는 즉시 종료하고 408·429·5xx는 제한된 횟수로 재시도합니다.
+- 429와 서버가 제공한 `Retry-After`를 우선 적용하고, 헤더가 없으면 최소 60초, 모든 대기는 최대 300초로 제한합니다.
+- 빈 응답·JSON 검증과 transport timeout 같은 비 API 오류는 기존처럼 최대 3회 안에서 재시도합니다.
+- source·glossary runner 예외는 background job 상태에 절대 경로나 SDK 내부 내용을 저장하지 않고 안전한 한글 메시지로 변환합니다.
+- 공통 정책, 세 provider client 설정과 job 오류 정제 테스트를 추가했습니다.
+- 전체 204개 테스트, 설정된 16개 Python 파일 mypy, Python bytecode 컴파일과 `git diff --check`를 통과했습니다.
+- Orca에서 실패한 원문 작업의 안전한 한글 오류가 카드에 표시되고, 내부 절대 경로 노출과 브라우저 콘솔 오류가 없음을 확인했습니다.
+
 ---
 
 ## 다른 컴퓨터에서 작업 재개

@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import random
-import time
 from typing import Any
 
 from dotenv import load_dotenv
@@ -19,10 +17,14 @@ from glk.extraction.layout import (
     RESPONSE_SCHEMA,
     build_layout_prompt,
 )
+from glk.infrastructure.gemini_common import (
+    DEFAULT_REQUEST_TIMEOUT_MS,
+    gemini_http_options,
+    run_with_gemini_retry,
+)
 
 
 DEFAULT_MODEL = "gemini-2.5-flash"
-_NON_RETRYABLE_STATUS_CODES = {400, 401, 403, 404}
 
 
 class GeminiConfigurationError(ValueError):
@@ -48,19 +50,6 @@ def resolve_model_name(model_name: str | None = None) -> str:
     return DEFAULT_MODEL
 
 
-def _is_retryable_error(error: Exception) -> bool:
-    message = str(error).lower()
-    if any(str(code) in message for code in _NON_RETRYABLE_STATUS_CODES):
-        return False
-    permanent_markers = (
-        "invalid api key",
-        "permission denied",
-        "not found",
-        "invalid argument",
-    )
-    return not any(marker in message for marker in permanent_markers)
-
-
 class GeminiLayoutProvider:
     prompt_version = PROMPT_VERSION
 
@@ -71,13 +60,18 @@ class GeminiLayoutProvider:
         model_name: str,
         max_retries: int = 3,
         base_delay: float = 2,
+        request_timeout_ms: int = DEFAULT_REQUEST_TIMEOUT_MS,
     ) -> None:
         if not api_key.strip():
             raise GeminiConfigurationError("GEMINI_API_KEY is not configured.")
         self.model_name = model_name
         self.max_retries = max_retries
         self.base_delay = base_delay
-        self.client = genai.Client(api_key=api_key)
+        self.request_timeout_ms = request_timeout_ms
+        self.client = genai.Client(
+            api_key=api_key,
+            http_options=gemini_http_options(request_timeout_ms),
+        )
 
     @classmethod
     def from_environment(cls, model_name: str | None = None) -> GeminiLayoutProvider:
@@ -98,22 +92,22 @@ class GeminiLayoutProvider:
             response_json_schema=RESPONSE_SCHEMA,
         )
         prompt = build_layout_prompt(page_number, fragments)
-        for attempt in range(self.max_retries):
-            try:
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=[prompt, page_image],
-                    config=config,
-                )
-                if not response.text:
-                    raise ValueError("Gemini returned an empty layout response.")
-                layout = json.loads(response.text)
-                if not isinstance(layout, dict):
-                    raise ValueError("Gemini returned a non-object layout response.")
-                return layout
-            except Exception as error:
-                if attempt == self.max_retries - 1 or not _is_retryable_error(error):
-                    raise
-                delay = self.base_delay * (2**attempt) + random.uniform(0, 0.5)
-                time.sleep(delay)
-        raise RuntimeError("Gemini retry loop ended unexpectedly.")
+
+        def request() -> dict[str, Any]:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[prompt, page_image],
+                config=config,
+            )
+            if not response.text:
+                raise ValueError("Gemini returned an empty layout response.")
+            layout = json.loads(response.text)
+            if not isinstance(layout, dict):
+                raise ValueError("Gemini returned a non-object layout response.")
+            return layout
+
+        return run_with_gemini_retry(
+            request,
+            max_attempts=self.max_retries,
+            base_delay=self.base_delay,
+        )
