@@ -100,6 +100,10 @@ class TranslationReviewServerTests(unittest.TestCase):
         self.assertIsInstance(html, str)
         self.assertIn("원문과 번역을 함께 검수하세요", html)
         self.assertIn("오류만 재번역", html)
+        self.assertIn("확정 용어집", html)
+        self.assertIn("이 블록의 적용 용어", html)
+        self.assertIn("keep_rule_applied: \"원문 유지 적용\"", html)
+        self.assertIn("highlightSourceTerm", html)
         self.assertIn("최종 번역 승인이 완료되었습니다", html)
         self.assertIn('number_changed: "숫자 불일치"', html)
         self.assertIn("${issueLabel(issue)} · ${issue.message}", html)
@@ -127,6 +131,14 @@ class TranslationReviewServerTests(unittest.TestCase):
         status, document, _ = self._request("/api/review")
         self.assertEqual(status, 200)
         self.assertEqual(document["summary"]["blocks"], 3)
+        self.assertEqual(len(document["termbase"]), 3)
+        self.assertEqual(
+            [
+                term["source_term"]
+                for term in document["blocks"][1]["relevant_terms"]
+            ],
+            ["Hunter", "Stamina"],
+        )
         original_hash = document["review_sha256"]
         translations = {
             block["id"]: block["translation"]

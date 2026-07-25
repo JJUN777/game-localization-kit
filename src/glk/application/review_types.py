@@ -104,6 +104,15 @@ class TranslationReviewIssuePayload(TypedDict):
     message: str
 
 
+class TranslationReviewTerm(TypedDict):
+    source_term: str
+    translation: str
+    status: str
+    category: str
+    variants: list[str]
+    note: str
+
+
 class TranslationReviewBlock(TypedDict):
     id: str
     source_file: str
@@ -115,6 +124,7 @@ class TranslationReviewBlock(TypedDict):
     translation: str
     changed: bool
     issues: list[TranslationReviewIssuePayload]
+    relevant_terms: list[TranslationReviewTerm]
 
 
 class TranslationReviewSummary(TypedDict):
@@ -134,4 +144,5 @@ class TranslationReviewDocument(TypedDict):
     final_translation_approved: bool
     summary: TranslationReviewSummary
     general_issues: list[TranslationReviewIssuePayload]
+    termbase: list[TranslationReviewTerm]
     blocks: list[TranslationReviewBlock]

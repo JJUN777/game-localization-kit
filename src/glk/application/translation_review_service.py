@@ -17,6 +17,7 @@ from glk.application.review_types import (
     TranslationReviewBlock,
     TranslationReviewDocument,
     TranslationReviewIssuePayload,
+    TranslationReviewTerm,
 )
 from glk.domain.approved_translation import (
     APPROVED_TRANSLATION_SCHEMA_VERSION,
@@ -226,6 +227,80 @@ def _load_active_termbase(path: Path) -> tuple[dict[str, Any], ...]:
         if entry.get("status") in {"approved", "keep"}:
             active.append(entry)
     return tuple(active)
+
+
+def _term_variants(entry: dict[str, Any]) -> list[str]:
+    source_term = str(entry.get("source_term") or "").strip()
+    raw_variants = entry.get("variants")
+    variants = (
+        [str(value).strip() for value in raw_variants]
+        if isinstance(raw_variants, list)
+        else []
+    )
+    return list(
+        dict.fromkeys(
+            value
+            for value in [source_term, *variants]
+            if value
+        )
+    )
+
+
+def _term_pattern(term: str) -> re.Pattern[str]:
+    prefix = r"(?<!\w)" if term[0].isalnum() else ""
+    suffix = r"(?!\w)" if term[-1].isalnum() else ""
+    return re.compile(prefix + re.escape(term) + suffix, re.IGNORECASE)
+
+
+def _term_matches(text: str, entry: dict[str, Any]) -> bool:
+    return any(
+        _term_pattern(variant).search(text)
+        for variant in _term_variants(entry)
+    )
+
+
+def _review_term(entry: dict[str, Any]) -> TranslationReviewTerm:
+    return {
+        "source_term": str(entry.get("source_term") or ""),
+        "translation": str(entry.get("translation") or ""),
+        "status": str(entry.get("status") or ""),
+        "category": str(entry.get("category") or ""),
+        "variants": _term_variants(entry),
+        "note": str(entry.get("note") or ""),
+    }
+
+
+def _relevant_review_terms(
+    source_text: str,
+    entries: tuple[dict[str, Any], ...],
+) -> list[TranslationReviewTerm]:
+    return [
+        _review_term(entry)
+        for entry in entries
+        if _term_matches(source_text, entry)
+    ]
+
+
+def _source_latin_is_fully_kept(
+    source_text: str,
+    entries: tuple[dict[str, Any], ...],
+) -> bool:
+    remaining = source_text
+    matched = False
+    variants = sorted(
+        {
+            variant
+            for entry in entries
+            if entry.get("status") == "keep"
+            for variant in _term_variants(entry)
+        },
+        key=len,
+        reverse=True,
+    )
+    for variant in variants:
+        remaining, count = _term_pattern(variant).subn("", remaining)
+        matched = matched or count > 0
+    return matched and _LATIN_PATTERN.search(remaining) is None
 
 
 def _require_current_translation(
@@ -576,7 +651,27 @@ def _analyze_review(
                     message=issue.message,
                 )
             )
-        if translated == segment.source_text and _LATIN_PATTERN.search(
+        fully_kept = _source_latin_is_fully_kept(
+            segment.source_text,
+            context.termbase_entries,
+        )
+        if (
+            fully_kept
+            and _LATIN_PATTERN.search(segment.source_text)
+            and not _HANGUL_PATTERN.search(translated)
+        ):
+            issues.append(
+                TranslationReviewIssue(
+                    severity="info",
+                    code="keep_rule_applied",
+                    block_id=segment.source_block_id,
+                    message=(
+                        "이 블록의 영문은 용어집의 원문 유지 규칙으로 "
+                        "보존되었습니다."
+                    ),
+                )
+            )
+        elif translated == segment.source_text and _LATIN_PATTERN.search(
             segment.source_text
         ):
             issues.append(
@@ -629,6 +724,7 @@ def get_project_translation_review_document(
     errors, warnings, information = _issue_counts(issues)
     location = load_project(project, workspace_root)
     pipeline = inspect_project(location.path)["pipeline"]
+    termbase = [_review_term(entry) for entry in context.termbase_entries]
     blocks: list[TranslationReviewBlock] = []
     for segment in context.segments:
         translation = translations[segment.source_block_id]
@@ -644,6 +740,10 @@ def get_project_translation_review_document(
                 "translation": translation,
                 "changed": translation != segment.translated_text,
                 "issues": issue_map.get(segment.source_block_id, []),
+                "relevant_terms": _relevant_review_terms(
+                    segment.source_text,
+                    context.termbase_entries,
+                ),
             }
         )
     return {
@@ -666,6 +766,7 @@ def get_project_translation_review_document(
             "passed": errors == 0,
         },
         "general_issues": general_issues,
+        "termbase": termbase,
         "blocks": blocks,
     }
 

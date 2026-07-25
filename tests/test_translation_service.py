@@ -21,6 +21,7 @@ from glk.application.translation_review_service import (
     _final_translation_outputs,
     _render_final_translation,
     finalize_project_translation_review,
+    get_project_translation_review_document,
     prepare_project_translation_review,
     run_project_translation_qa,
 )
@@ -631,6 +632,114 @@ class TranslationReviewTests(unittest.TestCase):
             provider=SequenceProvider([valid_response(blocks)]),
         )
         return project_path, blocks
+
+    def test_review_document_includes_relevant_and_full_active_terms(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            _, blocks = self._translated_project(workspace_root)
+
+            document = get_project_translation_review_document(
+                project="translation_project",
+                workspace_root=workspace_root,
+            )
+
+            self.assertEqual(len(document["termbase"]), 3)
+            by_id = {block["id"]: block for block in document["blocks"]}
+            self.assertEqual(by_id[blocks[0].id]["relevant_terms"], [])
+            self.assertEqual(
+                [
+                    term["source_term"]
+                    for term in by_id[blocks[1].id]["relevant_terms"]
+                ],
+                ["Hunter", "Stamina"],
+            )
+            self.assertEqual(
+                [
+                    term["source_term"]
+                    for term in by_id[blocks[2].id]["relevant_terms"]
+                ],
+                ["Hunter"],
+            )
+
+    def test_keep_only_block_is_info_instead_of_untranslated_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            block = make_block(1, "IMPORTANT", block_type="heading")
+            other_blocks = [
+                make_block(2, "Setup", block_type="heading"),
+                make_block(3, "End", block_type="heading"),
+            ]
+            project_path = create_translation_project(
+                workspace_root,
+                [block, *other_blocks],
+            )
+            paths = WorkspacePaths(project_path)
+            termbase = json.loads(paths.termbase.read_text(encoding="utf-8"))
+            termbase["entries"] = [
+                {
+                    "candidate_id": "term-important",
+                    "source_term": "IMPORTANT",
+                    "translation": "IMPORTANT",
+                    "category": "ui",
+                    "status": "keep",
+                    "note": "",
+                    "variants": ["IMPORTANT"],
+                    "occurrences": 1,
+                    "block_ids": [block.id],
+                    "locations": ["p1"],
+                    "example": "IMPORTANT",
+                    "origin": "auto",
+                    "source_verified": True,
+                }
+            ]
+            termbase_data = (
+                json.dumps(termbase, ensure_ascii=False, indent=2) + "\n"
+            ).encode("utf-8")
+            paths.termbase.write_bytes(termbase_data)
+            import_state = json.loads(
+                paths.glossary_import_state.read_text(encoding="utf-8")
+            )
+            import_state["termbase_sha256"] = hashlib.sha256(
+                termbase_data
+            ).hexdigest()
+            import_state["entry_count"] = 1
+            paths.glossary_import_state.write_text(
+                json.dumps(import_state),
+                encoding="utf-8",
+            )
+            translate_project(
+                project="translation_project",
+                workspace_root=workspace_root,
+                provider=SequenceProvider(
+                    [
+                        {
+                            "translations": [
+                                {"id": block.id, "text": "IMPORTANT"},
+                                {"id": other_blocks[0].id, "text": "준비"},
+                                {"id": other_blocks[1].id, "text": "종료"},
+                            ]
+                        }
+                    ]
+                ),
+            )
+
+            document = get_project_translation_review_document(
+                project="translation_project",
+                workspace_root=workspace_root,
+            )
+
+            issues = document["blocks"][0]["issues"]
+            self.assertEqual(
+                [issue["code"] for issue in issues],
+                ["keep_rule_applied"],
+            )
+            self.assertEqual(issues[0]["severity"], "info")
+            self.assertEqual(
+                document["blocks"][0]["relevant_terms"][0]["status"],
+                "keep",
+            )
+            self.assertEqual(document["summary"]["warnings"], 0)
+            self.assertEqual(document["summary"]["info"], 1)
 
     def test_qa_and_finalize_preserve_draft_and_store_only_human_correction(
         self,
