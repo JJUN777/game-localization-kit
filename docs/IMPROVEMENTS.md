@@ -285,8 +285,15 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     상수 시간 비교한다.
   - 검증: 네 HTTP handler와 source asset 인증이 모두 `compare_digest`를
     호출하는 전용 회귀 테스트를 통과한다.
-- [ ] `QUALITY-001` ruff를 작은 규칙 집합부터 도입하고 포맷 변경은 별도 커밋으로
+- [x] `QUALITY-001` ruff를 작은 규칙 집합부터 도입하고 포맷 변경은 별도 커밋으로
   분리한다.
+  - 오류 가능성이 높은 `E4`, `E7`, `E9`, `F`만 `src`와 `tests`에 적용하고,
+    formatter나 자동 수정은 도입하지 않는다.
+  - dev 의존성과 CI static checks에 동일한 `ruff check src tests`를 추가한다.
+  - 완료 기준: 선택한 규칙을 명시한 설정과 CI 검사가 있고, 기존 동작 변경 없이
+    모든 lint 오류를 제거해야 한다.
+  - 검증: 미사용 import 3건을 제거한 뒤 Python 88개 파일의 ruff 검사,
+    전체 248개 테스트와 mypy 26개 파일 검사를 통과했다.
 - [ ] `QUALITY-002` mypy 대상을 도메인 계층부터 점진적으로 확대한다.
   - 현재 설정된 26개 파일은 통과한다.
   - application/domain/extraction 35개 파일로 확대하면 7개 파일에서

@@ -10,11 +10,9 @@ from typing import Any, Callable, Protocol
 from PIL import Image, ImageOps
 
 from glk.application._cache import invalid_cache, read_json_object
-from glk.application._hashing import sha256_bytes as _sha256_bytes
 from glk.application._hashing import sha256_file as _sha256_file
 from glk.application._hashing import sha256_text as _sha256_text
 from glk.application._io import copy_file_atomic as _copy_file_atomic
-from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.application._io import write_text_atomic as _write_text_atomic
 from glk.application.project_service import (

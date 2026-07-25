@@ -62,7 +62,7 @@ jobs:
           glk --help
 
   typecheck:
-    name: Review API type check
+    name: Static checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -87,3 +87,6 @@ jobs:
 
       - name: Check review API types
         run: python -m mypy
+
+      - name: Check Python lint
+        run: python -m ruff check src tests

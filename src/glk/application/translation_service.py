@@ -26,7 +26,6 @@ from glk.application._translation_context import (
 )
 from glk.application.project_service import inspect_project, load_project
 from glk.application.translation_types import (
-    DEFAULT_PROJECT_INSTRUCTIONS,
     TranslationError,
     TranslationProvider,
     TranslationValidationError,
