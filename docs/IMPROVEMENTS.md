@@ -4,13 +4,20 @@
 정적 분석 원문은 `DASHBOARD_WORK_HISTORY.md`의 부록에 보존하되, 실제 구현 순서와
 완료 상태는 이 문서만 갱신합니다.
 
-기능 구현과 안정화가 끝난 뒤 `README.md`, `docs/ARCHITECTURE.md`,
-`docs/WORKFLOW.md`와 작업 히스토리를 한 번에 정리합니다. 작업 도중에는 관련
-항목의 상태와 검증 결과만 같은 커밋에서 갱신합니다.
+현재 사용자 문서는 역할별로 정리되어 있습니다. `README.md`는 설치와 빠른
+시작, `docs/GUI.md`는 화면 사용법, `docs/WORKFLOW.md`는 CLI·파일·상태 규칙,
+`docs/ARCHITECTURE.md`는 구현 경계를 담당합니다. 과거 분석과 구현 과정은
+`DASHBOARD_WORK_HISTORY.md`에 보존하되 현재 동작의 기준으로 사용하지 않습니다.
+작업 도중에는 관련 항목의 상태와 검증 결과를 같은 커밋에서 갱신합니다.
 
 항목을 `진행 중`으로 바꾸기 전에는 구현 범위, 측정 가능한 완료 기준과 필수
 회귀 테스트를 해당 항목에 추가합니다. 범위가 큰 항목은 한 번에 완료 처리하지
 않고 독립적으로 검증할 수 있는 하위 항목으로 나눕니다.
+
+2026-07-26 2차 분석에서 현재 소스와 실행 환경을 다시 확인했습니다. 기존
+설정으로 unittest 269개, mypy 48개 파일과 ruff 91개 파일이 통과했으며,
+`follow_imports = "normal"`에서는 3개 파일의 타입 오류가 확인됐습니다.
+새 항목은 발견 시점과 관계없이 실제 영향에 따라 아래 P1~P3에 배치합니다.
 
 ## 상태 표기
 
@@ -92,6 +99,28 @@
   - 남은 문구 매칭 제거는 도메인별 하위 항목으로 분리해 별도로 추적한다.
   - 검증: 명시적 `INVALID_REQUEST`가 stale detail보다 우선하는 단위 테스트와
     dashboard·source·glossary·translation review HTTP 회귀 테스트를 통과했다.
+- [ ] `ERROR-004` 번역 검수 재번역 실패에서 내부 예외 원문을 UI와 job
+  응답에 노출하지 않는다.
+  - `_safe_retry_error()`는 알려진 검수 충돌과 validation 문구 외의 예외를
+    최대 600자까지 그대로 반환하므로 Gemini SDK 상세와 파일 절대 경로가
+    브라우저에 표시될 수 있다.
+  - SDK 상태 코드와 명시적 도메인 예외를 기준으로 API 키·모델·권한·사용량·
+    네트워크·검수 충돌·결과 검증 오류를 안전한 한글 안내로 분류한다.
+  - 예상하지 못한 예외는 고정 안내만 반환하고 내부 상세를 job JSON과 HTTP
+    응답에 저장하지 않는다.
+  - 완료 기준: Gemini `APIError`, 네트워크 예외와 절대 경로가 포함된
+    `OSError`를 강제로 발생시켜도 job의 `error`와 API 응답에 SDK 원문·키·
+    절대 경로가 없어야 하며, 검수 충돌과 validation 오류는 기존 행동 안내를
+    유지해야 한다.
+- [ ] `ERROR-005` 용어 후보 생성 job의 안전한 도메인 오류 안내를 보존한다.
+  - 현재 모든 runner 예외를 하나의 고정 문구로 바꿔 stale 용어 검수 파일처럼
+    사용자가 직접 해결할 수 있는 원인까지 숨긴다.
+  - 자동 덮어쓰기 차단처럼 명시적으로 만든 안전한 도메인 상태는 안정적
+    오류 코드와 한글 안내로 전달하고, 경로·파싱 상세를 포함할 수 있는 일반
+    `ProjectError`와 예상하지 못한 예외는 고정 문구로 정제한다.
+  - 완료 기준: 승인 원문 불일치·stale 검수 파일은 재생성 방법을 안내하고,
+    절대 경로가 포함된 프로젝트·파일시스템 예외는 UI와 job state에 노출하지
+    않아야 한다.
 - [x] `JOB-001` 저장된 background job 상태를 스키마로 검증한다.
   - 타입, 허용 상태, 필수 필드와 프로젝트 ID를 검증한다.
   - 프로젝트 ID는 가능한 경우 상태 파일 내용보다 상위 프로젝트 경로를 기준으로 한다.
@@ -118,6 +147,25 @@
     dashboard와 provider가 같은 `.env`를 사용해야 한다.
   - 검증: 다른 CWD, editable checkout, macOS·Linux 사용자 설정 경로와 provider
     로딩 경로 테스트를 통과했고, 저장 직후 `api_key_source=env_file`을 확인했다.
+- [x] `ENV-003` 대시보드의 명시적 `--settings-root`를 background job
+  provider까지 전달한다.
+  - 대시보드는 해석된 root를 `AiSettingsService`에만 전달하고 provider의
+    `from_environment()`는 인자 없이 기본 설정 경로를 다시 찾는다. 이 때문에
+    custom root에 기존 `.env`가 있는 첫 실행은 화면에서 설정 완료로 보여도
+    실제 원문 준비·번역에서 키를 찾지 못할 수 있다.
+  - 대시보드가 해석한 단일 settings root를 job manager와 source·translation
+    runner를 거쳐 provider 생성까지 명시적으로 전달하고, `save()`가 process
+    환경변수에 키를 복사하는 부수 효과에 의존하지 않는다.
+  - 완료 기준: 셸의 Gemini 환경변수가 없는 상태에서
+    `glk ui --settings-root <custom>`으로 시작하면 custom `.env`의 키와 모델을
+    source·translation background job이 모두 사용하고, 기본 설정 경로의 값은
+    섞이지 않아야 한다.
+  - 회귀 테스트: custom `.env`를 미리 만든 첫 실행, GUI에서 저장한 뒤 실행,
+    `GLK_SETTINGS_ROOT`와 명시적 옵션의 우선순위 및 테스트 간 process 환경
+    오염 방지를 확인한다.
+  - 검증: 명시적 root의 기존 `.env` 로딩과 환경 root보다 높은 우선순위,
+    설정 저장 뒤 process 환경 무변경, source·translation·검수 재번역 job의
+    단일 root 전달을 포함해 전체 274개 테스트와 mypy·ruff 검사를 통과했다.
 - [x] `IO-001` 이미지 입력과 파생 출력의 대소문자 무시 충돌을 검사한다.
   - CLI와 대시보드가 같은 `casefold()` 기준을 사용한다.
   - 완료 기준: 원본 상대 경로와 확장자를 `.txt`로 바꾼 파생 경로를 각각
@@ -191,6 +239,19 @@
     state commit 중단을 다음 실행에서 복구하며, 불일치한 사용자 편집은 보존한다.
   - 검증: append 꼬리, 번역 최종 산출물 기록 중단과 용어 후보 state commit
     중단 뒤 재실행 회귀 테스트를 통과했다.
+- [ ] `IO-003` 부모 디렉터리 fsync 미지원 환경에서 성공한 파일 교체를
+  실패로 오인하지 않는다.
+  - `os.replace()`가 성공한 뒤 `_fsync_parent()`에서 `EINVAL` 또는
+    `ENOTSUP`이 발생하면 파일은 이미 교체됐지만 호출자는 전체 쓰기가 실패한
+    것으로 판단한다.
+  - 디렉터리 fsync를 지원하지 않는 것이 명확한 errno만 best-effort로
+    처리하고, `EIO`·권한 오류처럼 실제 저장소 이상일 수 있는 오류는 숨기지
+    않는다.
+  - 완료 기준: 지원 파일시스템에서는 기존 directory fsync를 유지하고,
+    `EINVAL`·`ENOTSUP`에서는 atomic replace와 신규 append가 성공으로
+    끝나며, 그 밖의 `OSError`는 호출자에게 전달되어야 한다.
+  - 회귀 테스트: `os.open`과 `os.fsync` 각각의 미지원 errno, 실제 I/O 오류,
+    replace 이전 실패와 replace 이후 fsync 실패를 분리해 검사한다.
 - [x] `ENV-002` 일반 설치 환경에서 provider의 `.env` 탐색 경로가 패키지 상위
   디렉터리를 잘못 가리키지 않게 한다.
   - 완료 기준: source checkout 표식이 실제로 있을 때만 checkout root를 사용하고,
@@ -236,6 +297,16 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
   - 검증: 정적·동적 경로, 1회 URL decode, query 분리, 잘못된 메서드·빈 ID·
     중첩 경로 단위 테스트를 포함한 전체 246개 테스트와 mypy 23개 파일 검사를
     통과했다.
+- [ ] `ROUTE-001` 라우터와 HTTP handler 분기의 불일치를 즉시 실패로
+  감지한다.
+  - 현재 등록된 route는 모두 처리되지만, 이후 라우터에 이름을 추가하고
+    `do_GET`·`do_POST`·`do_PUT`·`do_PATCH` 분기를 빠뜨리면 응답을 쓰지 않은
+    채 handler가 종료될 수 있다.
+  - 각 메서드의 마지막에 미처리 route fallback을 두거나 route 이름과 handler
+    callable을 구조적으로 연결해 등록 누락을 테스트에서 확인한다.
+  - 완료 기준: 라우터가 반환한 이름을 handler가 처리하지 못하면 보안 헤더가
+    포함된 500 또는 501 응답을 즉시 반환하고, 모든 등록 route가 정확히 하나의
+    handler에 연결됐음을 단위 테스트로 고정해야 한다.
 - [x] `ARCH-004` `translate_project`, `import_project_glossary`,
   `_inspect_pipeline_status` 등 대형 함수를 책임별로 분리한다.
   - [x] `_inspect_pipeline_status`를 원문, 용어, 번역 실행, 번역 검수 상태
@@ -272,6 +343,20 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     `from_environment`와 공통 재시도 실행을 담당한다.
   - 검증: 세 provider의 공통 환경 생성·누락 키 오류·timeout 설정 회귀 테스트와
     공통 기반 및 세 provider의 mypy 검사를 통과한다.
+- [ ] `ARCH-006` 상태 판정·I/O·provider 호출이 다시 섞인 대형 use case를
+  작은 단계로 분리한다.
+  - AST 기준 현재 `src`에는 80줄 이상 함수가 30개 있지만 줄 수 자체를
+    일괄 축소 목표로 삼지 않는다. 선언형 CLI parser와 단순 dispatch는
+    복잡도·변경 위험을 따로 판단한다.
+  - 우선 범위는 `translate_project`, `extract_project_pdf`,
+    `ocr_project_images`, `save_project_source_review`,
+    `retry_failed_translations`로 제한한다. `build_parser`와 dashboard
+    `do_*`는 각각 CLI 구성과 `ROUTE-001` 범위에서 다룬다.
+  - 입력 준비, cache/checkpoint 복원, 외부 호출, 결과 검증과 최종 저장을
+    독립 helper로 분리하되 진입 함수는 use case 순서와 조기 반환만 조정한다.
+  - 완료 기준: 우선 범위의 각 진입 함수가 120줄 이하이고, 추출한 단계별
+    helper에 성공·부분 실패·재개·stale 회귀 테스트가 있어야 한다. 줄 수를
+    맞추기 위한 의미 없는 wrapper 분리는 허용하지 않는다.
 - [x] `API-001` 결과 객체의 `ok` 의미를 통일하거나 상수 필드를 제거한다.
   - 성공하거나 예외를 던지는 결과 객체는 상수 `ok`를 노출하지 않는다.
   - 일부 실패나 QA 불합격처럼 정상 반환 안에 실제 결과 차이가 있는 객체만
@@ -285,6 +370,17 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     상수 시간 비교한다.
   - 검증: 네 HTTP handler와 source asset 인증이 모두 `compare_digest`를
     호출하는 전용 회귀 테스트를 통과한다.
+- [ ] `SECURITY-002` 공통 HTTP handler의 기본 오류 응답에도 보안 헤더를
+  적용하고 서버 버전 노출을 제거한다.
+  - `HEAD`, `OPTIONS`와 그 밖의 미지원 메서드는
+    `BaseHTTPRequestHandler`의 기본 501 응답을 사용해 공통 CSP·no-store
+    헤더가 빠지고 `Server` 헤더에 Python 버전이 포함된다.
+  - 공통 handler에서 미지원 메서드를 명시적 405로 처리하고, 기본 오류 경로도
+    `_send_standard_headers()`를 통과하게 한다. 서버 식별자는 제품명만
+    사용하고 Python 런타임 버전은 보내지 않는다.
+  - 완료 기준: 네 localhost 서버의 `HEAD`, `OPTIONS`와 임의 미지원 메서드
+    응답에 공통 보안 헤더가 있고, 응답 헤더 어디에도 Python 버전이 없어야
+    한다. 정상 GET·POST 응답과 source의 Range 요청은 기존 계약을 유지한다.
 - [x] `QUALITY-001` ruff를 작은 규칙 집합부터 도입하고 포맷 변경은 별도 커밋으로
   분리한다.
   - 오류 가능성이 높은 `E4`, `E7`, `E9`, `F`만 `src`와 `tests`에 적용하고,
@@ -314,6 +410,39 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     잘못된 입력의 구체적인 실패 조건까지 고정해야 한다.
   - 검증: 전용 단위 테스트 21개를 추가해 전체 269개 테스트, mypy 48개 파일과
     ruff 91개 Python 파일 검사를 통과했다.
+- [ ] `QUALITY-004` mypy의 모듈 경계 검사를 활성화한다.
+  - 현재 `follow_imports = "skip"`을 `normal`로 바꾸면 48개 대상에서 3개
+    오류가 확인된다. `gemini_common.py`의 `PathLike` 경계와 layout·OCR
+    provider의 `contents` 타입을 실제 SDK 계약에 맞게 정리한다.
+  - 오류가 없는 파일부터 편입하는 장기 계획 대신 현재 확인된 3개 오류를
+    한 묶음에서 수정한 뒤 설정을 `normal`로 전환한다.
+  - 완료 기준: `follow_imports = "normal"` 상태에서 CI의 기존 48개 파일이
+    mypy 0 오류이고 unittest·ruff도 통과해야 한다.
+- [ ] `ERROR-003` 예외 문구 부분 검색에 의존하는 오류 판정을 도메인별
+  안정적 코드로 교체한다.
+  - 대상은 `error_response.py`의 detail 추론,
+    `dashboard_job_service.py`의 provider 분류,
+    `translation_retry_job_service.py`와 세 review server의 충돌·validation
+    판정이다.
+  - API 키 null byte, Windows 예약 이름과 OCR `[ILLEGIBLE]`처럼 사용자
+    입력·본문을 검증하는 정상 문자열 검사는 범위에 포함하지 않는다.
+  - `ERROR-004`와 `ERROR-005`에서 새 예외 코드를 먼저 도입하고 이후
+    source·glossary·translation·review 순서로 기존 fallback을 축소한다.
+  - 완료 기준: 예외 문구 부분 검색이 오류 코드, HTTP 상태 또는 사용자 메시지를
+    결정하는 지점이 0개이고, 같은 예외 타입·code가 CLI와 HTTP에서 같은
+    행동 안내를 만들어야 한다.
+- [ ] `DOMAIN-002` 번역 내용 검증 문제가 있는 `TranslationSegment`를
+  `flagged` 상태로 기록한다.
+  - `TRANSLATION_STATUSES`에는 `flagged`가 있지만 현재 생성 코드는 모든
+    segment를 `translated`로 저장하고 문제 block ID는 실행 state의 개수로만
+    남긴다. 이 상태는 최초 스키마부터 존재했으므로 새 회귀가 아니라 미완성
+    도메인 계약이다.
+  - `_build_translation_segments()`에서 숫자·token·용어 등 내용 검증 오류가
+    있는 block은 `flagged`, 나머지는 `translated`로 저장하고 resume 때도
+    같은 검증 결과를 재현한다.
+  - 완료 기준: `translation.jsonl`만 읽어도 문제 block을 식별할 수 있고,
+    flagged 결과도 현재처럼 번역 검수로 넘어가 사람이 수정할 수 있어야 한다.
+    QA 통과와 최종 승인 뒤의 `approved_translation.jsonl` 계약은 변경하지 않는다.
 - [x] `REPO-001` 테스트 샘플을 저장소 최상위에서 `docs/samples/` 또는
   `tests/fixtures/`로 옮긴다.
   - 수동 대시보드 확인용 PDF 1개와 이미지 2개를 `docs/samples/`로 옮기고
@@ -323,12 +452,14 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     형식·페이지 수·해시가 유지되어야 한다.
   - 검증: PNG 2개의 1800×1140 크기와 PDF의 2페이지 구성·이동 전후 SHA-256
     일치를 확인했고, 전체 269개 테스트와 mypy·ruff 검사를 통과했다.
-- [ ] `REPO-002` 배포·공개 범위를 결정한 뒤 LICENSE를 추가한다.
+- [~] `REPO-002` 배포·공개 범위를 결정한 뒤 LICENSE를 추가한다.
+  - 현재는 LICENSE를 추가하지 않고 보류한다.
+  - 배포 정책, 라이선스 종류와 저작권자 표기를 결정한 뒤 다시 진행한다.
 
 ## 제품 기능 후속 항목
 
-안정성 개선과 별도로 관리하는 사용자 기능입니다. P0 완료 뒤 현재 제품 흐름과
-함께 우선순위를 다시 결정합니다.
+안정성 개선과 별도로 관리하는 사용자 기능입니다. 아래의 다음 구현 계획을
+마친 뒤 현재 제품 흐름과 함께 우선순위를 다시 결정합니다.
 
 - [ ] `FEATURE-001` AI 설정 연결 테스트
   - 실제 Gemini 최소 호출과 비용 발생 가능성을 명시한다.
@@ -336,19 +467,23 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
 - [ ] `FEATURE-002` 원문 검수 선택 영역 OCR 재인식과 입력창 자동 채움
 - [ ] `FEATURE-003` 프로젝트 내보내기·가져오기 범위 결정 및 구현
 
-## 구현 묶음
+## 다음 구현 계획
 
+완료된 작업 순서는 각 항목의 상태와 검증 기록으로 보존합니다. 앞으로의 작업은
 서로 연관된 항목을 다음 순서로 나눠 커밋합니다.
 
-1. `SAFE-001`, `CONC-001`
-2. `STAGE-001`, `INPUT-001`
-3. `AI-001`, `AI-002`, `AI-003`, `ERROR-001`
-4. `OCR-001`, `IO-001`, `CACHE-001`
-5. `ERROR-002`, `JOB-001`, `ENV-001`, `ENV-002`, `HASH-001`
-6. `REVIEW-001`
-7. `PERF-001`, `PERF-002`, `PERF-003` 실측 뒤 범위를 확정한 `IO-002`
-8. `ARCH-005`를 포함한 P3 구조 개선과 개발 도구
-9. 제품 기능 후속 항목
+1. `ERROR-004`, `ERROR-005`: background job 오류의 안전성과 행동 안내 보존
+2. `IO-003`: directory fsync 미지원 환경의 쓰기 결과 판정
+3. `SECURITY-002`, `ROUTE-001`: 공통 HTTP 기본 응답과 route 누락 방어
+4. `DOMAIN-002`: 검수 필요한 번역 segment를 `flagged`로 기록
+5. `QUALITY-004`: 확인된 3개 타입 오류 수정과 `follow_imports = "normal"` 전환
+6. `ERROR-003`: source·glossary·translation·review 순서로 문구 추론 제거
+7. `ARCH-006`: 선택한 use case를 각각 독립 커밋으로 분리
+8. `DOMAIN-001`: 하이픈 결합 경고의 검수 화면 표시 방법 확정과 구현
+9. 제품 기능 후속 항목의 우선순위 결정
+
+`UPLOAD-001`은 실제 대용량 파일의 메모리 사용량을 측정하기 전까지, `REPO-002`는
+배포 정책과 라이선스를 결정하기 전까지 구현 순서에 넣지 않습니다.
 
 각 묶음은 관련 회귀 테스트, 전체 테스트, 필요한 경우 Orca 브라우저 검증을
 통과해야 완료로 표시합니다.

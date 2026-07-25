@@ -45,6 +45,7 @@ class TranslationReviewHttpServer(LocalHttpServer):
         *,
         project: str | Path,
         workspace_root: str | Path,
+        settings_root: str | Path | None = None,
         return_url: str | None = None,
         retry_runner: TranslationRetryJobRunner | None = None,
     ) -> None:
@@ -58,6 +59,7 @@ class TranslationReviewHttpServer(LocalHttpServer):
         self.retry_jobs = TranslationRetryJobManager(
             project=project,
             workspace_root=workspace_root,
+            settings_root=settings_root,
             runner=retry_runner,
         )
 
@@ -220,6 +222,7 @@ def create_translation_review_server(
     *,
     project: str | Path,
     workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
     port: int = 0,
     return_url: str | None = None,
     retry_runner: TranslationRetryJobRunner | None = None,
@@ -234,6 +237,7 @@ def create_translation_review_server(
         _TranslationReviewHandler,
         project=project,
         workspace_root=workspace_root,
+        settings_root=settings_root,
         return_url=return_url,
         retry_runner=retry_runner,
     )
@@ -243,12 +247,14 @@ def serve_translation_review(
     *,
     project: str | Path,
     workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
     port: int = 0,
     open_browser: bool = True,
 ) -> None:
     server = create_translation_review_server(
         project=project,
         workspace_root=workspace_root,
+        settings_root=settings_root,
         port=port,
     )
     print(f"Translation review: {server.review_url}")

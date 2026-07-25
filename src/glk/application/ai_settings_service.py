@@ -174,7 +174,6 @@ class AiSettingsService:
         model: str,
     ) -> AiSettingsStatus:
         validated_model = self._validate_model(model)
-        values = self._file_values()
         updates = {"GEMINI_MODEL": validated_model}
         if api_key is not None and api_key.strip():
             updates["GEMINI_API_KEY"] = self._validate_api_key(api_key)
@@ -192,11 +191,4 @@ class AiSettingsService:
                 f"Unable to save Gemini settings to {self.env_path}."
             ) from error
 
-        active_file_values = {**values, **updates}
-        if not self._environment_api_key:
-            file_api_key = active_file_values.get("GEMINI_API_KEY", "")
-            if file_api_key:
-                os.environ["GEMINI_API_KEY"] = file_api_key
-        if not self._environment_model:
-            os.environ["GEMINI_MODEL"] = validated_model
         return self.status()

@@ -102,6 +102,15 @@ class DashboardServerTests(unittest.TestCase):
             "source_type": "pdf",
         }
 
+    def test_uses_one_settings_root_for_status_and_background_jobs(
+        self,
+    ) -> None:
+        expected = self.settings_root.resolve()
+
+        self.assertEqual(self.server.settings_root, expected)
+        self.assertEqual(self.server.ai_settings.settings_root, expected)
+        self.assertEqual(self.server.job_manager.settings_root, expected)
+
     def _run_glossary_job(
         self,
         project_id: str,

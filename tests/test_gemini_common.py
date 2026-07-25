@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
+import os
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -199,32 +202,73 @@ class GeminiCommonPolicyTests(unittest.TestCase):
             with self.subTest(provider=provider_type.__name__):
                 with (
                     patch(
-                        "glk.infrastructure.gemini_common.load_gemini_environment"
-                    ) as load,
-                    patch.dict(
-                        "os.environ",
-                        {
-                            "GEMINI_API_KEY": " environment-key ",
-                            "GEMINI_MODEL": " environment-model ",
+                        "glk.infrastructure.gemini_common.load_gemini_environment",
+                        return_value={
+                            "GEMINI_API_KEY": "environment-key",
+                            "GEMINI_MODEL": "environment-model",
                         },
-                        clear=True,
-                    ),
+                    ) as load,
                     patch(
                         "glk.infrastructure.gemini_common.genai.Client"
                     ) as client,
                 ):
                     provider = provider_type.from_environment()
 
-                load.assert_called_once_with()
+                load.assert_called_once_with(None)
                 client.assert_called_once()
                 self.assertEqual(provider.model_name, "environment-model")
+
+    def test_provider_reads_api_key_and_model_from_explicit_settings_root(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            settings_root = root / "explicit"
+            fallback_root = root / "environment"
+            settings_root.mkdir()
+            fallback_root.mkdir()
+            (settings_root / ".env").write_text(
+                'GEMINI_API_KEY="custom-root-key"\n'
+                'GEMINI_MODEL="custom-root-model"\n',
+                encoding="utf-8",
+            )
+            (fallback_root / ".env").write_text(
+                'GEMINI_API_KEY="fallback-key"\n'
+                'GEMINI_MODEL="fallback-model"\n',
+                encoding="utf-8",
+            )
+            with (
+                patch.dict(
+                    os.environ,
+                    {"GLK_SETTINGS_ROOT": str(fallback_root)},
+                    clear=True,
+                ),
+                patch(
+                    "glk.infrastructure.gemini_common.genai.Client"
+                ) as client,
+            ):
+                provider = GeminiLayoutProvider.from_environment(
+                    settings_root=settings_root,
+                )
+                environment_after_load = dict(os.environ)
+
+            client.assert_called_once()
+            self.assertEqual(
+                client.call_args.kwargs["api_key"],
+                "custom-root-key",
+            )
+            self.assertEqual(provider.model_name, "custom-root-model")
+            self.assertEqual(
+                environment_after_load,
+                {"GLK_SETTINGS_ROOT": str(fallback_root)},
+            )
 
     def test_shared_environment_factory_rejects_missing_api_key(self) -> None:
         with (
             patch(
-                "glk.infrastructure.gemini_common.load_gemini_environment"
+                "glk.infrastructure.gemini_common.load_gemini_environment",
+                return_value={},
             ),
-            patch.dict("os.environ", {}, clear=True),
         ):
             with self.assertRaisesRegex(
                 GeminiConfigurationError,

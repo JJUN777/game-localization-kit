@@ -171,6 +171,7 @@ def ocr_project_images(
     folder: str | Path | None = None,
     prompt_file: str | Path | None = None,
     workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
     model_name: str | None = None,
     force: bool = False,
     dry_run: bool = False,
@@ -241,7 +242,10 @@ def ocr_project_images(
 
     common_instructions = _read_text(registered_prompt)
     common_prompt_hash = _sha256_text(common_instructions)
-    active_provider = provider or GeminiImageOcrProvider.from_environment(model_name)
+    active_provider = provider or GeminiImageOcrProvider.from_environment(
+        model_name,
+        settings_root=settings_root,
+    )
     individual_dir = paths.ocr_individual
     results_dir = paths.ocr_results
     combined_items: list[tuple[str, str]] = []

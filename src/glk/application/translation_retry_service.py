@@ -85,6 +85,7 @@ def retry_failed_translations(
     *,
     project: str | Path,
     workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
     model_name: str | None = None,
     dry_run: bool = False,
     provider: TranslationProvider | None = None,
@@ -155,7 +156,8 @@ def retry_failed_translations(
     termbase_entries, _ = _load_termbase(location.path)
     project_instructions, _, _ = _resolve_prompt(None, location.path)
     active_provider = provider or GeminiTranslationProvider.from_environment(
-        model_name or _read_translation_model(location.path)
+        model_name or _read_translation_model(location.path),
+        settings_root=settings_root,
     )
 
     translations = {

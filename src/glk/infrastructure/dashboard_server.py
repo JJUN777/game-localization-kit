@@ -117,9 +117,11 @@ class DashboardHttpServer(LocalHttpServer):
     ) -> None:
         super().__init__(server_address, handler_class)
         self.workspace_root = str(workspace_root)
-        self.ai_settings = AiSettingsService(settings_root)
+        self.settings_root = Path(settings_root).expanduser().resolve()
+        self.ai_settings = AiSettingsService(self.settings_root)
         self.job_manager = DashboardJobManager(
             workspace_root,
+            settings_root=self.settings_root,
             runner=source_job_runner,
             glossary_runner=glossary_job_runner,
             translation_runner=translation_job_runner,
@@ -168,6 +170,7 @@ class DashboardHttpServer(LocalHttpServer):
                 review_server = create_translation_review_server(
                     project=location.path,
                     workspace_root=self.workspace_root,
+                    settings_root=self.settings_root,
                     port=0,
                     return_url=self.dashboard_url,
                 )

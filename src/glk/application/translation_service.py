@@ -536,6 +536,7 @@ def _prepare_translation_inputs(
     *,
     project: str | Path,
     workspace_root: str | Path,
+    settings_root: str | Path | None,
     prompt_file: str | Path | None,
     model_name: str | None,
     max_characters: int,
@@ -569,7 +570,10 @@ def _prepare_translation_inputs(
         active_model = provider.model_name
         provider_prompt_version = provider.prompt_version
     else:
-        active_model = resolve_model_name(model_name)
+        active_model = resolve_model_name(
+            model_name,
+            settings_root=settings_root,
+        )
         provider_prompt_version = GeminiTranslationProvider.prompt_version
     input_hash = _translation_input_hash(
         approved_hash=approved_hash,
@@ -1067,6 +1071,7 @@ def translate_project(
     *,
     project: str | Path,
     workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
     prompt_file: str | Path | None = None,
     model_name: str | None = None,
     max_characters: int = 10000,
@@ -1080,6 +1085,7 @@ def translate_project(
     inputs = _prepare_translation_inputs(
         project=project,
         workspace_root=workspace_root,
+        settings_root=settings_root,
         prompt_file=prompt_file,
         model_name=model_name,
         max_characters=max_characters,
@@ -1108,7 +1114,10 @@ def translate_project(
     previous_state = restored.previous_state
     existing_segments = list(restored.existing_segments)
     existing_output_data = restored.existing_output_data
-    active_provider = provider or GeminiTranslationProvider.from_environment(model_name)
+    active_provider = provider or GeminiTranslationProvider.from_environment(
+        model_name,
+        settings_root=settings_root,
+    )
     completed = {
         segment.source_block_id: segment for segment in existing_segments
     }

@@ -100,6 +100,43 @@ class DashboardJobManagerTests(unittest.TestCase):
         self.assertEqual(state["schema_version"], 1)
         manager.close()
 
+    def test_default_source_runner_receives_explicit_settings_root(
+        self,
+    ) -> None:
+        completed = threading.Event()
+        settings_root = self.root / "custom-settings"
+
+        def run_default(
+            project_id: str,
+            workspace_root: str | Path,
+            model: str,
+            progress: object,
+            *,
+            settings_root: str | Path | None = None,
+        ) -> dict[str, object]:
+            self.assertEqual(project_id, "background_job")
+            self.assertEqual(Path(workspace_root), self.workspace_root.resolve())
+            self.assertEqual(settings_root, settings_root_path)
+            self.assertEqual(model, "gemini-test")
+            completed.set()
+            return {"ok": True, "status": "succeeded"}
+
+        settings_root_path = settings_root.resolve()
+        with patch(
+            "glk.application.dashboard_job_service.run_registered_source_pipeline",
+            side_effect=run_default,
+        ):
+            manager = DashboardJobManager(
+                self.workspace_root,
+                settings_root=settings_root,
+            )
+            manager.start_source_job(
+                project_id="background_job",
+                model="gemini-test",
+            )
+            self.assertTrue(completed.wait(timeout=2))
+            manager.close()
+
     def test_rejects_a_second_job_while_one_is_running(self) -> None:
         running = threading.Event()
         release = threading.Event()
@@ -282,6 +319,7 @@ class DashboardJobManagerTests(unittest.TestCase):
     def test_registered_pipeline_prepares_review_after_pdf_acquisition(
         self,
     ) -> None:
+        settings_root = self.root / "custom-settings"
         planned = SimpleNamespace(selected_pages=(1, 2))
         acquisition = SimpleNamespace(
             ok=True,
@@ -313,11 +351,18 @@ class DashboardJobManagerTests(unittest.TestCase):
                 self.workspace_root,
                 "gemini-test",
                 lambda message, current, total: messages.append(message),
+                settings_root=settings_root,
             )
 
         self.assertEqual(result["status"], "succeeded")
         self.assertEqual(result["source_type"], "pdf")
         self.assertEqual(extract.call_count, 2)
+        self.assertTrue(
+            all(
+                call.kwargs["settings_root"] == settings_root
+                for call in extract.call_args_list
+            )
+        )
         self.assertTrue(extract.call_args_list[0].kwargs["dry_run"])
         self.assertEqual(
             extract.call_args_list[1].kwargs["model_name"],
@@ -853,6 +898,7 @@ class DashboardJobManagerTests(unittest.TestCase):
         manager.close()
 
     def test_translation_pipeline_reports_chunk_progress(self) -> None:
+        settings_root = self.root / "custom-settings"
         planned = SimpleNamespace(total_chunks=2)
         translated = SimpleNamespace(
             validation_issue_count=0,
@@ -875,11 +921,18 @@ class DashboardJobManagerTests(unittest.TestCase):
                 lambda message, current, total: progress.append(
                     (message, current, total)
                 ),
+                settings_root=settings_root,
             )
 
         self.assertEqual(result["status"], "succeeded")
         self.assertIsNone(result["qa"])
         self.assertEqual(translate.call_count, 2)
+        self.assertTrue(
+            all(
+                call.kwargs["settings_root"] == settings_root
+                for call in translate.call_args_list
+            )
+        )
         self.assertTrue(translate.call_args_list[0].kwargs["dry_run"])
         self.assertFalse(translate.call_args_list[1].kwargs["resume"])
         self.assertFalse(translate.call_args_list[1].kwargs["force"])

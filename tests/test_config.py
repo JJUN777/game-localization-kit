@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -87,12 +89,49 @@ class SettingsPathTests(unittest.TestCase):
                 "glk.infrastructure.gemini_common.resolve_settings_root",
                 return_value=root,
             ) as resolve,
-            patch("glk.infrastructure.gemini_common.load_dotenv") as load,
+            patch(
+                "glk.infrastructure.gemini_common.dotenv_values",
+                return_value={},
+            ) as load,
         ):
             load_gemini_environment()
 
         resolve.assert_called_once_with(None)
-        load.assert_called_once_with(root / ".env", override=False)
+        load.assert_called_once_with(root / ".env")
+
+    def test_provider_settings_merge_without_mutating_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            (root / ".env").write_text(
+                'GEMINI_API_KEY="file-key"\n'
+                'GEMINI_MODEL="file-model"\n',
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "GEMINI_API_KEY": " shell-key ",
+                    "GEMINI_MODEL": "",
+                },
+                clear=True,
+            ):
+                settings = load_gemini_environment(root)
+                environment_after_load = dict(os.environ)
+
+        self.assertEqual(
+            settings,
+            {
+                "GEMINI_API_KEY": "shell-key",
+                "GEMINI_MODEL": "file-model",
+            },
+        )
+        self.assertEqual(
+            environment_after_load,
+            {
+                "GEMINI_API_KEY": " shell-key ",
+                "GEMINI_MODEL": "",
+            },
+        )
 
 
 if __name__ == "__main__":

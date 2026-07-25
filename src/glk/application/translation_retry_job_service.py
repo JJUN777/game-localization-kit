@@ -15,6 +15,7 @@ from glk.application.translation_retry_service import (
     TranslationRetryResult,
     retry_failed_translations,
 )
+from glk.config import resolve_settings_root
 
 
 ACTIVE_RETRY_JOB_STATUSES = frozenset({"queued", "running"})
@@ -67,10 +68,13 @@ def _run_retry(
     workspace_root: str | Path,
     expected_review_sha256: str,
     progress: RetryProgress,
+    *,
+    settings_root: str | Path | None = None,
 ) -> TranslationRetryResult:
     return retry_failed_translations(
         project=project,
         workspace_root=workspace_root,
+        settings_root=settings_root,
         expected_review_sha256=expected_review_sha256,
         progress=progress,
     )
@@ -107,11 +111,13 @@ class TranslationRetryJobManager:
         *,
         project: str | Path,
         workspace_root: str | Path,
+        settings_root: str | Path | None = None,
         runner: TranslationRetryJobRunner | None = None,
     ) -> None:
         self.project = project
         self.workspace_root = workspace_root
-        self._runner = runner or _run_retry
+        self.settings_root = resolve_settings_root(settings_root)
+        self._runner = runner
         self._lock = threading.RLock()
         self._job: TranslationRetryJob | None = None
         self._closed = False
@@ -194,12 +200,21 @@ class TranslationRetryJobManager:
         result_payload: dict[str, Any] | None
         error: str | None
         try:
-            result = self._runner(
-                self.project,
-                self.workspace_root,
-                expected_review_sha256,
-                report,
-            )
+            if self._runner is not None:
+                result = self._runner(
+                    self.project,
+                    self.workspace_root,
+                    expected_review_sha256,
+                    report,
+                )
+            else:
+                result = _run_retry(
+                    self.project,
+                    self.workspace_root,
+                    expected_review_sha256,
+                    report,
+                    settings_root=self.settings_root,
+                )
         except Exception as caught:
             result_payload = None
             status = "failed"

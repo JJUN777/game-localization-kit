@@ -52,8 +52,8 @@ class AiSettingsServiceTests(unittest.TestCase):
         self.assertEqual(status.api_key_source, "env_file")
         self.assertEqual(status.model, "gemini-2.5-pro")
         self.assertNotIn("test-secret-key", repr(status.to_dict()))
-        self.assertEqual(os.environ["GEMINI_API_KEY"], "test-secret-key")
-        self.assertEqual(os.environ["GEMINI_MODEL"], "gemini-2.5-pro")
+        self.assertEqual(os.environ["GEMINI_API_KEY"], "")
+        self.assertEqual(os.environ["GEMINI_MODEL"], "")
         if os.name != "nt":
             mode = stat.S_IMODE(env_path.stat().st_mode)
             self.assertEqual(mode, 0o600)

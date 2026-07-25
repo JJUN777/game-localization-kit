@@ -168,6 +168,7 @@ def extract_project_pdf(
     file: str | Path | None = None,
     pages: str | None = None,
     workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
     model_name: str | None = None,
     scale: float = 1.5,
     force: bool = False,
@@ -204,7 +205,10 @@ def extract_project_pdf(
             dry_run=True,
         )
 
-    active_provider = provider or GeminiLayoutProvider.from_environment(model_name)
+    active_provider = provider or GeminiLayoutProvider.from_environment(
+        model_name,
+        settings_root=settings_root,
+    )
     try:
         registered = register_pdf_source(
             location,

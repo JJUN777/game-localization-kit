@@ -10,7 +10,7 @@ import random
 import time
 from typing import Callable, TypeVar
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 from google import genai
 from google.genai import errors, types
 
@@ -22,6 +22,7 @@ DEFAULT_REQUEST_TIMEOUT_MS = 180_000
 DEFAULT_RATE_LIMIT_DELAY_SECONDS = 60.0
 MAX_RETRY_DELAY_SECONDS = 300.0
 _RETRYABLE_CLIENT_STATUS_CODES = frozenset({408, 429})
+_GEMINI_SETTING_NAMES = ("GEMINI_API_KEY", "GEMINI_MODEL")
 
 ResultT = TypeVar("ResultT")
 ProviderT = TypeVar("ProviderT", bound="GeminiProviderBase")
@@ -33,27 +34,40 @@ class GeminiConfigurationError(ValueError):
 
 def load_gemini_environment(
     settings_root: str | os.PathLike[str] | None = None,
-) -> None:
-    """Load Gemini settings from the same stable root used by the dashboard."""
-    load_dotenv(
-        resolve_settings_root(settings_root) / ".env",
-        override=False,
-    )
+) -> dict[str, str]:
+    """Read effective Gemini settings without mutating process environment."""
+    parsed = dotenv_values(resolve_settings_root(settings_root) / ".env")
+    effective: dict[str, str] = {}
+    for name in _GEMINI_SETTING_NAMES:
+        environment_value = os.getenv(name, "").strip()
+        file_value = parsed.get(name)
+        if environment_value:
+            effective[name] = environment_value
+        elif isinstance(file_value, str) and file_value.strip():
+            effective[name] = file_value.strip()
+    return effective
 
 
-def _configured_model_name(model_name: str | None) -> str:
+def _configured_model_name(
+    model_name: str | None,
+    environment: dict[str, str],
+) -> str:
     if model_name and model_name.strip():
         return model_name.strip()
-    environment_model = os.getenv("GEMINI_MODEL", "").strip()
+    environment_model = environment.get("GEMINI_MODEL", "").strip()
     if environment_model:
         return environment_model
     return DEFAULT_MODEL
 
 
-def resolve_model_name(model_name: str | None = None) -> str:
+def resolve_model_name(
+    model_name: str | None = None,
+    *,
+    settings_root: str | os.PathLike[str] | None = None,
+) -> str:
     """Resolve an explicit, configured, or default Gemini model name."""
-    load_gemini_environment()
-    return _configured_model_name(model_name)
+    environment = load_gemini_environment(settings_root)
+    return _configured_model_name(model_name, environment)
 
 
 def gemini_http_options(
@@ -226,17 +240,19 @@ class GeminiProviderBase:
     def from_environment(
         cls: type[ProviderT],
         model_name: str | None = None,
+        *,
+        settings_root: str | os.PathLike[str] | None = None,
     ) -> ProviderT:
         """Create one provider from the shared settings location."""
-        load_gemini_environment()
-        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        environment = load_gemini_environment(settings_root)
+        api_key = environment.get("GEMINI_API_KEY", "").strip()
         if not api_key:
             raise GeminiConfigurationError(
                 "GEMINI_API_KEY is not set. Add it to .env or export it in the shell."
             )
         return cls(
             api_key=api_key,
-            model_name=_configured_model_name(model_name),
+            model_name=_configured_model_name(model_name, environment),
         )
 
     def run_request(self, operation: Callable[[], ResultT]) -> ResultT:

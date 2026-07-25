@@ -445,6 +445,21 @@ class TranslationReviewServerTests(unittest.TestCase):
                 return_url="https://attacker.example/",
             )
 
+    def test_passes_settings_root_to_retry_job_manager(self) -> None:
+        settings_root = Path(self.temporary_directory.name) / "settings"
+        server = create_translation_review_server(
+            project="translation_project",
+            workspace_root=self.workspace_root,
+            settings_root=settings_root,
+        )
+        try:
+            self.assertEqual(
+                server.retry_jobs.settings_root,
+                settings_root.resolve(),
+            )
+        finally:
+            server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

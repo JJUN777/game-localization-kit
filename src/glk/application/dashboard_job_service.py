@@ -36,6 +36,7 @@ from glk.application.translation_review_service import (
     run_project_translation_qa,
 )
 from glk.application.translation_service import translate_project
+from glk.config import resolve_settings_root
 from glk.domain.workspace import (
     IMAGE_SOURCE_ROOT,
     WorkspacePaths,
@@ -449,6 +450,8 @@ def run_registered_source_pipeline(
     workspace_root: str | Path,
     model: str,
     progress: JobProgress,
+    *,
+    settings_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Acquire a registered source and prepare local review artifacts."""
     source_type = _registered_source_type(project_id, workspace_root)
@@ -458,6 +461,7 @@ def run_registered_source_pipeline(
         pdf_plan = extract_project_pdf(
             project=project_id,
             workspace_root=workspace_root,
+            settings_root=settings_root,
             model_name=model,
             dry_run=True,
         )
@@ -480,6 +484,7 @@ def run_registered_source_pipeline(
         acquisition = extract_project_pdf(
             project=project_id,
             workspace_root=workspace_root,
+            settings_root=settings_root,
             model_name=model,
             progress=report_pdf,
         )
@@ -487,6 +492,7 @@ def run_registered_source_pipeline(
         image_plan = ocr_project_images(
             project=project_id,
             workspace_root=workspace_root,
+            settings_root=settings_root,
             model_name=model,
             dry_run=True,
         )
@@ -501,6 +507,7 @@ def run_registered_source_pipeline(
         acquisition = ocr_project_images(
             project=project_id,
             workspace_root=workspace_root,
+            settings_root=settings_root,
             model_name=model,
             progress=report_image,
         )
@@ -587,12 +594,15 @@ def run_translation_pipeline(
     resume: bool,
     force: bool,
     progress: JobProgress,
+    *,
+    settings_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Translate approved source blocks with the current termbase."""
     progress("승인 원문과 용어집을 확인하고 있습니다.", 0, None)
     planned = translate_project(
         project=project_id,
         workspace_root=workspace_root,
+        settings_root=settings_root,
         model_name=model,
         resume=resume,
         force=force,
@@ -620,6 +630,7 @@ def run_translation_pipeline(
     result = translate_project(
         project=project_id,
         workspace_root=workspace_root,
+        settings_root=settings_root,
         model_name=model,
         resume=resume,
         force=force,
@@ -786,16 +797,16 @@ class DashboardJobManager:
         self,
         workspace_root: str | Path,
         *,
+        settings_root: str | Path | None = None,
         runner: SourceJobRunner | None = None,
         glossary_runner: GlossaryJobRunner | None = None,
         translation_runner: TranslationJobRunner | None = None,
     ) -> None:
         self.workspace_root = Path(workspace_root).expanduser().resolve()
-        self._source_runner = runner or run_registered_source_pipeline
+        self.settings_root = resolve_settings_root(settings_root)
+        self._source_runner = runner
         self._glossary_runner = glossary_runner or run_glossary_pipeline
-        self._translation_runner = (
-            translation_runner or run_translation_pipeline
-        )
+        self._translation_runner = translation_runner
         self._lock = threading.RLock()
         self._source_jobs = _JobStore[DashboardSourceJob](
             self.workspace_root,
@@ -1234,11 +1245,19 @@ class DashboardJobManager:
             job: DashboardSourceJob,
             report: JobProgress,
         ) -> dict[str, Any]:
-            return self._source_runner(
+            if self._source_runner is not None:
+                return self._source_runner(
+                    project_id,
+                    self.workspace_root,
+                    job.model,
+                    report,
+                )
+            return run_registered_source_pipeline(
                 project_id,
                 self.workspace_root,
                 job.model,
                 report,
+                settings_root=self.settings_root,
             )
 
         def result_error(
@@ -1336,13 +1355,23 @@ class DashboardJobManager:
             job: DashboardTranslationJob,
             report: JobProgress,
         ) -> dict[str, Any]:
-            return self._translation_runner(
+            if self._translation_runner is not None:
+                return self._translation_runner(
+                    project_id,
+                    self.workspace_root,
+                    job.model,
+                    job.resume,
+                    job.force,
+                    report,
+                )
+            return run_translation_pipeline(
                 project_id,
                 self.workspace_root,
                 job.model,
                 job.resume,
                 job.force,
                 report,
+                settings_root=self.settings_root,
             )
 
         def result_error(
