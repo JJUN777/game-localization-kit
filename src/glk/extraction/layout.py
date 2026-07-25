@@ -65,6 +65,12 @@ class LayoutProvider(Protocol):
 
 def parse_page_selection(value: str | None, page_count: int) -> list[int]:
     """Parse a 1-based page expression such as '1,3-5'."""
+    if (
+        not isinstance(page_count, int)
+        or isinstance(page_count, bool)
+        or page_count < 1
+    ):
+        raise ValueError("Document page count must be a positive integer.")
     if not value:
         return list(range(page_count))
     selected: set[int] = set()
@@ -77,14 +83,20 @@ def parse_page_selection(value: str | None, page_count: int) -> list[int]:
             start, end = int(start_raw), int(end_raw)
             if start > end:
                 raise ValueError(f"Invalid page range: {item}")
+            if start < 1 or end > page_count:
+                raise ValueError(
+                    f"Page range out of range: {item} "
+                    f"(document has {page_count} pages)"
+                )
             selected.update(range(start - 1, end))
         else:
-            selected.add(int(item) - 1)
-    invalid = sorted(page + 1 for page in selected if page < 0 or page >= page_count)
-    if invalid:
-        raise ValueError(
-            f"Page numbers out of range: {invalid} (document has {page_count} pages)"
-        )
+            page = int(item)
+            if page < 1 or page > page_count:
+                raise ValueError(
+                    f"Page number out of range: {page} "
+                    f"(document has {page_count} pages)"
+                )
+            selected.add(page - 1)
     if not selected:
         raise ValueError("Page selection is empty.")
     return sorted(selected)

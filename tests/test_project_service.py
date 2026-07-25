@@ -14,6 +14,7 @@ from glk.application.project_service import (
     PROJECT_INPUT_DIRECTORIES,
     SOURCE_QA_VERSION,
     ProjectExistsError,
+    _project_stage,
     create_project,
     inspect_project,
     list_projects,
@@ -60,6 +61,22 @@ class ProjectManifestTests(unittest.TestCase):
 
 
 class ProjectServiceTests(unittest.TestCase):
+    def test_partial_translation_stage_precedes_stale_review(self) -> None:
+        pipeline = {
+            "final_translation_approved": False,
+            "translation_review": "stale",
+            "translation_status": "partial",
+            "termbase_status": "current",
+            "glossary_status": "current",
+            "final_source_approved": True,
+            "review_source_ready": True,
+            "source_acquired": True,
+        }
+
+        self.assertEqual(_project_stage(pipeline), "translation_partial")
+        pipeline["translation_review"] = "qa_failed"
+        self.assertEqual(_project_stage(pipeline), "translation_partial")
+
     def test_create_and_load_project(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory) / "workspaces"

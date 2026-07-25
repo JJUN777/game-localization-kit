@@ -282,12 +282,12 @@ def inspect_project(
 def _project_stage(pipeline: dict[str, Any]) -> str:
     if pipeline["final_translation_approved"]:
         return "completed"
+    if pipeline["translation_status"] == "partial":
+        return "translation_partial"
     if pipeline["translation_review"] == "qa_failed":
         return "translation_qa_failed"
     if pipeline["translation_review"] in {"pending", "stale", "qa_passed"}:
         return "translation_review"
-    if pipeline["translation_status"] == "partial":
-        return "translation_partial"
     if pipeline["translation_status"] == "current":
         return "translation_review"
     if pipeline["termbase_status"] == "current":
