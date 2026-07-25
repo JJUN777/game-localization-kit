@@ -137,7 +137,7 @@ def _block_id(
 def _union_pdf_bbox(
     fragment_ids: list[str],
     fragments: dict[str, dict[str, Any]],
-    page_size: list[Any],
+    page_size: Any,
 ) -> tuple[float, float, float, float]:
     if (
         not isinstance(page_size, list)
@@ -175,7 +175,12 @@ def _union_pdf_bbox(
         max(0.0, min(1000.0, raw[2] / width * 1000)),
         max(0.0, min(1000.0, raw[3] / height * 1000)),
     )
-    return tuple(round(value, 2) for value in normalized)
+    return (
+        round(normalized[0], 2),
+        round(normalized[1], 2),
+        round(normalized[2], 2),
+        round(normalized[3], 2),
+    )
 
 
 def _validate_complete_run(metadata: dict[str, Any], path: Path) -> None:
@@ -213,11 +218,13 @@ def _build_pdf_blocks(
         fragment_values = fragment_data.get("fragments")
         if not isinstance(reconstructed, list) or not isinstance(fragment_values, list):
             raise SegmentationError(f"Invalid PDF layout data for page {page}.")
-        fragments = {
-            value.get("id"): value
-            for value in fragment_values
-            if isinstance(value, dict) and isinstance(value.get("id"), str)
-        }
+        fragments: dict[str, dict[str, Any]] = {}
+        for value in fragment_values:
+            if not isinstance(value, dict):
+                continue
+            fragment_id = value.get("id")
+            if isinstance(fragment_id, str):
+                fragments[fragment_id] = value
         for block_order, value in enumerate(reconstructed, start=1):
             if not isinstance(value, dict):
                 raise SegmentationError(f"Invalid reconstructed block on page {page}.")
@@ -281,7 +288,12 @@ def _normalized_image_bbox(value: Any) -> tuple[float, float, float, float]:
         or not all(isinstance(item, (int, float)) for item in value)
     ):
         raise SegmentationError("Image OCR block has an invalid bbox.")
-    return tuple(round(float(item), 2) for item in value)
+    return (
+        round(float(value[0]), 2),
+        round(float(value[1]), 2),
+        round(float(value[2]), 2),
+        round(float(value[3]), 2),
+    )
 
 
 def _build_image_blocks(project_path: Path) -> tuple[list[SourceBlock], list[Path]]:

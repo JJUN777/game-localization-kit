@@ -12,12 +12,12 @@ from uuid import uuid4
 
 from glk.application._cache import read_json_object
 from glk.application._io import write_bytes_atomic, write_json_atomic
-from glk.application.extraction_service import extract_project_pdf
+from glk.application.extraction_service import ExtractionResult, extract_project_pdf
 from glk.application.glossary_service import (
     GlossaryBuildError,
     build_project_glossary_candidates,
 )
-from glk.application.image_ocr_service import ocr_project_images
+from glk.application.image_ocr_service import ImageOcrRunResult, ocr_project_images
 from glk.application.project_service import (
     inspect_project,
     load_workspace_project_id,
@@ -453,14 +453,15 @@ def run_registered_source_pipeline(
     """Acquire a registered source and prepare local review artifacts."""
     source_type = _registered_source_type(project_id, workspace_root)
     progress("등록된 원본을 확인하고 있습니다.", 0, None)
+    acquisition: ExtractionResult | ImageOcrRunResult
     if source_type == "pdf":
-        planned = extract_project_pdf(
+        pdf_plan = extract_project_pdf(
             project=project_id,
             workspace_root=workspace_root,
             model_name=model,
             dry_run=True,
         )
-        selected_pages = list(planned.selected_pages)
+        selected_pages = list(pdf_plan.selected_pages)
         total = len(selected_pages)
         page_positions = {
             page: index
@@ -483,13 +484,13 @@ def run_registered_source_pipeline(
             progress=report_pdf,
         )
     else:
-        planned = ocr_project_images(
+        image_plan = ocr_project_images(
             project=project_id,
             workspace_root=workspace_root,
             model_name=model,
             dry_run=True,
         )
-        total = len(planned.selected_images)
+        total = len(image_plan.selected_images)
 
         def report_image(message: str) -> None:
             match = _IMAGE_PROGRESS.match(message)

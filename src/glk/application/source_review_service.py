@@ -543,7 +543,12 @@ def save_project_source_review(
                     block_type="paragraph",
                     raw_text=raw_text,
                     corrected_text=None,
-                    bbox=tuple(float(item) for item in bbox),
+                    bbox=(
+                        float(bbox[0]),
+                        float(bbox[1]),
+                        float(bbox[2]),
+                        float(bbox[3]),
+                    ),
                     legibility="clear",
                     status="corrected",
                     warnings=(),

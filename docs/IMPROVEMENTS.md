@@ -294,12 +294,15 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     모든 lint 오류를 제거해야 한다.
   - 검증: 미사용 import 3건을 제거한 뒤 Python 88개 파일의 ruff 검사,
     전체 248개 테스트와 mypy 26개 파일 검사를 통과했다.
-- [ ] `QUALITY-002` mypy 대상을 도메인 계층부터 점진적으로 확대한다.
-  - 현재 설정된 26개 파일은 통과한다.
-  - application/domain/extraction 35개 파일로 확대하면 7개 파일에서
-    22개 오류가 확인되므로 한 번에 strict로 전환하지 않는다.
-  - 오류가 0개인 파일부터 검사 대상에 편입하고, 나머지는 파일 단위로 오류를
-    수정한 뒤 해당 파일을 검사 대상에 추가한다.
+- [x] `QUALITY-002` mypy 대상을 도메인 계층부터 점진적으로 확대한다.
+  - application/domain/extraction 전체 37개 파일을 디렉터리 단위로 편입해
+    앞으로 추가되는 파일도 자동 검사한다.
+  - Optional 상태 축소, 고정 길이 bbox tuple, PDF fragment 타입과 PDF·이미지
+    결과 union을 명시해 6개 파일의 15개 오류를 제거했다.
+  - 완료 기준: 기존 infrastructure 검사와 세 디렉터리를 함께 검사하고,
+    명시한 전체 범위에서 mypy 오류가 없어야 한다.
+  - 검증: 전체 48개 파일의 mypy 검사, 88개 Python 파일의 ruff 검사와
+    전체 248개 테스트를 통과했다.
 - [ ] `QUALITY-003` 결정적 규칙부터 전용 단위 테스트를 보강한다.
   - `domain/translation_qa.py`
   - `extraction/layout.py`

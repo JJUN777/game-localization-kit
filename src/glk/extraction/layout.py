@@ -277,6 +277,7 @@ def merge_paragraph_continuations(
         if not should_merge:
             merged.append({**block})
             continue
+        assert previous is not None
         previous["fragment_ids"] = [
             *previous["fragment_ids"],
             *block["fragment_ids"],

@@ -989,6 +989,7 @@ def _finalize_translation_run(
     draft_hash = _sha256_bytes(review_data)
     _write_bytes_atomic(paths.translation_draft, review_data)
     review_created = not paths.translation_review.is_file()
+    review_base_draft_hash: str | None
     if review_created:
         _write_bytes_atomic(paths.translation_review, review_data)
         review_status = "current"
@@ -1000,7 +1001,9 @@ def _finalize_translation_run(
             else None
         )
         review_status = "current" if previous_base == draft_hash else "stale"
-        review_base_draft_hash = previous_base
+        review_base_draft_hash = (
+            previous_base if isinstance(previous_base, str) else None
+        )
     _write_json_atomic(
         paths.translation_state,
         {

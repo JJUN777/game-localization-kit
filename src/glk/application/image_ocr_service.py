@@ -195,8 +195,8 @@ def ocr_project_images(
         folder_prompt = source_folder / "ocr_prompt.txt"
         requested_prompt = folder_prompt if folder_prompt.is_file() else None
     if requested_prompt is None:
-        registered_prompt = paths.input_ocr_prompt
-        requested_prompt = registered_prompt if registered_prompt.is_file() else None
+        saved_prompt = paths.input_ocr_prompt
+        requested_prompt = saved_prompt if saved_prompt.is_file() else None
 
     if dry_run:
         return ImageOcrRunResult(
