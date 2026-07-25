@@ -4,7 +4,9 @@
 
 **대상 독자**: GLK 코드를 수정하거나 확장하려는 개발자
 
-일반 사용자는 이 문서를 읽을 필요가 없습니다. 사용 순서는 [README](../README.md), 세부 실행 규칙은 [전체 작업 흐름](WORKFLOW.md)을 참고합니다.
+일반 사용자는 이 문서를 읽을 필요가 없습니다. 시작 방법은
+[README](../README.md), 화면 사용법은 [GUI 사용 가이드](GUI.md), CLI와 파일
+규칙은 [전체 작업 흐름](WORKFLOW.md)을 참고합니다.
 
 ---
 
@@ -16,7 +18,7 @@
 4. 자동 생성 기준본과 사람 작업본을 분리하고 사람의 편집을 자동으로 덮어쓰지 않는다.
 5. 모든 후속 데이터는 안정적인 block ID로 원본 파일·페이지·좌표까지 역추적할 수 있어야 한다.
 6. 최종 승인 파일과 저장된 hash가 모두 일치할 때만 후속 단계를 실행한다.
-7. CLI와 향후 GUI는 같은 application service를 사용한다.
+7. CLI와 로컬 웹 GUI는 같은 application service를 사용한다.
 8. Windows와 macOS의 최소·최신 지원 Python 조합을 CI에서 계속 검증한다.
 
 ---
@@ -47,7 +49,13 @@ CLI와 localhost 검수 서버에서 사용자에게 반환하는 실패 응답�
 
 원문·용어·번역 검수 화면에 전달하는 document 구조는 `application/review_types.py`의 `TypedDict` 계약으로 정의합니다. 검증 전 외부 JSON은 계속 `Any`로 받고 service에서 검증한 뒤 typed document로 반환합니다. 이 타입은 IDE와 정적 분석을 위한 것이며 런타임 데이터 검증은 기존 service 규칙이 담당합니다.
 
-`.github/workflows/ci.yml`은 push, pull request, 수동 실행 때 Windows와 macOS에서 Python 3.10·3.14 조합을 검사합니다. 각 작업은 패키지 설치, 의존성 무결성, Python 구문, 전체 unittest, `glk` entry point를 확인하며 Gemini API 키나 실제 모델 호출은 사용하지 않습니다. 별도 typecheck 작업은 Python 3.10을 기준으로 review API 경계 파일을 `mypy`로 검사하며, 적용 범위는 payload가 복잡해지는 service부터 점진적으로 넓힙니다.
+`.github/workflows/ci.yml`은 push, pull request, 수동 실행 때 Windows와
+macOS에서 Python 3.10·3.14 조합을 검사합니다. 각 작업은 패키지 설치, 의존성
+무결성, Python 구문, 전체 unittest와 `glk` entry point를 확인하며 Gemini API
+키나 실제 모델 호출은 사용하지 않습니다. 별도 static checks 작업은 Python
+3.14에서 `pyproject.toml`에 지정한 application·domain·extraction과 주요
+infrastructure 경계를 `mypy`로 검사하고, `src`와 `tests` 전체에 작은
+`ruff` 규칙 집합을 적용합니다.
 
 ---
 
@@ -331,6 +339,9 @@ UI는 workspace 파일을 직접 다루지 않고 기존 application service를 
 다음 단계도 기존 경계를 유지합니다.
 
 - 의미·문체 QA: 결정적 로컬 QA와 분리된 선택적 LLM 보조 단계
-- GUI: workspace 파일을 직접 조작하지 않고 application service 호출. 장시간 작업은 HTTP 요청 thread와 분리된 job 계층을 거쳐 실행
+- 로컬 웹 GUI 확장: workspace 파일을 직접 조작하지 않고 application service를
+  호출하며 장시간 작업은 HTTP 요청 thread와 분리된 job 계층을 거쳐 실행
 
-사용자 흐름과 제한사항이 바뀌면 [README](../README.md)와 [전체 작업 흐름](WORKFLOW.md)을 함께 갱신합니다.
+사용자 흐름과 제한사항이 바뀌면 [README](../README.md),
+[GUI 사용 가이드](GUI.md)와 [전체 작업 흐름](WORKFLOW.md) 중 책임이 맞는
+문서를 함께 갱신합니다.
