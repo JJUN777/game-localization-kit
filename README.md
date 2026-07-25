@@ -286,7 +286,7 @@ glk translate --project primal --model gemini-2.5-pro
 
 프로젝트 workspace 전체를 한 번에 전송하지 않습니다. 이미지 OCR은 요청마다 대상 이미지 한 장만 보내고, 번역은 현재 처리할 block과 관련 용어만 보냅니다.
 
-검수 브라우저는 `127.0.0.1`에서만 동작하며 외부 CDN이나 script를 불러오지 않습니다. `오류만 재번역`을 실행할 때만 로컬 서버가 대상 ERROR block을 Gemini API로 전송합니다.
+검수 브라우저는 `127.0.0.1`에서만 동작하며 외부 CDN이나 script를 불러오지 않습니다. `오류만 재번역`을 실행할 때만 로컬 서버가 대상 ERROR block을 Gemini API로 전송합니다. 재번역은 background job으로 실행되며 검수 화면에서 진행률과 실패 사유를 확인하고 실패 뒤 다시 시도할 수 있습니다.
 
 ---
 

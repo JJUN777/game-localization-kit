@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -100,6 +101,9 @@ class TranslationReviewServerTests(unittest.TestCase):
         self.assertIsInstance(html, str)
         self.assertIn("원문과 번역을 함께 검수하세요", html)
         self.assertIn("오류만 재번역", html)
+        self.assertIn('id="retry-job"', html)
+        self.assertIn('api("/api/retry-job")', html)
+        self.assertIn("오류 재번역 다시 시도", html)
         self.assertIn("확정 용어집", html)
         self.assertIn("이 블록의 적용 용어", html)
         self.assertIn("keep_rule_applied: \"원문 유지 적용\"", html)
@@ -256,9 +260,20 @@ class TranslationReviewServerTests(unittest.TestCase):
             review_file=str(self.project_path / "04_translation/review.txt"),
             revision_file=str(self.project_path / "04_translation/revisions/retry.json"),
         )
+        started = threading.Event()
+        release = threading.Event()
+
+        def run_retry(**kwargs: object) -> TranslationRetryResult:
+            progress = kwargs["progress"]
+            self.assertTrue(callable(progress))
+            progress("오류 블록 1/1 재번역 중: block-2")
+            started.set()
+            self.assertTrue(release.wait(2))
+            return result
+
         with patch(
-            "glk.infrastructure.translation_review_server.retry_failed_translations",
-            return_value=result,
+            "glk.application.translation_retry_job_service.retry_failed_translations",
+            side_effect=run_retry,
         ) as retry:
             status, payload, _ = self._request(
                 "/api/retry",
@@ -268,8 +283,57 @@ class TranslationReviewServerTests(unittest.TestCase):
                     "translations": translations,
                 },
             )
-        self.assertEqual(status, 200)
-        self.assertEqual(payload["result"]["retried_blocks"], 1)
+            self.assertEqual(status, 202)
+            self.assertEqual(payload["job"]["status"], "queued")
+            self.assertTrue(started.wait(1))
+
+            status, running, _ = self._request("/api/retry-job")
+            self.assertEqual(status, 200)
+            self.assertEqual(running["job"]["status"], "running")
+            self.assertEqual(running["job"]["progress_current"], 0)
+            self.assertEqual(running["job"]["progress_total"], 1)
+
+            status, responsive, _ = self._request("/api/review")
+            self.assertEqual(status, 200)
+            self.assertIn("summary", responsive)
+            status, conflict, _ = self._request(
+                "/api/retry",
+                method="POST",
+                payload={
+                    "review_sha256": responsive["review_sha256"],
+                    "translations": {
+                        block["id"]: block["translation"]
+                        for block in responsive["blocks"]
+                    },
+                },
+            )
+            self.assertEqual(status, 409)
+            self.assertIn("이미 진행 중", conflict["detail"])
+            status, save_conflict, _ = self._request(
+                "/api/save",
+                method="POST",
+                payload={
+                    "review_sha256": responsive["review_sha256"],
+                    "translations": {
+                        block["id"]: block["translation"]
+                        for block in responsive["blocks"]
+                    },
+                },
+            )
+            self.assertEqual(status, 409)
+            self.assertIn("변경할 수 없습니다", save_conflict["detail"])
+
+            release.set()
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                _, completed, _ = self._request("/api/retry-job")
+                if completed["job"]["status"] == "succeeded":
+                    break
+                threading.Event().wait(0.01)
+            else:
+                self.fail("translation retry job did not finish")
+
+        self.assertEqual(completed["job"]["result"]["retried_blocks"], 1)
         self.assertEqual(
             retry.call_args.kwargs["expected_review_sha256"],
             payload["document"]["review_sha256"],
@@ -280,6 +344,78 @@ class TranslationReviewServerTests(unittest.TestCase):
                 encoding="utf-8"
             ),
         )
+
+    def test_failed_retry_job_exposes_reason_and_can_be_retried(self) -> None:
+        _, document, _ = self._request("/api/review")
+        translations = {
+            block["id"]: block["translation"]
+            for block in document["blocks"]
+        }
+        result = TranslationRetryResult(
+            project_path=str(self.project_path),
+            model="test-model",
+            requested_blocks=0,
+            retried_blocks=0,
+            block_ids=(),
+            previous_error_count=0,
+            remaining_error_count=0,
+            warning_count=0,
+            review_file=str(self.project_path / "04_translation/review.txt"),
+            revision_file=None,
+        )
+        calls = 0
+
+        def run_retry(**kwargs: object) -> TranslationRetryResult:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("temporary provider failure")
+            return result
+
+        with patch(
+            "glk.application.translation_retry_job_service.retry_failed_translations",
+            side_effect=run_retry,
+        ):
+            status, first, _ = self._request(
+                "/api/retry",
+                method="POST",
+                payload={
+                    "review_sha256": document["review_sha256"],
+                    "translations": translations,
+                },
+            )
+            self.assertEqual(status, 202)
+            failed = self._wait_for_retry_job("failed")
+            self.assertIn("temporary provider failure", failed["error"])
+
+            _, latest_document, _ = self._request("/api/review")
+            status, second, _ = self._request(
+                "/api/retry",
+                method="POST",
+                payload={
+                    "review_sha256": latest_document["review_sha256"],
+                    "translations": {
+                        block["id"]: block["translation"]
+                        for block in latest_document["blocks"]
+                    },
+                },
+            )
+            self.assertEqual(status, 202)
+            self.assertNotEqual(
+                first["job"]["job_id"],
+                second["job"]["job_id"],
+            )
+            self._wait_for_retry_job("succeeded")
+
+    def _wait_for_retry_job(self, status: str) -> dict[str, object]:
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            _, payload, _ = self._request("/api/retry-job")
+            job = payload["job"]
+            if job["status"] == status:
+                return job
+            threading.Event().wait(0.01)
+        self.fail(f"translation retry job did not reach {status}")
 
     def test_injects_only_a_local_return_url(self) -> None:
         return_url = "http://127.0.0.1:8765/"

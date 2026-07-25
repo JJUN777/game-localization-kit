@@ -179,6 +179,71 @@
       white-space: nowrap;
     }
     .general-issues { margin-bottom: 16px; }
+    .retry-job {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px 18px;
+      align-items: center;
+      margin-bottom: 16px;
+      padding: 14px 16px;
+      border: 1px solid #cdd7e5;
+      border-radius: 12px;
+      background: #f4f7fb;
+    }
+    .retry-job.failed {
+      border-color: #ebaaa6;
+      background: var(--error-bg);
+    }
+    .retry-job.succeeded {
+      border-color: #a8d8bc;
+      background: var(--success-bg);
+    }
+    .retry-job-copy { min-width: 0; }
+    .retry-job-title {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 4px;
+      font-weight: 800;
+    }
+    .retry-job-status {
+      padding: 2px 7px;
+      color: var(--navy);
+      border-radius: 999px;
+      background: #dfe8f5;
+      font-size: 11px;
+    }
+    .retry-job.failed .retry-job-status {
+      color: var(--error);
+      background: #ffd9d6;
+    }
+    .retry-job.succeeded .retry-job-status {
+      color: var(--success);
+      background: #d2f0df;
+    }
+    .retry-job-message { color: var(--muted); font-size: 12px; }
+    .retry-job-error {
+      margin-top: 5px;
+      color: var(--error);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .retry-progress {
+      grid-column: 1 / -1;
+      height: 6px;
+      border-radius: 999px;
+      background: #dde3eb;
+      overflow: hidden;
+    }
+    .retry-progress-bar {
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--navy);
+      transition: width .25s ease;
+    }
+    .retry-job.failed .retry-progress-bar { background: var(--error); }
+    .retry-job.succeeded .retry-progress-bar { background: var(--success); }
     .review-card {
       scroll-margin-top: 96px;
       margin-bottom: 16px;
@@ -471,6 +536,20 @@
         <span class="status-pill" id="review-status">불러오는 중</span>
       </div>
       <div class="general-issues" id="general-issues"></div>
+      <section class="retry-job hidden" id="retry-job" aria-live="polite">
+        <div class="retry-job-copy">
+          <div class="retry-job-title">
+            <span>오류 문장 재번역</span>
+            <span class="retry-job-status" id="retry-job-status"></span>
+          </div>
+          <div class="retry-job-message" id="retry-job-message"></div>
+          <div class="retry-job-error hidden" id="retry-job-error"></div>
+        </div>
+        <div class="retry-job-count" id="retry-job-count"></div>
+        <div class="retry-progress">
+          <div class="retry-progress-bar" id="retry-progress-bar"></div>
+        </div>
+      </section>
       <section id="content"><div class="loading">검수 데이터를 불러오는 중입니다…</div></section>
     </main>
   </div>
@@ -521,7 +600,10 @@
       termFilter: "all",
       termSearch: "",
       dirty: false,
-      busy: false
+      busy: false,
+      retryJob: null,
+      watchedRetryJobId: null,
+      retryPollTimer: null
     };
     const $ = (selector) => document.querySelector(selector);
 
@@ -767,8 +849,45 @@
     };
     const issueLabel = (issue) => issueLabels[issue.code] || "확인 필요";
 
+    const retryJobActive = () =>
+      Boolean(
+        state.retryJob &&
+        ["queued", "running"].includes(state.retryJob.status)
+      );
+
+    function renderRetryJob() {
+      const panel = $("#retry-job");
+      const job = state.retryJob;
+      panel.classList.toggle("hidden", !job);
+      if (!job) return;
+      panel.className = `retry-job ${job.status}`;
+      const statusLabels = {
+        queued: "대기 중",
+        running: "진행 중",
+        succeeded: "완료",
+        failed: "실패 · 재시도 가능"
+      };
+      $("#retry-job-status").textContent = statusLabels[job.status] || job.status;
+      $("#retry-job-message").textContent = job.progress_message;
+      const error = $("#retry-job-error");
+      error.textContent = job.error || "";
+      error.classList.toggle("hidden", !job.error);
+      const current = job.progress_current;
+      const total = job.progress_total;
+      $("#retry-job-count").textContent =
+        Number.isInteger(current) && Number.isInteger(total)
+          ? `${current} / ${total}`
+          : retryJobActive() ? "처리 중" : "";
+      const percent =
+        Number.isInteger(current) && Number.isInteger(total) && total > 0
+          ? Math.min(100, Math.max(0, current / total * 100))
+          : retryJobActive() ? 12 : job.status === "succeeded" ? 100 : 0;
+      $("#retry-progress-bar").style.width = `${percent}%`;
+    }
+
     function refreshSummary() {
       const doc = state.document;
+      const interactionBusy = state.busy || retryJobActive();
       const changed = doc.blocks.filter((block) => block.changed).length;
       doc.summary.changed = changed;
       const summary = $("#header-summary");
@@ -780,10 +899,20 @@
       );
       $("#review-status").textContent =
         `${doc.review_status}${state.dirty ? " · 저장 안 됨" : ""}`;
-      $("#finalize-button").disabled = state.busy || state.dirty || doc.summary.errors > 0;
-      $("#save-button").disabled = state.busy || !state.dirty;
-      $("#qa-button").disabled = state.busy;
-      $("#retry-button").disabled = state.busy || doc.summary.errors === 0;
+      $("#finalize-button").disabled =
+        interactionBusy || state.dirty || doc.summary.errors > 0;
+      $("#save-button").disabled = interactionBusy || !state.dirty;
+      $("#qa-button").disabled = interactionBusy;
+      $("#retry-button").disabled =
+        interactionBusy || doc.summary.errors === 0;
+      $("#retry-button").textContent =
+        retryJobActive() ? "재번역 진행 중…" :
+        state.retryJob?.status === "failed" ? "오류 재번역 다시 시도" :
+        "오류만 재번역";
+      document.querySelectorAll(".translation-input").forEach((node) => {
+        node.disabled = interactionBusy;
+      });
+      renderRetryJob();
     }
 
     function blockDot(block) {
@@ -875,6 +1004,7 @@
         const textarea = make("textarea", "translation-input");
         textarea.value = block.translation;
         textarea.dataset.blockId = block.id;
+        textarea.disabled = state.busy || retryJobActive();
         textarea.addEventListener("input", () => {
           block.translation = textarea.value;
           block.changed = block.translation.trim() !== block.draft_translation;
@@ -970,14 +1100,6 @@
           const count = payload.result.error_count;
           toast(count ? `QA 오류 ${count}개를 확인하세요.` : "QA를 통과했습니다.", count > 0);
         }
-        if (action === "retry") {
-          const count = payload.result.retried_blocks;
-          const remaining = payload.result.remaining_error_count;
-          toast(
-            `${count}개 오류 문장을 재번역했습니다. 남은 오류 ${remaining}개.`,
-            remaining > 0
-          );
-        }
         if (action === "finalize") {
           const finalized = payload.result.finalized;
           toast(finalized ? "최종 번역을 승인했습니다." : "QA 오류를 먼저 수정하세요.", !finalized);
@@ -991,9 +1113,78 @@
       }
     }
 
+    function scheduleRetryPoll() {
+      clearTimeout(state.retryPollTimer);
+      if (!retryJobActive()) return;
+      state.retryPollTimer = setTimeout(pollRetryJob, 700);
+    }
+
+    async function reloadReviewAfterRetry(job) {
+      const document = await api("/api/review");
+      state.document = document;
+      state.dirty = false;
+      render();
+      if (job.status === "succeeded") {
+        const result = job.result || {};
+        const count = result.retried_blocks || 0;
+        const remaining = result.remaining_error_count || 0;
+        toast(
+          `${count}개 오류 문장을 재번역했습니다. 남은 오류 ${remaining}개.`,
+          remaining > 0
+        );
+      } else {
+        toast(job.error || "오류 문장 재번역에 실패했습니다.", true);
+      }
+    }
+
+    async function pollRetryJob() {
+      try {
+        const payload = await api("/api/retry-job");
+        const previousActive = retryJobActive();
+        state.retryJob = payload.job;
+        refreshSummary();
+        if (
+          previousActive &&
+          state.retryJob &&
+          !retryJobActive() &&
+          state.retryJob.job_id === state.watchedRetryJobId
+        ) {
+          state.watchedRetryJobId = null;
+          await reloadReviewAfterRetry(state.retryJob);
+        }
+      } catch (error) {
+        toast(`재번역 상태를 확인하지 못했습니다. ${error.message}`, true);
+      }
+      scheduleRetryPoll();
+    }
+
+    async function startRetry() {
+      if (state.busy || retryJobActive()) return;
+      state.busy = true;
+      refreshSummary();
+      try {
+        const payload = await api(
+          "/api/retry",
+          { method: "POST", body: requestBody() }
+        );
+        state.document = payload.document;
+        state.dirty = false;
+        state.retryJob = payload.job;
+        state.watchedRetryJobId = payload.job.job_id;
+        render();
+        toast("오류 문장 재번역을 시작했습니다.");
+        scheduleRetryPoll();
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        state.busy = false;
+        refreshSummary();
+      }
+    }
+
     $("#save-button").addEventListener("click", () => runAction("save"));
     $("#qa-button").addEventListener("click", () => runAction("qa"));
-    $("#retry-button").addEventListener("click", () => runAction("retry"));
+    $("#retry-button").addEventListener("click", startRetry);
     $("#finalize-button").addEventListener("click", () => runAction("finalize"));
     $("#stayAfterFinalize").addEventListener("click", () => {
       $("#translationCompleteDialog").close();
@@ -1042,10 +1233,15 @@
       if (state.dirty) event.preventDefault();
     });
 
-    api("/api/review")
-      .then((document) => {
+    Promise.all([api("/api/review"), api("/api/retry-job")])
+      .then(([document, retryPayload]) => {
         state.document = document;
+        state.retryJob = retryPayload.job;
+        if (retryJobActive()) {
+          state.watchedRetryJobId = state.retryJob.job_id;
+        }
         render();
+        scheduleRetryPoll();
       })
       .catch((error) => {
         $("#content").replaceChildren(make("div", "empty", error.message));

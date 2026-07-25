@@ -21,7 +21,12 @@ from glk.application.translation_review_service import (
     run_project_translation_qa,
     save_project_translation_review,
 )
-from glk.application.translation_retry_service import retry_failed_translations
+from glk.application.translation_retry_job_service import (
+    TranslationRetryJobConflict,
+    TranslationRetryJobError,
+    TranslationRetryJobManager,
+    TranslationRetryJobRunner,
+)
 from glk.application.translation_types import TranslationError
 from glk.error_response import make_http_error_response
 from glk.infrastructure.gemini_layout import GeminiConfigurationError
@@ -76,6 +81,7 @@ class TranslationReviewHttpServer(ThreadingHTTPServer):
         project: str | Path,
         workspace_root: str | Path,
         return_url: str | None = None,
+        retry_runner: TranslationRetryJobRunner | None = None,
     ) -> None:
         self.return_url = _validate_return_url(return_url)
         super().__init__(server_address, handler_class)
@@ -83,6 +89,11 @@ class TranslationReviewHttpServer(ThreadingHTTPServer):
         self.workspace_root = str(workspace_root)
         self.auth_token = secrets.token_urlsafe(32)
         self.mutation_lock = threading.Lock()
+        self.retry_jobs = TranslationRetryJobManager(
+            project=project,
+            workspace_root=workspace_root,
+            runner=retry_runner,
+        )
 
     @property
     def origin(self) -> str:
@@ -93,6 +104,10 @@ class TranslationReviewHttpServer(ThreadingHTTPServer):
     @property
     def review_url(self) -> str:
         return self.origin + "/"
+
+    def server_close(self) -> None:
+        self.retry_jobs.close()
+        super().server_close()
 
 
 class _TranslationReviewHandler(BaseHTTPRequestHandler):
@@ -179,6 +194,15 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(HTTPStatus.OK, document)
             return
+        if path == "/api/retry-job":
+            if not self._api_authorized():
+                self._send_error_json(HTTPStatus.FORBIDDEN, "Invalid review session.")
+                return
+            self._send_json(
+                HTTPStatus.OK,
+                {"ok": True, "job": self.server.retry_jobs.get_job()},
+            )
+            return
         self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
 
     def _read_request_json(self) -> dict[str, Any]:
@@ -216,6 +240,16 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
             if not isinstance(translations, dict):
                 raise TranslationReviewError("translations must be an object.")
             with self.server.mutation_lock:
+                if self.server.retry_jobs.is_active():
+                    message = (
+                        "오류 문장 재번역이 이미 진행 중입니다."
+                        if path == "/api/retry"
+                        else (
+                            "오류 문장 재번역 중에는 검수 내용을 "
+                            "변경할 수 없습니다."
+                        )
+                    )
+                    raise TranslationRetryJobConflict(message)
                 document = save_project_translation_review(
                     project=self.server.project,
                     workspace_root=self.server.workspace_root,
@@ -238,18 +272,13 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
                         ),
                     }
                 elif path == "/api/retry":
-                    retry_result = retry_failed_translations(
-                        project=self.server.project,
-                        workspace_root=self.server.workspace_root,
+                    job = self.server.retry_jobs.start(
                         expected_review_sha256=document["review_sha256"],
                     )
                     response = {
-                        "ok": retry_result.ok,
-                        "result": retry_result.to_dict(),
-                        "document": get_project_translation_review_document(
-                            project=self.server.project,
-                            workspace_root=self.server.workspace_root,
-                        ),
+                        "ok": True,
+                        "job": job,
+                        "document": document,
                     }
                 else:
                     finalize_result = finalize_project_translation_review(
@@ -267,6 +296,8 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
         except (
             TranslationError,
             TranslationReviewError,
+            TranslationRetryJobConflict,
+            TranslationRetryJobError,
             GeminiConfigurationError,
             OSError,
             RuntimeError,
@@ -274,12 +305,16 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
         ) as error:
             status = (
                 HTTPStatus.CONFLICT
-                if "changed after this page was loaded" in str(error)
+                if isinstance(error, TranslationRetryJobConflict)
+                or "changed after this page was loaded" in str(error)
                 else HTTPStatus.BAD_REQUEST
             )
             self._send_error_json(status, str(error))
             return
-        self._send_json(HTTPStatus.OK, response)
+        self._send_json(
+            HTTPStatus.ACCEPTED if path == "/api/retry" else HTTPStatus.OK,
+            response,
+        )
 
 
 def create_translation_review_server(
@@ -288,6 +323,7 @@ def create_translation_review_server(
     workspace_root: str | Path = "workspaces",
     port: int = 0,
     return_url: str | None = None,
+    retry_runner: TranslationRetryJobRunner | None = None,
 ) -> TranslationReviewHttpServer:
     if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
         raise TranslationReviewError("port must be between 0 and 65535.")
@@ -301,6 +337,7 @@ def create_translation_review_server(
         project=project,
         workspace_root=workspace_root,
         return_url=return_url,
+        retry_runner=retry_runner,
     )
 
 

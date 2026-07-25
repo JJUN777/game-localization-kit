@@ -52,6 +52,7 @@ files = [
   "src/glk/application/glossary_review_service.py",
   "src/glk/application/translation_prompt_service.py",
   "src/glk/application/translation_restart_service.py",
+  "src/glk/application/translation_retry_job_service.py",
   "src/glk/application/translation_review_service.py",
   "src/glk/infrastructure/source_review_server.py",
   "src/glk/infrastructure/glossary_review_server.py",

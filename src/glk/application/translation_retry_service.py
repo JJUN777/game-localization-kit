@@ -172,7 +172,9 @@ def retry_failed_translations(
         )
         translated: dict[str, str] | None = None
         validation_feedback = qa_feedback
-        notify(f"Retry block {index}/{len(target_blocks)}: {block_id}")
+        notify(
+            f"오류 블록 {index}/{len(target_blocks)} 재번역 중: {block_id}"
+        )
         try:
             for attempt in range(2):
                 prompt = compile_translation_prompt(
@@ -194,8 +196,8 @@ def retry_failed_translations(
                         f"Latest response errors:\n{error}"
                     )
                     notify(
-                        f"Retry block {index}/{len(target_blocks)}: "
-                        f"validation failed ({attempt + 1}/2)"
+                        f"오류 블록 {index}/{len(target_blocks)} 검증 재시도 "
+                        f"({attempt + 1}/2)"
                     )
         except Exception as error:
             raise TranslationError(
