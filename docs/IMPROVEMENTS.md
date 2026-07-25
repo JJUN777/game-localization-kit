@@ -99,7 +99,7 @@
   - 남은 문구 매칭 제거는 도메인별 하위 항목으로 분리해 별도로 추적한다.
   - 검증: 명시적 `INVALID_REQUEST`가 stale detail보다 우선하는 단위 테스트와
     dashboard·source·glossary·translation review HTTP 회귀 테스트를 통과했다.
-- [ ] `ERROR-004` 번역 검수 재번역 실패에서 내부 예외 원문을 UI와 job
+- [x] `ERROR-004` 번역 검수 재번역 실패에서 내부 예외 원문을 UI와 job
   응답에 노출하지 않는다.
   - `_safe_retry_error()`는 알려진 검수 충돌과 validation 문구 외의 예외를
     최대 600자까지 그대로 반환하므로 Gemini SDK 상세와 파일 절대 경로가
@@ -112,7 +112,10 @@
     `OSError`를 강제로 발생시켜도 job의 `error`와 API 응답에 SDK 원문·키·
     절대 경로가 없어야 하며, 검수 충돌과 validation 오류는 기존 행동 안내를
     유지해야 한다.
-- [ ] `ERROR-005` 용어 후보 생성 job의 안전한 도메인 오류 안내를 보존한다.
+  - 검증: API 키·권한·모델·사용량·5xx·네트워크·검수 충돌·결과 검증과
+    미분류 파일 오류를 각각 강제로 발생시켜 안전한 행동 안내와 원문 비노출을
+    확인했고, 전체 279개 테스트와 mypy·ruff 검사를 통과했다.
+- [x] `ERROR-005` 용어 후보 생성 job의 안전한 도메인 오류 안내를 보존한다.
   - 현재 모든 runner 예외를 하나의 고정 문구로 바꿔 stale 용어 검수 파일처럼
     사용자가 직접 해결할 수 있는 원인까지 숨긴다.
   - 자동 덮어쓰기 차단처럼 명시적으로 만든 안전한 도메인 상태는 안정적
@@ -121,6 +124,9 @@
   - 완료 기준: 승인 원문 불일치·stale 검수 파일은 재생성 방법을 안내하고,
     절대 경로가 포함된 프로젝트·파일시스템 예외는 UI와 job state에 노출하지
     않아야 한다.
+  - 검증: `GLOSSARY_REVIEW_STALE` 도메인 오류는 기존 편집 보존·정리 후
+    재생성을 안내하고, 승인 원문 오류와 미분류 예외의 절대 경로는 job state에
+    남지 않음을 확인했다.
 - [x] `JOB-001` 저장된 background job 상태를 스키마로 검증한다.
   - 타입, 허용 상태, 필수 필드와 프로젝트 ID를 검증한다.
   - 프로젝트 ID는 가능한 경우 상태 파일 내용보다 상위 프로젝트 경로를 기준으로 한다.
@@ -239,7 +245,7 @@
     state commit 중단을 다음 실행에서 복구하며, 불일치한 사용자 편집은 보존한다.
   - 검증: append 꼬리, 번역 최종 산출물 기록 중단과 용어 후보 state commit
     중단 뒤 재실행 회귀 테스트를 통과했다.
-- [ ] `IO-003` 부모 디렉터리 fsync 미지원 환경에서 성공한 파일 교체를
+- [x] `IO-003` 부모 디렉터리 fsync 미지원 환경에서 성공한 파일 교체를
   실패로 오인하지 않는다.
   - `os.replace()`가 성공한 뒤 `_fsync_parent()`에서 `EINVAL` 또는
     `ENOTSUP`이 발생하면 파일은 이미 교체됐지만 호출자는 전체 쓰기가 실패한
@@ -252,6 +258,9 @@
     끝나며, 그 밖의 `OSError`는 호출자에게 전달되어야 한다.
   - 회귀 테스트: `os.open`과 `os.fsync` 각각의 미지원 errno, 실제 I/O 오류,
     replace 이전 실패와 replace 이후 fsync 실패를 분리해 검사한다.
+  - 검증: directory open·fsync의 `EINVAL`·`ENOTSUP`, 신규 append와 atomic
+    replace 성공, replace 전 파일 fsync 실패, replace 후 `EIO` 및 권한 오류
+    전파를 확인했고 전체 285개 테스트와 mypy·ruff 검사를 통과했다.
 - [x] `ENV-002` 일반 설치 환경에서 provider의 `.env` 탐색 경로가 패키지 상위
   디렉터리를 잘못 가리키지 않게 한다.
   - 완료 기준: source checkout 표식이 실제로 있을 때만 checkout root를 사용하고,
@@ -472,15 +481,13 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
 완료된 작업 순서는 각 항목의 상태와 검증 기록으로 보존합니다. 앞으로의 작업은
 서로 연관된 항목을 다음 순서로 나눠 커밋합니다.
 
-1. `ERROR-004`, `ERROR-005`: background job 오류의 안전성과 행동 안내 보존
-2. `IO-003`: directory fsync 미지원 환경의 쓰기 결과 판정
-3. `SECURITY-002`, `ROUTE-001`: 공통 HTTP 기본 응답과 route 누락 방어
-4. `DOMAIN-002`: 검수 필요한 번역 segment를 `flagged`로 기록
-5. `QUALITY-004`: 확인된 3개 타입 오류 수정과 `follow_imports = "normal"` 전환
-6. `ERROR-003`: source·glossary·translation·review 순서로 문구 추론 제거
-7. `ARCH-006`: 선택한 use case를 각각 독립 커밋으로 분리
-8. `DOMAIN-001`: 하이픈 결합 경고의 검수 화면 표시 방법 확정과 구현
-9. 제품 기능 후속 항목의 우선순위 결정
+1. `SECURITY-002`, `ROUTE-001`: 공통 HTTP 기본 응답과 route 누락 방어
+2. `DOMAIN-002`: 검수 필요한 번역 segment를 `flagged`로 기록
+3. `QUALITY-004`: 확인된 3개 타입 오류 수정과 `follow_imports = "normal"` 전환
+4. `ERROR-003`: source·glossary·translation·review 순서로 문구 추론 제거
+5. `ARCH-006`: 선택한 use case를 각각 독립 커밋으로 분리
+6. `DOMAIN-001`: 하이픈 결합 경고의 검수 화면 표시 방법 확정과 구현
+7. 제품 기능 후속 항목의 우선순위 결정
 
 `UPLOAD-001`은 실제 대용량 파일의 메모리 사용량을 측정하기 전까지, `REPO-002`는
 배포 정책과 라이선스를 결정하기 전까지 구현 순서에 넣지 않습니다.

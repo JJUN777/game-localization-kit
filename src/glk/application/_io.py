@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 from pathlib import Path
 import shutil
 import tempfile
 from typing import Any
+
+
+_UNSUPPORTED_DIRECTORY_FSYNC_ERRNOS = frozenset(
+    error_number
+    for error_number in (
+        errno.EINVAL,
+        getattr(errno, "ENOTSUP", None),
+        getattr(errno, "EOPNOTSUPP", None),
+    )
+    if error_number is not None
+)
 
 
 def _temporary_path(path: Path) -> Path:
@@ -30,14 +42,31 @@ def _replace_from_temporary(path: Path, temporary_path: Path) -> None:
         raise
 
 
+def _open_parent_directory(path: Path) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    return os.open(path.parent, flags)
+
+
+def _directory_fsync_is_unsupported(error: OSError) -> bool:
+    return error.errno in _UNSUPPORTED_DIRECTORY_FSYNC_ERRNOS
+
+
 def _fsync_parent(path: Path) -> None:
     """Persist a replaced or newly created directory entry where supported."""
     if os.name == "nt":
         return
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    descriptor = os.open(path.parent, flags)
     try:
-        os.fsync(descriptor)
+        descriptor = _open_parent_directory(path)
+    except OSError as error:
+        if _directory_fsync_is_unsupported(error):
+            return
+        raise
+    try:
+        try:
+            os.fsync(descriptor)
+        except OSError as error:
+            if not _directory_fsync_is_unsupported(error):
+                raise
     finally:
         os.close(descriptor)
 
