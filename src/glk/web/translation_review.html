@@ -290,6 +290,31 @@
       min-height: 60vh;
       color: var(--muted);
     }
+    dialog {
+      width: min(480px, calc(100vw - 32px));
+      padding: 24px;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: 0 24px 80px rgba(31, 41, 55, .24);
+    }
+    dialog::backdrop { background: rgba(24, 32, 51, .62); }
+    dialog h2 { margin: 0 0 10px; font-size: 21px; }
+    dialog p { margin: 0; color: var(--muted); }
+    dialog .button-secondary {
+      color: var(--ink);
+      border-color: var(--line);
+      background: #f8f7f3;
+    }
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 22px;
+    }
+    .hidden { display: none !important; }
     @media (max-width: 900px) {
       .app-header { align-items: flex-start; flex-wrap: wrap; }
       .brand { min-width: 0; flex: 1; }
@@ -343,10 +368,25 @@
       <section id="content"><div class="loading">검수 데이터를 불러오는 중입니다…</div></section>
     </main>
   </div>
+  <dialog id="translationCompleteDialog" aria-labelledby="translationCompleteTitle">
+    <h2 id="translationCompleteTitle">최종 번역 승인이 완료되었습니다</h2>
+    <p>
+      대시보드에서 최종 번역 완료 상태와 생성된 출력 파일을 확인할 수 있습니다.
+    </p>
+    <div class="dialog-actions">
+      <button class="button button-secondary" id="stayAfterFinalize" type="button">
+        이 화면에 머물기
+      </button>
+      <button class="button button-primary" id="returnDashboard" type="button">
+        대시보드로 돌아가기
+      </button>
+    </div>
+  </dialog>
   <div class="toast" id="toast"></div>
   <script>
     "use strict";
     const AUTH_TOKEN = __GLK_TOKEN_JSON__;
+    const RETURN_URL = __GLK_RETURN_URL_JSON__;
     const state = { document: null, filter: "all", search: "", dirty: false, busy: false };
     const $ = (selector) => document.querySelector(selector);
 
@@ -605,7 +645,9 @@
           );
         }
         if (action === "finalize") {
-          toast(payload.result.finalized ? "최종 번역을 승인했습니다." : "QA 오류를 먼저 수정하세요.", !payload.result.finalized);
+          const finalized = payload.result.finalized;
+          toast(finalized ? "최종 번역을 승인했습니다." : "QA 오류를 먼저 수정하세요.", !finalized);
+          if (finalized) $("#translationCompleteDialog").showModal();
         }
       } catch (error) {
         toast(error.message, true);
@@ -619,6 +661,13 @@
     $("#qa-button").addEventListener("click", () => runAction("qa"));
     $("#retry-button").addEventListener("click", () => runAction("retry"));
     $("#finalize-button").addEventListener("click", () => runAction("finalize"));
+    $("#stayAfterFinalize").addEventListener("click", () => {
+      $("#translationCompleteDialog").close();
+    });
+    $("#returnDashboard").classList.toggle("hidden", !RETURN_URL);
+    $("#returnDashboard").addEventListener("click", () => {
+      if (RETURN_URL) window.location.assign(RETURN_URL);
+    });
     $("#search").addEventListener("input", (event) => {
       state.search = event.target.value;
       render();

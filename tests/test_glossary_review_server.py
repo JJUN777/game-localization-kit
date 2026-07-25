@@ -105,7 +105,10 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertIn("첫 등장 위치 순", html)
         self.assertIn("출현 많은 순", html)
         self.assertIn("출현 적은 순", html)
+        self.assertIn("용어집 생성이 완료되었습니다", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
+        self.assertNotIn("__GLK_RETURN_URL_JSON__", html)
+        self.assertIn("const RETURN_URL = null;", html)
         self.assertEqual(headers["X-Frame-Options"], "DENY")
         self.assertEqual(self.server.server_address[0], "127.0.0.1")
 
@@ -222,6 +225,34 @@ class GlossaryReviewServerTests(unittest.TestCase):
             payload["document"]["review_sha256"],
             document["review_sha256"],
         )
+
+    def test_injects_only_a_local_return_url(self) -> None:
+        return_url = "http://127.0.0.1:8765/"
+        server = create_glossary_review_server(
+            project="glossary_project",
+            workspace_root=self.workspace_root,
+            return_url=return_url,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen(server.review_url, timeout=3) as response:
+                html = response.read().decode("utf-8")
+            self.assertIn(
+                f"const RETURN_URL = {json.dumps(return_url)};",
+                html,
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        with self.assertRaisesRegex(ValueError, "local HTTP URL"):
+            create_glossary_review_server(
+                project="glossary_project",
+                workspace_root=self.workspace_root,
+                return_url="https://attacker.example/",
+            )
 
 
 if __name__ == "__main__":

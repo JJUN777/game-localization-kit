@@ -208,6 +208,10 @@ class WorkspacePaths:
         return self.state_dir / "dashboard_glossary_job.json"
 
     @property
+    def dashboard_translation_job_state(self) -> Path:
+        return self.state_dir / "dashboard_translation_job.json"
+
+    @property
     def segmentation_state(self) -> Path:
         return self.state_dir / "segmentation.json"
 

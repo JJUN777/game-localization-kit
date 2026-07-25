@@ -1,4 +1,4 @@
-"""Run source preparation outside the dashboard HTTP request thread."""
+"""Run long-lived dashboard work outside the HTTP request thread."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import threading
 from typing import Any, Callable
 from uuid import uuid4
 
-from glk.application._io import write_json_atomic
+from glk.application._io import write_bytes_atomic, write_json_atomic
 from glk.application.extraction_service import extract_project_pdf
 from glk.application.glossary_service import (
     GlossaryBuildError,
@@ -24,6 +24,7 @@ from glk.application.project_service import (
 )
 from glk.application.segmentation_service import segment_project_source
 from glk.application.source_qa_service import run_project_source_qa
+from glk.application.translation_service import translate_project
 from glk.domain.workspace import (
     IMAGE_SOURCE_ROOT,
     WorkspacePaths,
@@ -37,6 +38,8 @@ TERMINAL_JOB_STATUSES = frozenset(
 )
 _PDF_PROGRESS = re.compile(r"^Page (\d+):")
 _IMAGE_PROGRESS = re.compile(r"^Image (\d+)/(\d+):")
+_TRANSLATION_PROGRESS = re.compile(r"^Chunk (\d+)/(\d+):")
+MAX_TRANSLATION_PROMPT_BYTES = 64 * 1024
 
 JobProgress = Callable[[str, int | None, int | None], None]
 SourceJobRunner = Callable[
@@ -45,6 +48,10 @@ SourceJobRunner = Callable[
 ]
 GlossaryJobRunner = Callable[
     [str, str | Path, JobProgress],
+    dict[str, Any],
+]
+TranslationJobRunner = Callable[
+    [str, str | Path, str, bool, JobProgress],
     dict[str, Any],
 ]
 
@@ -82,6 +89,27 @@ class DashboardSourceJob:
 class DashboardGlossaryJob:
     job_id: str
     project_id: str
+    status: str
+    progress_message: str
+    progress_current: int | None
+    progress_total: int | None
+    result: dict[str, Any] | None
+    error: str | None
+    created_at: str
+    started_at: str | None
+    finished_at: str | None
+    updated_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class DashboardTranslationJob:
+    job_id: str
+    project_id: str
+    model: str
+    resume: bool
     status: str
     progress_message: str
     progress_current: int | None
@@ -221,6 +249,16 @@ def _acquisition_failure_message(
     if total > 0 and failed_count > 0:
         return f"전체 {total}개 중 {failed_count}개 처리에 실패했습니다. {detail}"
     return f"일부 원본 처리에 실패했습니다. {detail}"
+
+
+def _safe_translation_error(error: BaseException, model: str) -> str:
+    detail = _safe_provider_error([str(error)], model)
+    if detail.startswith("원본을 처리하지 못했습니다."):
+        return (
+            "초벌 번역에 실패했습니다. 완료된 청크는 보존되었습니다. "
+            "다시 시도하면 이어서 진행합니다."
+        )
+    return detail
 
 
 def _registered_source_type(project_id: str, workspace_root: str | Path) -> str:
@@ -369,6 +407,46 @@ def run_glossary_pipeline(
     }
 
 
+def run_translation_pipeline(
+    project_id: str,
+    workspace_root: str | Path,
+    model: str,
+    resume: bool,
+    progress: JobProgress,
+) -> dict[str, Any]:
+    """Translate approved source blocks with the current termbase."""
+    progress("승인 원문과 용어집을 확인하고 있습니다.", 0, None)
+    planned = translate_project(
+        project=project_id,
+        workspace_root=workspace_root,
+        model_name=model,
+        resume=resume,
+        dry_run=True,
+    )
+    total = planned.total_chunks
+    progress("초벌 번역 청크를 준비하고 있습니다.", 0, total)
+
+    def report_translation(message: str) -> None:
+        match = _TRANSLATION_PROGRESS.match(message)
+        current = max(0, int(match.group(1)) - 1) if match else None
+        message_total = int(match.group(2)) if match else total
+        progress(message, current, message_total)
+
+    result = translate_project(
+        project=project_id,
+        workspace_root=workspace_root,
+        model_name=model,
+        resume=resume,
+        progress=report_translation,
+    )
+    progress("초벌 번역과 검수 파일 생성이 완료되었습니다.", total, total)
+    return {
+        "ok": True,
+        "status": "succeeded",
+        "translation": result.to_dict(),
+    }
+
+
 class DashboardJobManager:
     """Own one active dashboard job and latest per-project records."""
 
@@ -378,13 +456,18 @@ class DashboardJobManager:
         *,
         runner: SourceJobRunner | None = None,
         glossary_runner: GlossaryJobRunner | None = None,
+        translation_runner: TranslationJobRunner | None = None,
     ) -> None:
         self.workspace_root = Path(workspace_root).expanduser().resolve()
         self._source_runner = runner or run_registered_source_pipeline
         self._glossary_runner = glossary_runner or run_glossary_pipeline
+        self._translation_runner = (
+            translation_runner or run_translation_pipeline
+        )
         self._lock = threading.RLock()
         self._jobs: dict[str, DashboardSourceJob] = {}
         self._glossary_jobs: dict[str, DashboardGlossaryJob] = {}
+        self._translation_jobs: dict[str, DashboardTranslationJob] = {}
         self._closed = False
         self._load_records()
 
@@ -408,6 +491,21 @@ class DashboardJobManager:
     def _persist_glossary(self, job: DashboardGlossaryJob) -> None:
         write_json_atomic(
             self._glossary_state_path(job.project_id),
+            job.to_dict(),
+        )
+
+    def _translation_state_path(self, project_id: str) -> Path:
+        location = load_workspace_project_id(
+            project_id,
+            self.workspace_root,
+        )
+        return WorkspacePaths(
+            location.path
+        ).dashboard_translation_job_state
+
+    def _persist_translation(self, job: DashboardTranslationJob) -> None:
+        write_json_atomic(
+            self._translation_state_path(job.project_id),
             job.to_dict(),
         )
 
@@ -531,10 +629,49 @@ class DashboardJobManager:
                 ValueError,
             ):
                 continue
+        for state_path in self.workspace_root.glob(
+            "*/.glk/state/dashboard_translation_job.json"
+        ):
+            try:
+                value = json.loads(state_path.read_text(encoding="utf-8"))
+                translation_job = DashboardTranslationJob(**value)
+                if translation_job.status in ACTIVE_JOB_STATUSES:
+                    now = _utc_now()
+                    translation_job.status = "interrupted"
+                    translation_job.progress_message = (
+                        "이전 대시보드가 종료되어 작업 상태를 확인할 수 없습니다."
+                    )
+                    translation_job.error = (
+                        "Dashboard process stopped before job completion."
+                    )
+                    translation_job.finished_at = now
+                    translation_job.updated_at = now
+                    write_json_atomic(
+                        state_path,
+                        translation_job.to_dict(),
+                    )
+                if translation_job.status not in TERMINAL_JOB_STATUSES:
+                    continue
+                self._translation_jobs[
+                    translation_job.project_id
+                ] = translation_job
+            except (
+                OSError,
+                UnicodeError,
+                json.JSONDecodeError,
+                TypeError,
+                ValueError,
+            ):
+                continue
 
     def _active_job(
         self,
-    ) -> DashboardSourceJob | DashboardGlossaryJob | None:
+    ) -> (
+        DashboardSourceJob
+        | DashboardGlossaryJob
+        | DashboardTranslationJob
+        | None
+    ):
         source_job = next(
             (
                 job
@@ -545,10 +682,20 @@ class DashboardJobManager:
         )
         if source_job is not None:
             return source_job
-        return next(
+        glossary_job = next(
             (
                 job
                 for job in self._glossary_jobs.values()
+                if job.status in ACTIVE_JOB_STATUSES
+            ),
+            None,
+        )
+        if glossary_job is not None:
+            return glossary_job
+        return next(
+            (
+                job
+                for job in self._translation_jobs.values()
                 if job.status in ACTIVE_JOB_STATUSES
             ),
             None,
@@ -559,6 +706,7 @@ class DashboardJobManager:
             jobs = (
                 self._jobs.get(project_id),
                 self._glossary_jobs.get(project_id),
+                self._translation_jobs.get(project_id),
             )
             return any(
                 job is not None and job.status in ACTIVE_JOB_STATUSES
@@ -578,6 +726,15 @@ class DashboardJobManager:
         with self._lock:
             jobs = sorted(
                 self._glossary_jobs.values(),
+                key=lambda job: job.created_at,
+                reverse=True,
+            )
+            return [job.to_dict() for job in jobs]
+
+    def list_translation_jobs(self) -> list[dict[str, Any]]:
+        with self._lock:
+            jobs = sorted(
+                self._translation_jobs.values(),
                 key=lambda job: job.created_at,
                 reverse=True,
             )
@@ -691,6 +848,109 @@ class DashboardJobManager:
                 target=self._execute_glossary,
                 args=(job.job_id, project_id),
                 name=f"glk-glossary-job-{project_id}",
+                daemon=True,
+            )
+            thread.start()
+            return queued_job
+
+    def start_translation_job(
+        self,
+        *,
+        project_id: str,
+        model: str,
+        prompt: str,
+    ) -> dict[str, Any]:
+        prompt_data = prompt.encode("utf-8")
+        if not prompt.strip():
+            raise DashboardJobError("Translation prompt must not be empty.")
+        if len(prompt_data) > MAX_TRANSLATION_PROMPT_BYTES:
+            raise DashboardJobError(
+                "Translation prompt is too large."
+            )
+        location = load_workspace_project_id(
+            project_id,
+            self.workspace_root,
+        )
+        with self._lock:
+            if self._closed:
+                raise DashboardJobError("Dashboard job manager is closed.")
+            active = self._active_job()
+            if active is not None:
+                if active.project_id == project_id:
+                    raise DashboardJobConflict(
+                        "This project already has a background job running."
+                    )
+                raise DashboardJobConflict(
+                    "Another project background job is already running."
+                )
+            pipeline = inspect_project(location.path)["pipeline"]
+            if not pipeline["final_source_approved"]:
+                raise DashboardJobError(
+                    "Approve the current source before starting translation."
+                )
+            if pipeline["termbase_status"] != "current":
+                raise DashboardJobError(
+                    "Complete the current termbase before starting translation."
+                )
+            translation_status = pipeline["translation_status"]
+            if translation_status == "current":
+                raise DashboardJobError(
+                    "Translation draft is already current."
+                )
+            if translation_status == "stale":
+                raise DashboardJobError(
+                    "Existing translation files are stale and cannot be "
+                    "overwritten from the dashboard."
+                )
+            if translation_status not in {"not_run", "partial"}:
+                raise DashboardJobError(
+                    "Translation is not ready to start."
+                )
+            paths = WorkspacePaths(location.path)
+            resume = translation_status == "partial"
+            if resume:
+                if not paths.translation_prompt.is_file():
+                    raise DashboardJobError(
+                        "The saved translation prompt is missing."
+                    )
+                try:
+                    saved_prompt = paths.translation_prompt.read_text(
+                        encoding="utf-8"
+                    )
+                except UnicodeDecodeError as error:
+                    raise DashboardJobError(
+                        "The saved translation prompt must be UTF-8."
+                    ) from error
+                if saved_prompt != prompt:
+                    raise DashboardJobError(
+                        "A partial translation must resume with its saved prompt."
+                    )
+            else:
+                write_bytes_atomic(paths.translation_prompt, prompt_data)
+            now = _utc_now()
+            job = DashboardTranslationJob(
+                job_id=uuid4().hex,
+                project_id=project_id,
+                model=model,
+                resume=resume,
+                status="queued",
+                progress_message="초벌 번역 실행을 준비하고 있습니다.",
+                progress_current=0,
+                progress_total=None,
+                result=None,
+                error=None,
+                created_at=now,
+                started_at=None,
+                finished_at=None,
+                updated_at=now,
+            )
+            self._translation_jobs[project_id] = job
+            self._persist_translation(job)
+            queued_job = job.to_dict()
+            thread = threading.Thread(
+                target=self._execute_translation,
+                args=(job.job_id, project_id),
+                name=f"glk-translation-job-{project_id}",
                 daemon=True,
             )
             thread.start()
@@ -847,6 +1107,86 @@ class DashboardJobManager:
             else:
                 current_job.progress_message = "용어 후보 생성에 실패했습니다."
             self._persist_glossary(current_job)
+
+    def _execute_translation(
+        self,
+        job_id: str,
+        project_id: str,
+    ) -> None:
+        with self._lock:
+            job = self._translation_jobs.get(project_id)
+            if job is None or job.job_id != job_id:
+                return
+            now = _utc_now()
+            job.status = "running"
+            job.started_at = now
+            job.updated_at = now
+            job.progress_message = "초벌 번역을 시작했습니다."
+            self._persist_translation(job)
+
+        def report(
+            message: str,
+            current: int | None,
+            total: int | None,
+        ) -> None:
+            with self._lock:
+                current_job = self._translation_jobs.get(project_id)
+                if current_job is None or current_job.job_id != job_id:
+                    return
+                current_job.progress_message = message
+                if current is not None:
+                    current_job.progress_current = current
+                if total is not None:
+                    current_job.progress_total = total
+                current_job.updated_at = _utc_now()
+                self._persist_translation(current_job)
+
+        try:
+            result = self._translation_runner(
+                project_id,
+                self.workspace_root,
+                job.model,
+                job.resume,
+                report,
+            )
+            status = str(result.get("status") or "")
+            if status not in {"succeeded", "failed"}:
+                raise DashboardJobError(
+                    "Translation job runner returned an invalid terminal status."
+                )
+            error_value = result.get("error")
+            error = (
+                str(error_value)
+                if status == "failed" and error_value
+                else (
+                    "초벌 번역에 실패했습니다. 다시 시도하세요."
+                    if status == "failed"
+                    else None
+                )
+            )
+        except Exception as caught:
+            result = None
+            status = "failed"
+            error = _safe_translation_error(caught, job.model)
+
+        with self._lock:
+            current_job = self._translation_jobs.get(project_id)
+            if current_job is None or current_job.job_id != job_id:
+                return
+            now = _utc_now()
+            current_job.status = status
+            current_job.result = result
+            current_job.error = error
+            current_job.finished_at = now
+            current_job.updated_at = now
+            if status == "succeeded":
+                current_job.progress_message = (
+                    "초벌 번역과 검수 파일 생성이 완료되었습니다."
+                )
+                current_job.progress_current = current_job.progress_total
+            else:
+                current_job.progress_message = "초벌 번역에 실패했습니다."
+            self._persist_translation(current_job)
 
     def close(self) -> None:
         with self._lock:

@@ -14,15 +14,24 @@ from urllib.request import Request, urlopen
 
 from PIL import Image
 
+from glk.application.glossary_service import build_project_glossary_candidates
 from glk.application.project_service import create_project
 from glk.application.source_registration_service import register_project_pdf
 from glk.application.source_review_service import prepare_project_source_review
+from glk.application.translation_service import translate_project
 from glk.infrastructure.dashboard_server import (
     DashboardHttpServer,
     create_dashboard_server,
 )
 from tests.test_glossary_service import create_approved_project, sample_blocks
 from tests.test_source_review_service import make_block, write_blocks
+from tests.test_translation_service import (
+    SequenceProvider,
+    create_translation_project,
+    make_block as make_translation_block,
+    sample_blocks as translation_sample_blocks,
+    valid_response,
+)
 
 
 class DashboardServerTests(unittest.TestCase):
@@ -37,6 +46,9 @@ class DashboardServerTests(unittest.TestCase):
         self.environment_patch.start()
         self.source_job_calls: list[tuple[str, Path, str]] = []
         self.glossary_job_calls: list[tuple[str, Path]] = []
+        self.translation_job_calls: list[
+            tuple[str, Path, str, bool]
+        ] = []
         location = create_project(
             name="Dashboard Review",
             workspace_root=self.workspace_root,
@@ -54,6 +66,7 @@ class DashboardServerTests(unittest.TestCase):
             settings_root=self.settings_root,
             source_job_runner=self._run_source_job,
             glossary_job_runner=self._run_glossary_job,
+            translation_job_runner=self._run_translation_job,
         )
         self.thread = threading.Thread(
             target=self.server.serve_forever,
@@ -99,6 +112,32 @@ class DashboardServerTests(unittest.TestCase):
             "ok": True,
             "status": "succeeded",
             "glossary": {"candidate_count": 4},
+        }
+
+    def _run_translation_job(
+        self,
+        project_id: str,
+        workspace_root: str | Path,
+        model: str,
+        resume: bool,
+        progress: object,
+    ) -> dict[str, object]:
+        self.translation_job_calls.append(
+            (
+                project_id,
+                Path(workspace_root),
+                model,
+                resume,
+            )
+        )
+        progress("Chunk 1/1: requesting translation", 0, 1)  # type: ignore[operator]
+        return {
+            "ok": True,
+            "status": "succeeded",
+            "translation": {
+                "completed_blocks": 3,
+                "completed_chunks": 1,
+            },
         }
 
     def _request(
@@ -204,6 +243,9 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("원문 준비 시작", html)
         self.assertIn("용어 후보 생성", html)
         self.assertIn("Gemini API를 사용하지 않으며", html)
+        self.assertIn("초벌 번역 시작", html)
+        self.assertIn("번역 문체·표현 지침", html)
+        self.assertIn("청크마다 API를 호출", html)
         self.assertIn("휴지통으로 이동", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
 
@@ -430,6 +472,85 @@ class DashboardServerTests(unittest.TestCase):
         )
         self.assertTrue(glossary_project["pipeline"]["final_source_approved"])
 
+    def test_starts_and_reports_a_background_translation_job(self) -> None:
+        create_translation_project(
+            self.workspace_root,
+            [
+                make_translation_block(1, "COMBAT", block_type="heading"),
+                make_translation_block(2, "Each Hunter gains 2 Stamina."),
+                make_translation_block(3, "Hunters may spend Stamina."),
+            ],
+        )
+        status, missing_key = self._request(
+            "/api/jobs/translation",
+            method="POST",
+            payload={
+                "project_id": "translation_project",
+                "prompt": "Translate naturally.",
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            missing_key["code"],
+            "TRANSLATION_JOB_START_FAILED",
+        )
+
+        status, _ = self._request(
+            "/api/settings/ai",
+            method="PUT",
+            payload={
+                "api_key": "dashboard-translation-key",
+                "model": "gemini-3.5-flash",
+            },
+        )
+        self.assertEqual(status, 200)
+        status, started = self._request(
+            "/api/jobs/translation",
+            method="POST",
+            payload={
+                "project_id": "translation_project",
+                "prompt": "Translate naturally.",
+            },
+        )
+        self.assertEqual(status, 202)
+        self.assertEqual(started["job"]["project_id"], "translation_project")
+        self.assertFalse(started["job"]["resume"])
+
+        job: dict[str, object] | None = None
+        for _ in range(100):
+            status, jobs = self._request("/api/jobs")
+            self.assertEqual(status, 200)
+            matching = [
+                value
+                for value in jobs["translation_jobs"]
+                if value["project_id"] == "translation_project"
+            ]
+            if matching and matching[0]["status"] == "succeeded":
+                job = matching[0]
+                break
+            time.sleep(0.01)
+        self.assertIsNotNone(job)
+        self.assertEqual(job["progress_total"], 1)
+        self.assertEqual(
+            self.translation_job_calls,
+            [
+                (
+                    "translation_project",
+                    self.workspace_root.resolve(),
+                    "gemini-3.5-flash",
+                    False,
+                )
+            ],
+        )
+        prompt_path = (
+            self.workspace_root
+            / "translation_project/04_translation/prompt.txt"
+        )
+        self.assertEqual(
+            prompt_path.read_text(encoding="utf-8"),
+            "Translate naturally.",
+        )
+
     def test_opens_ready_review_and_rejects_unknown_type(self) -> None:
         status, opened = self._request(
             "/api/review/open",
@@ -460,6 +581,57 @@ class DashboardServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(reused["url"], opened["url"])
+
+        create_approved_project(self.workspace_root, sample_blocks())
+        build_project_glossary_candidates(
+            project="glossary_project",
+            workspace_root=self.workspace_root,
+        )
+        status, glossary_opened = self._request(
+            "/api/review/open",
+            method="POST",
+            payload={
+                "project_id": "glossary_project",
+                "review_type": "glossary",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(glossary_opened["ok"])
+        with urlopen(str(glossary_opened["url"]), timeout=3) as response:
+            glossary_html = response.read().decode("utf-8")
+        self.assertIn("용어집 생성이 완료되었습니다", glossary_html)
+        self.assertIn(
+            f"const RETURN_URL = {json.dumps(self.server.dashboard_url)};",
+            glossary_html,
+        )
+
+        translation_blocks = translation_sample_blocks()
+        create_translation_project(self.workspace_root, translation_blocks)
+        translate_project(
+            project="translation_project",
+            workspace_root=self.workspace_root,
+            provider=SequenceProvider([valid_response(translation_blocks)]),
+        )
+        status, translation_opened = self._request(
+            "/api/review/open",
+            method="POST",
+            payload={
+                "project_id": "translation_project",
+                "review_type": "translation",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(translation_opened["ok"])
+        with urlopen(str(translation_opened["url"]), timeout=3) as response:
+            translation_html = response.read().decode("utf-8")
+        self.assertIn(
+            "최종 번역 승인이 완료되었습니다",
+            translation_html,
+        )
+        self.assertIn(
+            f"const RETURN_URL = {json.dumps(self.server.dashboard_url)};",
+            translation_html,
+        )
 
         status, invalid = self._request(
             "/api/review/open",

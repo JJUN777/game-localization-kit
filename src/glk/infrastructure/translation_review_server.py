@@ -41,6 +41,22 @@ _SECURITY_HEADERS = {
 }
 
 
+def _validate_return_url(return_url: str | None) -> str | None:
+    if return_url is None:
+        return None
+    parsed = urlsplit(return_url)
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"127.0.0.1", "localhost"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Translation review return URL must be a local HTTP URL.")
+    return return_url
+
+
 class TranslationReviewHttpServer(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -59,7 +75,9 @@ class TranslationReviewHttpServer(ThreadingHTTPServer):
         *,
         project: str | Path,
         workspace_root: str | Path,
+        return_url: str | None = None,
     ) -> None:
+        self.return_url = _validate_return_url(return_url)
         super().__init__(server_address, handler_class)
         self.project = str(project)
         self.workspace_root = str(workspace_root)
@@ -141,6 +159,9 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
             html = template.replace(
                 "__GLK_TOKEN_JSON__",
                 json.dumps(self.server.auth_token),
+            ).replace(
+                "__GLK_RETURN_URL_JSON__",
+                json.dumps(self.server.return_url),
             ).encode("utf-8")
             self._send_bytes(HTTPStatus.OK, html, "text/html; charset=utf-8")
             return
@@ -266,6 +287,7 @@ def create_translation_review_server(
     project: str | Path,
     workspace_root: str | Path = "workspaces",
     port: int = 0,
+    return_url: str | None = None,
 ) -> TranslationReviewHttpServer:
     if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
         raise TranslationReviewError("port must be between 0 and 65535.")
@@ -278,6 +300,7 @@ def create_translation_review_server(
         _TranslationReviewHandler,
         project=project,
         workspace_root=workspace_root,
+        return_url=return_url,
     )
 
 

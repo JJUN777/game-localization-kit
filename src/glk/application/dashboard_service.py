@@ -8,6 +8,7 @@ from typing import Any
 
 from glk.application.project_service import inspect_project, list_projects
 from glk.application.source_registration_service import discover_source_images
+from glk.application.translation_types import DEFAULT_PROJECT_INSTRUCTIONS
 from glk.domain.workspace import WorkspacePaths, is_pdf_source_file
 
 
@@ -125,6 +126,23 @@ def _project_ocr_prompt(summary: Any) -> str:
     return prompt_path.read_text(encoding="utf-8")
 
 
+def _project_translation_prompt(summary: Any) -> dict[str, Any]:
+    prompt_path = WorkspacePaths(Path(summary.path)).translation_prompt
+    if not prompt_path.is_file():
+        return {
+            "value": DEFAULT_PROJECT_INSTRUCTIONS,
+            "saved": False,
+        }
+    try:
+        value = prompt_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        value = ""
+    return {
+        "value": value,
+        "saved": True,
+    }
+
+
 def _project_document(summary: Any, status: dict[str, Any]) -> dict[str, Any]:
     pipeline = status["pipeline"]
     reviews = _review_availability(pipeline)
@@ -155,6 +173,7 @@ def _project_document(summary: Any, status: dict[str, Any]) -> dict[str, Any]:
         "source_type": summary.source_type,
         "source_files": _project_source_files(summary, status),
         "ocr_prompt": _project_ocr_prompt(summary),
+        "translation_prompt": _project_translation_prompt(summary),
         "stage": summary.stage,
         "stage_label": _STAGE_LABELS.get(summary.stage, summary.stage),
         "progress": _STAGE_PROGRESS.get(summary.stage, 0),

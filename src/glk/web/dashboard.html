@@ -556,7 +556,8 @@
     }
 
     .source-job-button,
-    .glossary-job-button {
+    .glossary-job-button,
+    .translation-job-button {
       grid-column: 1 / -1;
       padding: 12px;
       border-radius: 10px;
@@ -576,13 +577,20 @@
       background: var(--green);
     }
 
+    .translation-job-button {
+      border: 1px solid var(--ink);
+      background: var(--ink);
+    }
+
     .source-job-button:hover:not(:disabled),
-    .glossary-job-button:hover:not(:disabled) {
+    .glossary-job-button:hover:not(:disabled),
+    .translation-job-button:hover:not(:disabled) {
       transform: translateY(-1px);
     }
 
     .source-job-button:disabled,
-    .glossary-job-button:disabled {
+    .glossary-job-button:disabled,
+    .translation-job-button:disabled {
       cursor: not-allowed;
       border-color: var(--line);
       color: #999d99;
@@ -1544,6 +1552,64 @@
     </form>
   </dialog>
 
+  <dialog id="translationJobDialog"
+    aria-labelledby="translationJobDialogTitle">
+    <form class="modal-form" id="translationJobForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Background translation job</p>
+          <h2 id="translationJobDialogTitle">초벌 번역 시작</h2>
+        </div>
+        <button class="modal-close" id="translationJobDialogClose"
+          type="button" aria-label="닫기">×</button>
+      </div>
+
+      <p class="source-note">
+        최종 승인 원문과 확정 용어집을 Gemini에 보내 초벌 번역과 검수 파일을
+        만듭니다. 청크마다 API를 호출하므로 입력량과 모델에 따라 비용이
+        발생할 수 있습니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="translationJobProjectName"></strong>
+        <code id="translationJobProjectId"></code>
+      </div>
+      <div class="job-summary">
+        <div>
+          <span>사용 모델</span>
+          <strong id="translationJobModel"></strong>
+        </div>
+        <div>
+          <span>실행 방식</span>
+          <strong id="translationJobMode"></strong>
+        </div>
+      </div>
+      <div class="field" style="margin-top:16px">
+        <label for="translationPrompt">번역 문체·표현 지침</label>
+        <textarea id="translationPrompt" name="translation_prompt"
+          aria-describedby="translationPromptHelp" spellcheck="false"
+          required></textarea>
+        <div class="field-help-row">
+          <p class="field-help" id="translationPromptHelp">
+            용어집, 숫자, token과 블록 보존 규칙보다 우선할 수 없습니다.
+          </p>
+          <span class="field-count" id="translationPromptCount"></span>
+        </div>
+      </div>
+      <p class="field-help" id="translationResumeNote"
+        style="margin-top:14px" hidden>
+        중간 실패 뒤 이어하기에서는 저장된 청크의 입력 hash를 보호하기 위해
+        번역 지침을 변경할 수 없습니다.
+      </p>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel"
+          id="translationJobDialogCancel" type="button">취소</button>
+        <button class="modal-button modal-submit" id="translationJobSubmit"
+          type="submit">초벌 번역 시작</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="deleteDialog" aria-labelledby="deleteDialogTitle">
     <form class="modal-form" id="deleteForm">
       <div class="modal-head">
@@ -1580,6 +1646,7 @@
 
     const AUTH_TOKEN = __GLK_TOKEN_JSON__;
     const MAX_OCR_PROMPT_BYTES = 64 * 1024;
+    const MAX_TRANSLATION_PROMPT_BYTES = 64 * 1024;
     const reviewLabels = {
       source: "원문 검수",
       glossary: "용어 검수",
@@ -1592,9 +1659,11 @@
     let aiModelCatalog = null;
     let sourceJobs = new Map();
     let glossaryJobs = new Map();
+    let translationJobs = new Map();
     let sourceJobPollTimer = null;
     let pendingSourceJobProject = null;
     let pendingGlossaryJobProject = null;
+    let pendingTranslationJobProject = null;
     let pendingSourceProject = null;
     let pendingSourceFilesProject = null;
     let pendingOcrPromptProject = null;
@@ -1821,13 +1890,33 @@
       );
     }
 
+    function translationJobFor(projectId) {
+      return translationJobs.get(projectId) || null;
+    }
+
+    function activeTranslationJob() {
+      return [...translationJobs.values()].find(
+        (job) => ["queued", "running"].includes(job.status),
+      ) || null;
+    }
+
+    function translationJobIsActive(projectId) {
+      const job = translationJobFor(projectId);
+      return Boolean(
+        job && ["queued", "running"].includes(job.status),
+      );
+    }
+
     function activeBackgroundJob() {
-      return activeSourceJob() || activeGlossaryJob();
+      return activeSourceJob()
+        || activeGlossaryJob()
+        || activeTranslationJob();
     }
 
     function projectJobIsActive(projectId) {
       return sourceJobIsActive(projectId)
-        || glossaryJobIsActive(projectId);
+        || glossaryJobIsActive(projectId)
+        || translationJobIsActive(projectId);
     }
 
     function sourceJobStatusLabel(status) {
@@ -1975,6 +2064,83 @@
       </button>`;
     }
 
+    function translationJobStatus(project) {
+      const job = translationJobFor(project.project_id);
+      if (
+        !job
+        || job.status === "succeeded"
+        || project.pipeline.translation_status === "current"
+      ) return "";
+      const active = ["queued", "running"].includes(job.status);
+      const failed = ["failed", "interrupted"].includes(job.status);
+      if (!active && !failed) return "";
+      const progress = (
+        Number.isInteger(job.progress_current)
+        && Number.isInteger(job.progress_total)
+        && job.progress_total > 0
+      )
+        ? `<progress class="job-progress"
+            value="${Math.min(job.progress_current, job.progress_total)}"
+            max="${job.progress_total}"></progress>`
+        : "";
+      const error = job.error
+        ? `<p class="job-error">${escapeHtml(job.error)}</p>`
+        : "";
+      const label = {
+        queued: "초벌 번역 대기",
+        running: "초벌 번역 중",
+        failed: "초벌 번역 실패",
+        interrupted: "초벌 번역 중단",
+      }[job.status] || job.status;
+      return `<div class="job-status${failed ? " failed" : ""}">
+        <div class="job-status-head">
+          <span>${label}</span>
+          <span>${escapeHtml(job.model)}</span>
+        </div>
+        ${progress}
+        <p class="job-status-message">
+          ${escapeHtml(job.progress_message || "")}
+        </p>
+        ${error}
+      </div>`;
+    }
+
+    function translationJobButton(project) {
+      const status = project.pipeline.translation_status;
+      if (
+        project.pipeline.termbase_status !== "current"
+        || status === "current"
+        || translationJobIsActive(project.project_id)
+      ) {
+        return "";
+      }
+      if (status === "stale") {
+        return `<button class="translation-job-button" type="button" disabled
+          title="기존 번역과 사람의 검수 내용을 보호하기 위해 자동으로 덮어쓰지 않습니다.">
+          기존 번역 확인 후 CLI에서 재실행
+        </button>`;
+      }
+      if (!["not_run", "partial"].includes(status)) return "";
+      const active = activeBackgroundJob();
+      if (active) {
+        return `<button class="translation-job-button" type="button" disabled
+          title="${escapeHtml(active.project_id)} 백그라운드 작업이 실행 중입니다.">
+          다른 백그라운드 작업 실행 중
+        </button>`;
+      }
+      if (!aiSettings?.api_key_configured) {
+        return `<button class="translation-job-button" type="button"
+          data-require-ai-settings>
+          AI 설정 후 초벌 번역
+        </button>`;
+      }
+      const resume = status === "partial";
+      return `<button class="translation-job-button" type="button"
+        data-start-translation-job="${escapeHtml(project.project_id)}">
+        ${resume ? "초벌 번역 이어서 실행" : "초벌 번역 시작"}
+      </button>`;
+    }
+
     function setSourceJobs(jobs) {
       sourceJobs = new Map(
         jobs.map((job) => [job.project_id, job]),
@@ -1983,6 +2149,12 @@
 
     function setGlossaryJobs(jobs) {
       glossaryJobs = new Map(
+        jobs.map((job) => [job.project_id, job]),
+      );
+    }
+
+    function setTranslationJobs(jobs) {
+      translationJobs = new Map(
         jobs.map((job) => [job.project_id, job]),
       );
     }
@@ -1998,10 +2170,12 @@
     async function pollSourceJobs() {
       const previousSource = new Map(sourceJobs);
       const previousGlossary = new Map(glossaryJobs);
+      const previousTranslation = new Map(translationJobs);
       try {
         const result = await api("/api/jobs");
         setSourceJobs(result.jobs || []);
         setGlossaryJobs(result.glossary_jobs || []);
+        setTranslationJobs(result.translation_jobs || []);
         const completedSource = [...sourceJobs.values()].find((job) => {
           const before = previousSource.get(job.project_id);
           return (
@@ -2018,7 +2192,17 @@
             && !["queued", "running"].includes(job.status)
           );
         });
-        if (completedSource || completedGlossary) {
+        const completedTranslation = [...translationJobs.values()].find(
+          (job) => {
+            const before = previousTranslation.get(job.project_id);
+            return (
+              before
+              && ["queued", "running"].includes(before.status)
+              && !["queued", "running"].includes(job.status)
+            );
+          },
+        );
+        if (completedSource || completedGlossary || completedTranslation) {
           dashboard = await api("/api/dashboard");
         }
         if (completedSource) {
@@ -2039,6 +2223,20 @@
           showToast(
             message,
             completedGlossary.status !== "succeeded",
+          );
+        }
+        if (completedTranslation) {
+          const blocks = completedTranslation.result
+            ?.translation?.completed_blocks;
+          const message = completedTranslation.status === "succeeded"
+            ? `초벌 번역 ${Number.isInteger(blocks) ? `${blocks}개 블록 ` : ""}생성이 완료되었습니다.`
+            : (
+              completedTranslation.error
+              || completedTranslation.progress_message
+            );
+          showToast(
+            message,
+            completedTranslation.status !== "succeeded",
           );
         }
         render();
@@ -2144,6 +2342,87 @@
         render();
         scheduleSourceJobPoll();
         showToast("용어 후보 생성 작업을 시작했습니다.");
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    function updateTranslationPromptCount() {
+      const value = byId("translationPrompt").value;
+      const byteCount = new TextEncoder().encode(value).length;
+      const overLimit = byteCount > MAX_TRANSLATION_PROMPT_BYTES;
+      const count = byId("translationPromptCount");
+      count.textContent =
+        `${byteCount.toLocaleString()} / ${MAX_TRANSLATION_PROMPT_BYTES.toLocaleString()} bytes`;
+      count.classList.toggle("limit", overLimit);
+      byId("translationJobSubmit").disabled =
+        overLimit || !value.trim();
+    }
+
+    function openTranslationJobDialog(projectId) {
+      if (!aiSettings?.api_key_configured) {
+        showToast("먼저 Gemini API 키를 설정하세요.", true);
+        openAiSettingsDialog();
+        return;
+      }
+      const project = dashboard?.projects.find(
+        (value) => value.project_id === projectId,
+      );
+      if (!project) {
+        showToast("프로젝트 정보를 찾지 못했습니다.", true);
+        return;
+      }
+      if (project.pipeline.termbase_status !== "current") {
+        showToast("먼저 용어집을 확정하세요.", true);
+        return;
+      }
+      const resume = project.pipeline.translation_status === "partial";
+      pendingTranslationJobProject = project;
+      byId("translationJobProjectName").textContent = project.name;
+      byId("translationJobProjectId").textContent = project.project_id;
+      byId("translationJobModel").textContent = aiSettings.model;
+      byId("translationJobMode").textContent =
+        resume ? "저장된 청크부터 이어하기" : "새 초벌 번역";
+      byId("translationPrompt").value =
+        project.translation_prompt?.value || "";
+      byId("translationPrompt").readOnly = resume;
+      byId("translationResumeNote").hidden = !resume;
+      byId("translationJobSubmit").textContent =
+        resume ? "초벌 번역 이어서 실행" : "초벌 번역 시작";
+      updateTranslationPromptCount();
+      byId("translationJobDialog").showModal();
+      if (resume) byId("translationJobDialogCancel").focus();
+      else byId("translationPrompt").focus();
+    }
+
+    function closeTranslationJobDialog() {
+      byId("translationJobDialog").close();
+    }
+
+    async function startTranslationJob(event) {
+      event.preventDefault();
+      if (!pendingTranslationJobProject) return;
+      const submit = byId("translationJobSubmit");
+      submit.disabled = true;
+      try {
+        const result = await api("/api/jobs/translation", {
+          method: "POST",
+          body: JSON.stringify({
+            project_id: pendingTranslationJobProject.project_id,
+            prompt: byId("translationPrompt").value,
+          }),
+        });
+        translationJobs.set(result.job.project_id, result.job);
+        closeTranslationJobDialog();
+        render();
+        scheduleSourceJobPoll();
+        showToast(
+          result.job.resume
+            ? "저장된 초벌 번역을 이어서 실행합니다."
+            : "초벌 번역 작업을 시작했습니다.",
+        );
       } catch (error) {
         showToast(error.message, true);
       } finally {
@@ -2302,8 +2581,10 @@
         <div class="actions">
           ${sourceJobStatus(project)}
           ${glossaryJobStatus(project)}
+          ${translationJobStatus(project)}
           ${sourceJobButton(project)}
           ${glossaryJobButton(project)}
+          ${translationJobButton(project)}
           ${sourceRegistrationButton(project)}
           ${ocrPromptEditButton(project)}
           ${reviewButton(project, "source")}
@@ -2377,6 +2658,7 @@
         dashboard = dashboardDocument;
         setSourceJobs(jobsDocument.jobs || []);
         setGlossaryJobs(jobsDocument.glossary_jobs || []);
+        setTranslationJobs(jobsDocument.translation_jobs || []);
         render();
         scheduleSourceJobPoll();
         const time = new Intl.DateTimeFormat("ko-KR", {
@@ -2809,6 +3091,30 @@
       pendingGlossaryJobProject = null;
       byId("glossaryJobSubmit").disabled = false;
     });
+    byId("translationJobDialogClose").addEventListener(
+      "click",
+      closeTranslationJobDialog,
+    );
+    byId("translationJobDialogCancel").addEventListener(
+      "click",
+      closeTranslationJobDialog,
+    );
+    byId("translationJobForm").addEventListener(
+      "submit",
+      startTranslationJob,
+    );
+    byId("translationPrompt").addEventListener(
+      "input",
+      updateTranslationPromptCount,
+    );
+    byId("translationJobDialog").addEventListener("close", () => {
+      pendingTranslationJobProject = null;
+      byId("translationJobForm").reset();
+      byId("translationPrompt").readOnly = false;
+      byId("translationResumeNote").hidden = true;
+      byId("translationJobSubmit").disabled = false;
+      updateTranslationPromptCount();
+    });
     byId("emptyCreateButton").addEventListener("click", openProjectDialog);
     byId("projectDialogClose").addEventListener("click", closeProjectDialog);
     byId("projectDialogCancel").addEventListener("click", closeProjectDialog);
@@ -2913,6 +3219,15 @@
       if (glossaryStartButton) {
         openGlossaryJobDialog(
           glossaryStartButton.dataset.startGlossaryJob,
+        );
+        return;
+      }
+      const translationStartButton = event.target.closest(
+        "[data-start-translation-job]",
+      );
+      if (translationStartButton) {
+        openTranslationJobDialog(
+          translationStartButton.dataset.startTranslationJob,
         );
         return;
       }

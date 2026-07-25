@@ -34,6 +34,7 @@ from glk.application.dashboard_job_service import (
     DashboardJobManager,
     GlossaryJobRunner,
     SourceJobRunner,
+    TranslationJobRunner,
 )
 from glk.application.dashboard_service import get_dashboard_document
 from glk.application.project_service import (
@@ -62,7 +63,7 @@ from glk.infrastructure.translation_review_server import (
 )
 
 
-_MAX_REQUEST_BYTES = 64 * 1024
+_MAX_REQUEST_BYTES = 128 * 1024
 _MAX_OCR_PROMPT_REQUEST_BYTES = MAX_OCR_PROMPT_BYTES * 6 + 1024
 _MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 _MAX_UPLOAD_FILES = 200
@@ -110,6 +111,7 @@ class DashboardHttpServer(ThreadingHTTPServer):
         settings_root: str | Path,
         source_job_runner: SourceJobRunner | None = None,
         glossary_job_runner: GlossaryJobRunner | None = None,
+        translation_job_runner: TranslationJobRunner | None = None,
     ) -> None:
         super().__init__(server_address, handler_class)
         self.workspace_root = str(workspace_root)
@@ -118,6 +120,7 @@ class DashboardHttpServer(ThreadingHTTPServer):
             workspace_root,
             runner=source_job_runner,
             glossary_runner=glossary_job_runner,
+            translation_runner=translation_job_runner,
         )
         self.auth_token = secrets.token_urlsafe(32)
         self.mutation_lock = threading.Lock()
@@ -160,15 +163,19 @@ class DashboardHttpServer(ThreadingHTTPServer):
                     port=0,
                     return_url=self.dashboard_url,
                 )
-            else:
-                factories = {
-                    "glossary": create_glossary_review_server,
-                    "translation": create_translation_review_server,
-                }
-                review_server = factories[review_type](
+            elif review_type == "glossary":
+                review_server = create_glossary_review_server(
                     project=location.path,
                     workspace_root=self.workspace_root,
                     port=0,
+                    return_url=self.dashboard_url,
+                )
+            else:
+                review_server = create_translation_review_server(
+                    project=location.path,
+                    workspace_root=self.workspace_root,
+                    port=0,
+                    return_url=self.dashboard_url,
                 )
             review_thread = threading.Thread(
                 target=review_server.serve_forever,
@@ -627,6 +634,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                     "glossary_jobs": (
                         self.server.job_manager.list_glossary_jobs()
                     ),
+                    "translation_jobs": (
+                        self.server.job_manager.list_translation_jobs()
+                    ),
                 },
             )
             return
@@ -670,6 +680,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 "/api/review/open",
                 "/api/jobs/source",
                 "/api/jobs/glossary",
+                "/api/jobs/translation",
             }
             and not is_source_upload
         ):
@@ -726,6 +737,33 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                     {"ok": True, "job": job},
                 )
                 return
+            if path == "/api/jobs/translation":
+                project_id = request.get("project_id")
+                prompt = request.get("prompt")
+                if not isinstance(project_id, str) or not project_id.strip():
+                    raise DashboardJobError("project_id is required.")
+                if "/" in project_id or "\\" in project_id:
+                    raise DashboardJobError(
+                        "Project ID must not contain path separators."
+                    )
+                if not isinstance(prompt, str):
+                    raise DashboardJobError("prompt must be a string.")
+                settings = self.server.ai_settings.status()
+                if not settings.api_key_configured:
+                    raise DashboardJobError(
+                        "GEMINI_API_KEY is not configured."
+                    )
+                with self.server.mutation_lock:
+                    job = self.server.job_manager.start_translation_job(
+                        project_id=project_id.strip(),
+                        model=settings.model,
+                        prompt=prompt,
+                    )
+                self._send_json(
+                    HTTPStatus.ACCEPTED,
+                    {"ok": True, "job": job},
+                )
+                return
             if path == "/api/projects":
                 name = request.get("name")
                 project_id = request.get("project_id")
@@ -763,6 +801,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             conflict_code = (
                 "GLOSSARY_JOB_CONFLICT"
                 if path == "/api/jobs/glossary"
+                else "TRANSLATION_JOB_CONFLICT"
+                if path == "/api/jobs/translation"
                 else "SOURCE_JOB_CONFLICT"
             )
             self._send_error_json(
@@ -786,6 +826,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                 if path == "/api/jobs/source"
                 else "GLOSSARY_JOB_START_FAILED"
                 if path == "/api/jobs/glossary"
+                else "TRANSLATION_JOB_START_FAILED"
+                if path == "/api/jobs/translation"
                 else "INVALID_REQUEST"
             )
             self._send_error_json(HTTPStatus.BAD_REQUEST, error, code=code)
@@ -996,6 +1038,7 @@ def create_dashboard_server(
     settings_root: str | Path | None = None,
     source_job_runner: SourceJobRunner | None = None,
     glossary_job_runner: GlossaryJobRunner | None = None,
+    translation_job_runner: TranslationJobRunner | None = None,
     port: int = 0,
 ) -> DashboardHttpServer:
     if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
@@ -1008,6 +1051,7 @@ def create_dashboard_server(
         settings_root=Path.cwd() if settings_root is None else settings_root,
         source_job_runner=source_job_runner,
         glossary_job_runner=glossary_job_runner,
+        translation_job_runner=translation_job_runner,
     )
 
 

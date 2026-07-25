@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -14,11 +15,16 @@ from glk.application.dashboard_job_service import (
     DashboardJobManager,
     run_glossary_pipeline,
     run_registered_source_pipeline,
+    run_translation_pipeline,
 )
 from glk.application.project_service import create_project
 from glk.application.source_registration_service import register_project_pdf
 from glk.domain.workspace import WorkspacePaths
 from tests.test_glossary_service import create_approved_project, sample_blocks
+from tests.test_translation_service import (
+    create_translation_project,
+    make_block as make_translation_block,
+)
 
 
 class DashboardJobManagerTests(unittest.TestCase):
@@ -530,6 +536,163 @@ class DashboardJobManagerTests(unittest.TestCase):
         self.assertIsNotNone(job["finished_at"])
         self.assertIn("종료", job["progress_message"])
         manager.close()
+
+    def test_runs_and_persists_a_successful_translation_job(self) -> None:
+        project_path = create_translation_project(
+            self.workspace_root,
+            [
+                make_translation_block(1, "COMBAT", block_type="heading"),
+                make_translation_block(2, "Each Hunter gains 2 Stamina."),
+                make_translation_block(3, "Hunters may spend Stamina."),
+            ],
+        )
+        completed = threading.Event()
+
+        def translation_runner(
+            project_id: str,
+            workspace_root: str | Path,
+            model: str,
+            resume: bool,
+            progress: object,
+        ) -> dict[str, object]:
+            self.assertEqual(project_id, "translation_project")
+            self.assertEqual(Path(workspace_root), self.workspace_root.resolve())
+            self.assertEqual(model, "gemini-test")
+            self.assertFalse(resume)
+            progress("Chunk 1/1: requesting translation", 0, 1)  # type: ignore[operator]
+            completed.set()
+            return {
+                "ok": True,
+                "status": "succeeded",
+                "translation": {"completed_blocks": 3},
+            }
+
+        manager = DashboardJobManager(
+            self.workspace_root,
+            translation_runner=translation_runner,
+        )
+        started = manager.start_translation_job(
+            project_id="translation_project",
+            model="gemini-test",
+            prompt="Translate naturally.",
+        )
+
+        self.assertEqual(started["status"], "queued")
+        self.assertFalse(started["resume"])
+        self.assertTrue(completed.wait(timeout=2))
+        state_path = WorkspacePaths(
+            project_path
+        ).dashboard_translation_job_state
+        for _ in range(100):
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            if state["status"] == "succeeded":
+                break
+            threading.Event().wait(0.01)
+        self.assertEqual(state["status"], "succeeded")
+        self.assertEqual(
+            state["result"]["translation"]["completed_blocks"],
+            3,
+        )
+        self.assertEqual(
+            manager.list_translation_jobs()[0]["project_id"],
+            "translation_project",
+        )
+        self.assertEqual(
+            WorkspacePaths(project_path).translation_prompt.read_text(
+                encoding="utf-8"
+            ),
+            "Translate naturally.",
+        )
+        manager.close()
+
+    def test_partial_translation_requires_its_saved_prompt(self) -> None:
+        project_path = create_translation_project(
+            self.workspace_root,
+            [
+                make_translation_block(1, "COMBAT", block_type="heading"),
+                make_translation_block(2, "Each Hunter gains 2 Stamina."),
+                make_translation_block(3, "Hunters may spend Stamina."),
+            ],
+        )
+        paths = WorkspacePaths(project_path)
+        saved_prompt = "Keep the saved style."
+        paths.translation_prompt.write_text(saved_prompt, encoding="utf-8")
+        paths.translation_state.write_text(
+            json.dumps(
+                {
+                    "version": "translation-run-v1",
+                    "status": "partial",
+                    "approved_source_sha256": hashlib.sha256(
+                        paths.approved_source_segments.read_bytes()
+                    ).hexdigest(),
+                    "termbase_sha256": hashlib.sha256(
+                        paths.termbase.read_bytes()
+                    ).hexdigest(),
+                    "project_prompt_sha256": hashlib.sha256(
+                        saved_prompt.encode("utf-8")
+                    ).hexdigest(),
+                    "completed_blocks": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        manager = DashboardJobManager(
+            self.workspace_root,
+            translation_runner=lambda *args: {
+                "ok": True,
+                "status": "succeeded",
+            },
+        )
+
+        with self.assertRaisesRegex(DashboardJobError, "saved prompt"):
+            manager.start_translation_job(
+                project_id="translation_project",
+                model="gemini-test",
+                prompt="Changed style.",
+            )
+
+        started = manager.start_translation_job(
+            project_id="translation_project",
+            model="gemini-test",
+            prompt=saved_prompt,
+        )
+        self.assertTrue(started["resume"])
+        manager.close()
+
+    def test_translation_pipeline_reports_chunk_progress(self) -> None:
+        planned = SimpleNamespace(total_chunks=2)
+        translated = SimpleNamespace(
+            to_dict=lambda: {
+                "completed_blocks": 3,
+                "completed_chunks": 2,
+            }
+        )
+        progress: list[tuple[str, int | None, int | None]] = []
+        with patch(
+            "glk.application.dashboard_job_service.translate_project",
+            side_effect=[planned, translated],
+        ) as translate:
+            result = run_translation_pipeline(
+                "translation_project",
+                self.workspace_root,
+                "gemini-test",
+                False,
+                lambda message, current, total: progress.append(
+                    (message, current, total)
+                ),
+            )
+
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(translate.call_count, 2)
+        self.assertTrue(translate.call_args_list[0].kwargs["dry_run"])
+        self.assertFalse(translate.call_args_list[1].kwargs["resume"])
+        translate.call_args_list[1].kwargs["progress"](
+            "Chunk 2/2: requesting translation"
+        )
+        self.assertIn(
+            ("Chunk 2/2: requesting translation", 1, 2),
+            progress,
+        )
 
 
 if __name__ == "__main__":

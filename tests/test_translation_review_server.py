@@ -100,9 +100,12 @@ class TranslationReviewServerTests(unittest.TestCase):
         self.assertIsInstance(html, str)
         self.assertIn("원문과 번역을 함께 검수하세요", html)
         self.assertIn("오류만 재번역", html)
+        self.assertIn("최종 번역 승인이 완료되었습니다", html)
         self.assertIn('number_changed: "숫자 불일치"', html)
         self.assertIn("${issueLabel(issue)} · ${issue.message}", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
+        self.assertNotIn("__GLK_RETURN_URL_JSON__", html)
+        self.assertIn("const RETURN_URL = null;", html)
         self.assertEqual(headers["X-Frame-Options"], "DENY")
         self.assertEqual(self.server.server_address[0], "127.0.0.1")
 
@@ -265,6 +268,34 @@ class TranslationReviewServerTests(unittest.TestCase):
                 encoding="utf-8"
             ),
         )
+
+    def test_injects_only_a_local_return_url(self) -> None:
+        return_url = "http://127.0.0.1:8765/"
+        server = create_translation_review_server(
+            project="translation_project",
+            workspace_root=self.workspace_root,
+            return_url=return_url,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen(server.review_url, timeout=3) as response:
+                html = response.read().decode("utf-8")
+            self.assertIn(
+                f"const RETURN_URL = {json.dumps(return_url)};",
+                html,
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        with self.assertRaisesRegex(ValueError, "local HTTP URL"):
+            create_translation_review_server(
+                project="translation_project",
+                workspace_root=self.workspace_root,
+                return_url="https://attacker.example/",
+            )
 
 
 if __name__ == "__main__":

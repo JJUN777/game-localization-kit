@@ -51,6 +51,11 @@ class DashboardServiceTests(unittest.TestCase):
             self.assertFalse(project["reviews"]["glossary"]["enabled"])
             self.assertFalse(project["reviews"]["translation"]["enabled"])
             self.assertIn("프로젝트 공통 OCR", project["ocr_prompt"])
+            self.assertFalse(project["translation_prompt"]["saved"])
+            self.assertIn(
+                "natural Korean",
+                project["translation_prompt"]["value"],
+            )
 
     def test_source_replacement_is_hidden_after_processing_starts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
