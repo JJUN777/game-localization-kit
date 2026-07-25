@@ -446,7 +446,7 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
   - 완료 기준: 예외 문구 부분 검색이 오류 코드, HTTP 상태 또는 사용자 메시지를
     결정하는 지점이 0개이고, 같은 예외 타입·code가 CLI와 HTTP에서 같은
     행동 안내를 만들어야 한다.
-- [ ] `DOMAIN-002` 번역 내용 검증 문제가 있는 `TranslationSegment`를
+- [x] `DOMAIN-002` 번역 내용 검증 문제가 있는 `TranslationSegment`를
   `flagged` 상태로 기록한다.
   - `TRANSLATION_STATUSES`에는 `flagged`가 있지만 현재 생성 코드는 모든
     segment를 `translated`로 저장하고 문제 block ID는 실행 state의 개수로만
@@ -458,6 +458,10 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
   - 완료 기준: `translation.jsonl`만 읽어도 문제 block을 식별할 수 있고,
     flagged 결과도 현재처럼 번역 검수로 넘어가 사람이 수정할 수 있어야 한다.
     QA 통과와 최종 승인 뒤의 `approved_translation.jsonl` 계약은 변경하지 않는다.
+  - 검증: 숫자·token 검증 문제가 있는 block만 `flagged`로 기록되고 정상
+    block은 `translated`를 유지하며, partial resume·완료 cache에서 상태와
+    오류 개수가 보존됨을 확인했다. 검수 수정 뒤 최종 산출물은 기존처럼
+    `approved`로 생성되며 전체 289개 테스트와 mypy·ruff 검사를 통과했다.
 - [x] `REPO-001` 테스트 샘플을 저장소 최상위에서 `docs/samples/` 또는
   `tests/fixtures/`로 옮긴다.
   - 수동 대시보드 확인용 PDF 1개와 이미지 2개를 `docs/samples/`로 옮기고
@@ -487,12 +491,11 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
 완료된 작업 순서는 각 항목의 상태와 검증 기록으로 보존합니다. 앞으로의 작업은
 서로 연관된 항목을 다음 순서로 나눠 커밋합니다.
 
-1. `DOMAIN-002`: 검수 필요한 번역 segment를 `flagged`로 기록
-2. `QUALITY-004`: 확인된 3개 타입 오류 수정과 `follow_imports = "normal"` 전환
-3. `ERROR-003`: source·glossary·translation·review 순서로 문구 추론 제거
-4. `ARCH-006`: 선택한 use case를 각각 독립 커밋으로 분리
-5. `DOMAIN-001`: 하이픈 결합 경고의 검수 화면 표시 방법 확정과 구현
-6. 제품 기능 후속 항목의 우선순위 결정
+1. `QUALITY-004`: 확인된 3개 타입 오류 수정과 `follow_imports = "normal"` 전환
+2. `ERROR-003`: source·glossary·translation·review 순서로 문구 추론 제거
+3. `ARCH-006`: 선택한 use case를 각각 독립 커밋으로 분리
+4. `DOMAIN-001`: 하이픈 결합 경고의 검수 화면 표시 방법 확정과 구현
+5. 제품 기능 후속 항목의 우선순위 결정
 
 `UPLOAD-001`은 실제 대용량 파일의 메모리 사용량을 측정하기 전까지, `REPO-002`는
 배포 정책과 라이선스를 결정하기 전까지 구현 순서에 넣지 않습니다.

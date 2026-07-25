@@ -897,7 +897,7 @@ def _build_translation_segments(
             translation_sha256=_sha256_bytes(
                 translated_text.encode("utf-8")
             ),
-            status="translated",
+            status="flagged" if content_errors else "translated",
             model=provider.model_name,
             prompt_sha256=prompt_hash,
             termbase_sha256=termbase_hash,

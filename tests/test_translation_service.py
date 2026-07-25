@@ -676,6 +676,36 @@ class TranslationFoundationTests(unittest.TestCase):
             )
             self.assertEqual(state["status"], "complete")
             self.assertEqual(state["validation_issue_blocks"], 1)
+            segment_path = (
+                project_path / ".glk/segments/translation.jsonl"
+            )
+            segments = [
+                TranslationSegment.from_dict(json.loads(line))
+                for line in segment_path.read_text(
+                    encoding="utf-8"
+                ).splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(
+                {
+                    segment.source_block_id: segment.status
+                    for segment in segments
+                },
+                {
+                    blocks[0].id: "translated",
+                    blocks[1].id: "translated",
+                    blocks[2].id: "flagged",
+                },
+            )
+            segment_data = segment_path.read_bytes()
+            cached = translate_project(
+                project="translation_project",
+                workspace_root=workspace_root,
+                provider=SequenceProvider([]),
+            )
+            self.assertTrue(cached.cached)
+            self.assertEqual(cached.validation_issue_blocks, 1)
+            self.assertEqual(segment_path.read_bytes(), segment_data)
             self.assertTrue(
                 (project_path / "04_translation/review.txt").is_file()
             )
@@ -686,6 +716,147 @@ class TranslationFoundationTests(unittest.TestCase):
             )
             self.assertFalse(qa.passed)
             self.assertGreaterEqual(qa.error_count, 2)
+
+            review_path = project_path / "04_translation/review.txt"
+            review_path.write_text(
+                review_path.read_text(encoding="utf-8").replace(
+                    "사냥꾼들은 11을 사용할 수 있습니다.",
+                    "사냥꾼들은 {HP} 10을 사용할 수 있습니다.",
+                ),
+                encoding="utf-8",
+            )
+            finalized = finalize_project_translation_review(
+                project="translation_project",
+                workspace_root=workspace_root,
+            )
+            self.assertTrue(finalized.finalized)
+            approved_path = (
+                project_path
+                / ".glk/segments/approved_translation.jsonl"
+            )
+            approved = [
+                ApprovedTranslationSegment.from_dict(json.loads(line))
+                for line in approved_path.read_text(
+                    encoding="utf-8"
+                ).splitlines()
+                if line.strip()
+            ]
+            self.assertTrue(
+                all(segment.status == "approved" for segment in approved)
+            )
+            corrected = next(
+                segment
+                for segment in approved
+                if segment.source_block_id == blocks[2].id
+            )
+            self.assertEqual(
+                corrected.corrected_translation,
+                "사냥꾼들은 {HP} 10을 사용할 수 있습니다.",
+            )
+
+    def test_resume_preserves_flagged_segments_and_issue_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            blocks = sample_blocks()
+            project_path = create_translation_project(
+                workspace_root,
+                blocks,
+            )
+            valid_by_id = {
+                item["id"]: item["text"]
+                for item in valid_response(blocks)["translations"]
+            }
+            first_valid = {
+                "translations": [
+                    {
+                        "id": blocks[0].id,
+                        "text": valid_by_id[blocks[0].id],
+                    }
+                ]
+            }
+            second_invalid = {
+                "translations": [
+                    {
+                        "id": blocks[1].id,
+                        "text": "각 사냥꾼은 스태미나 3을 얻습니다.",
+                    }
+                ]
+            }
+            missing_third = {"translations": []}
+
+            with self.assertRaisesRegex(TranslationError, "use --resume"):
+                translate_project(
+                    project="translation_project",
+                    workspace_root=workspace_root,
+                    provider=SequenceProvider(
+                        [
+                            first_valid,
+                            second_invalid,
+                            second_invalid,
+                            missing_third,
+                            missing_third,
+                        ]
+                    ),
+                    max_characters=1,
+                )
+
+            segment_path = (
+                project_path / ".glk/segments/translation.jsonl"
+            )
+            partial_segments = [
+                TranslationSegment.from_dict(json.loads(line))
+                for line in segment_path.read_text(
+                    encoding="utf-8"
+                ).splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(partial_segments), 2)
+            self.assertEqual(
+                [segment.status for segment in partial_segments],
+                ["translated", "flagged"],
+            )
+            partial_state = json.loads(
+                (
+                    project_path / ".glk/state/translation.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                partial_state["validation_issue_blocks"],
+                1,
+            )
+
+            resumed = translate_project(
+                project="translation_project",
+                workspace_root=workspace_root,
+                provider=SequenceProvider(
+                    [
+                        {
+                            "translations": [
+                                {
+                                    "id": blocks[2].id,
+                                    "text": valid_by_id[blocks[2].id],
+                                }
+                            ]
+                        }
+                    ]
+                ),
+                max_characters=1,
+                resume=True,
+            )
+
+            self.assertTrue(resumed.resumed)
+            self.assertEqual(resumed.validation_issue_blocks, 1)
+            completed_segments = [
+                TranslationSegment.from_dict(json.loads(line))
+                for line in segment_path.read_text(
+                    encoding="utf-8"
+                ).splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(
+                [segment.status for segment in completed_segments],
+                ["translated", "flagged", "translated"],
+            )
 
     def test_preserves_partial_state_and_resumes_after_validation_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
