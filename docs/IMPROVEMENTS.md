@@ -236,7 +236,7 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
   - 검증: 정적·동적 경로, 1회 URL decode, query 분리, 잘못된 메서드·빈 ID·
     중첩 경로 단위 테스트를 포함한 전체 246개 테스트와 mypy 23개 파일 검사를
     통과했다.
-- [-] `ARCH-004` `translate_project`, `import_project_glossary`,
+- [x] `ARCH-004` `translate_project`, `import_project_glossary`,
   `_inspect_pipeline_status` 등 대형 함수를 책임별로 분리한다.
   - [x] `_inspect_pipeline_status`를 원문, 용어, 번역 실행, 번역 검수 상태
     판정과 최종 조립 단계로 분리했다.
@@ -247,7 +247,7 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     - 검증: 자동 후보 보존, 수동 용어 증거, 중복·미완료·변경 ID 거부,
       cache 재사용을 포함한 전체 246개 테스트와 mypy 25개 파일 검사를
       통과했다.
-  - [ ] `translate_project`의 입력 준비·checkpoint 복원·청크 실행·최종화를
+  - [x] `translate_project`의 입력 준비·checkpoint 복원·청크 실행·최종화를
     분리한다.
     - [x] 프로젝트·termbase·prompt·model 입력 준비, dry-run 결과 생성과
       기존 checkpoint 검증·꼬리 복구·cache 반환을 분리했다.
@@ -257,8 +257,11 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
       분리했다.
       - 검증: 구조 오류 재시도, 내용 경고 보존과 provider 실패 resume를
         포함한 전체 246개 테스트와 mypy 26개 파일 검사를 통과했다.
-    - [ ] 초기·실패·진행 state 기록, 청크 append와 최종 review 생성을
+    - [x] 초기·실패·진행 state 기록, 청크 append와 최종 review 생성을
       분리한다.
+      - 검증: 초기·실패·진행 checkpoint 기록, 중단 뒤 resume, 청크 append와
+        최종 draft·review·state 생성을 포함한 전체 246개 테스트와 mypy
+        26개 파일 검사를 통과했다.
   - 완료 기준: 세 진입 함수는 한 use case의 순서만 조정하고, 각 하위 함수는
     독립된 상태 판정·검증·저장 책임 하나만 가져야 한다.
 - [x] `ARCH-005` 세 Gemini provider의 공통 동작을 기반 모듈로 추출한다.

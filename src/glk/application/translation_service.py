@@ -910,6 +910,163 @@ def _build_translation_segments(
     return chunk_segments, issue_messages, issue_block_ids
 
 
+def _write_partial_translation_state(
+    inputs: _TranslationInputs,
+    provider: TranslationProvider,
+    *,
+    max_characters: int,
+    completed_blocks: int,
+    completed_chunks: int,
+    output_hash: str | None,
+    output_bytes: int,
+    failed_chunk: str | None,
+    failure_reason: str | None,
+    validation_issue_count: int,
+    validation_issue_blocks: int,
+) -> None:
+    _write_json_atomic(
+        inputs.paths.translation_state,
+        {
+            "schema_version": 1,
+            "status": "partial",
+            "version": TRANSLATION_RUN_VERSION,
+            "input_sha256": inputs.input_hash,
+            "approved_source_sha256": inputs.approved_hash,
+            "termbase_sha256": inputs.termbase_hash,
+            "project_prompt_sha256": inputs.prompt_hash,
+            "project_prompt_file": inputs.paths.relative(
+                inputs.paths.translation_prompt
+            ),
+            "model": provider.model_name,
+            "provider_prompt_version": provider.prompt_version,
+            "hard_rules_version": TRANSLATION_HARD_RULES_VERSION,
+            "max_characters": max_characters,
+            "total_blocks": len(inputs.blocks),
+            "total_chunks": len(inputs.chunks),
+            "completed_blocks": completed_blocks,
+            "completed_chunks": completed_chunks,
+            "translation_output_sha256": output_hash,
+            "translation_output_bytes": output_bytes,
+            "failed_chunk": failed_chunk,
+            "failure_reason": failure_reason,
+            "validation_issue_count": validation_issue_count,
+            "validation_issue_blocks": validation_issue_blocks,
+            "updated_at": _utc_now(),
+        },
+    )
+
+
+def _finalize_translation_run(
+    inputs: _TranslationInputs,
+    prompt_path: Path,
+    provider: TranslationProvider,
+    *,
+    max_characters: int,
+    previous_state: dict[str, Any] | None,
+    resumed: bool,
+    completed: dict[str, TranslationSegment],
+    output_digest: Any,
+    output_bytes: int,
+    validation_issue_messages: list[str],
+    validation_issue_block_ids: set[str],
+) -> TranslationRunResult:
+    paths = inputs.paths
+    ordered_segments = sorted(
+        completed.values(),
+        key=lambda item: item.source_order,
+    )
+    if len(ordered_segments) != len(inputs.blocks):
+        raise TranslationError(
+            "Translation completed without every approved source block."
+        )
+    output_data = _serialize_segments(ordered_segments)
+    if output_bytes == 0:
+        _write_bytes_atomic(paths.translation_segments, output_data)
+        output_digest = hashlib.sha256(output_data)
+        output_bytes = len(output_data)
+    output_hash = output_digest.hexdigest()
+    if (
+        output_bytes != len(output_data)
+        or output_hash != _sha256_bytes(output_data)
+    ):
+        raise TranslationError(
+            "Translation checkpoint does not match completed segments."
+        )
+    review_data = _render_translation_review(ordered_segments)
+    draft_hash = _sha256_bytes(review_data)
+    _write_bytes_atomic(paths.translation_draft, review_data)
+    review_created = not paths.translation_review.is_file()
+    if review_created:
+        _write_bytes_atomic(paths.translation_review, review_data)
+        review_status = "current"
+        review_base_draft_hash = draft_hash
+    else:
+        previous_base = (
+            previous_state.get("review_base_draft_sha256")
+            if previous_state
+            else None
+        )
+        review_status = "current" if previous_base == draft_hash else "stale"
+        review_base_draft_hash = previous_base
+    _write_json_atomic(
+        paths.translation_state,
+        {
+            "schema_version": 1,
+            "status": "complete",
+            "version": TRANSLATION_RUN_VERSION,
+            "input_sha256": inputs.input_hash,
+            "approved_source_sha256": inputs.approved_hash,
+            "termbase_sha256": inputs.termbase_hash,
+            "project_prompt_sha256": inputs.prompt_hash,
+            "project_prompt_file": paths.relative(paths.translation_prompt),
+            "hard_rules_version": TRANSLATION_HARD_RULES_VERSION,
+            "model": provider.model_name,
+            "provider_prompt_version": provider.prompt_version,
+            "max_characters": max_characters,
+            "total_blocks": len(inputs.blocks),
+            "total_chunks": len(inputs.chunks),
+            "completed_blocks": len(ordered_segments),
+            "completed_chunks": len(inputs.chunks),
+            "translation_output_file": paths.relative(
+                paths.translation_segments
+            ),
+            "translation_output_sha256": output_hash,
+            "translation_output_bytes": output_bytes,
+            "draft_file": paths.relative(paths.translation_draft),
+            "draft_sha256": draft_hash,
+            "review_file": paths.relative(paths.translation_review),
+            "review_status": review_status,
+            "review_base_draft_sha256": review_base_draft_hash,
+            "failed_chunk": None,
+            "failure_reason": None,
+            "validation_issue_count": len(validation_issue_messages),
+            "validation_issue_blocks": len(validation_issue_block_ids),
+            "updated_at": _utc_now(),
+        },
+    )
+    return TranslationRunResult(
+        project_path=str(inputs.project_path),
+        model=provider.model_name,
+        approved_source_sha256=inputs.approved_hash,
+        termbase_sha256=inputs.termbase_hash,
+        project_prompt_sha256=inputs.prompt_hash,
+        input_sha256=inputs.input_hash,
+        total_blocks=len(inputs.blocks),
+        total_chunks=len(inputs.chunks),
+        completed_blocks=len(ordered_segments),
+        completed_chunks=len(inputs.chunks),
+        output_file=str(paths.translation_segments),
+        draft_file=str(paths.translation_draft),
+        review_file=str(paths.translation_review),
+        review_status=review_status,
+        prompt_file=str(prompt_path),
+        validation_issue_count=len(validation_issue_messages),
+        validation_issue_blocks=len(validation_issue_block_ids),
+        resumed=resumed,
+        review_created=review_created,
+    )
+
+
 def translate_project(
     *,
     project: str | Path,
@@ -939,16 +1096,11 @@ def translate_project(
     blocks = list(inputs.blocks)
     termbase_entries = list(inputs.termbase_entries)
     project_instructions = inputs.project_instructions
-    approved_hash = inputs.approved_hash
     termbase_hash = inputs.termbase_hash
     prompt_hash = inputs.prompt_hash
     chunks = list(inputs.chunks)
-    input_hash = inputs.input_hash
 
     output_path = paths.translation_segments
-    state_path = paths.translation_state
-    draft_path = paths.translation_draft
-    review_path = paths.translation_review
     restored = _restore_translation_checkpoint(
         inputs,
         canonical_prompt_path,
@@ -983,33 +1135,18 @@ def translate_project(
             )
 
     if not existing_segments:
-        _write_json_atomic(
-            state_path,
-            {
-                "schema_version": 1,
-                "status": "partial",
-                "version": TRANSLATION_RUN_VERSION,
-                "input_sha256": input_hash,
-                "approved_source_sha256": approved_hash,
-                "termbase_sha256": termbase_hash,
-                "project_prompt_sha256": prompt_hash,
-                "project_prompt_file": paths.relative(paths.translation_prompt),
-                "model": active_provider.model_name,
-                "provider_prompt_version": active_provider.prompt_version,
-                "hard_rules_version": TRANSLATION_HARD_RULES_VERSION,
-                "max_characters": max_characters,
-                "total_blocks": len(blocks),
-                "total_chunks": len(chunks),
-                "completed_blocks": 0,
-                "completed_chunks": 0,
-                "translation_output_sha256": None,
-                "translation_output_bytes": 0,
-                "failed_chunk": None,
-                "failure_reason": None,
-                "validation_issue_count": 0,
-                "validation_issue_blocks": 0,
-                "updated_at": _utc_now(),
-            },
+        _write_partial_translation_state(
+            inputs,
+            active_provider,
+            max_characters=max_characters,
+            completed_blocks=0,
+            completed_chunks=0,
+            output_hash=None,
+            output_bytes=0,
+            failed_chunk=None,
+            failure_reason=None,
+            validation_issue_count=0,
+            validation_issue_blocks=0,
         )
 
     completed_chunks = 0
@@ -1049,33 +1186,18 @@ def translate_project(
             output_hash = (
                 output_digest.hexdigest() if output_bytes > 0 else None
             )
-            _write_json_atomic(
-                state_path,
-                {
-                    "schema_version": 1,
-                    "status": "partial",
-                    "version": TRANSLATION_RUN_VERSION,
-                    "input_sha256": input_hash,
-                    "approved_source_sha256": approved_hash,
-                    "termbase_sha256": termbase_hash,
-                    "project_prompt_sha256": prompt_hash,
-                    "project_prompt_file": paths.relative(paths.translation_prompt),
-                    "model": active_provider.model_name,
-                    "provider_prompt_version": active_provider.prompt_version,
-                    "hard_rules_version": TRANSLATION_HARD_RULES_VERSION,
-                    "max_characters": max_characters,
-                    "total_blocks": len(blocks),
-                    "total_chunks": len(chunks),
-                    "completed_blocks": len(completed),
-                    "completed_chunks": completed_chunks,
-                    "translation_output_sha256": output_hash,
-                    "translation_output_bytes": output_bytes,
-                    "failed_chunk": chunk.id,
-                    "failure_reason": str(error),
-                    "validation_issue_count": len(validation_issue_messages),
-                    "validation_issue_blocks": len(validation_issue_block_ids),
-                    "updated_at": _utc_now(),
-                },
+            _write_partial_translation_state(
+                inputs,
+                active_provider,
+                max_characters=max_characters,
+                completed_blocks=len(completed),
+                completed_chunks=completed_chunks,
+                output_hash=output_hash,
+                output_bytes=output_bytes,
+                failed_chunk=chunk.id,
+                failure_reason=str(error),
+                validation_issue_count=len(validation_issue_messages),
+                validation_issue_blocks=len(validation_issue_block_ids),
             )
             raise TranslationError(
                 f"Translation failed for {chunk.id}. Completed chunks were preserved; "
@@ -1104,121 +1226,30 @@ def translate_project(
             _write_bytes_atomic(output_path, chunk_data)
         output_digest.update(chunk_data)
         output_bytes += len(chunk_data)
-        _write_json_atomic(
-            state_path,
-            {
-                "schema_version": 1,
-                "status": "partial",
-                "version": TRANSLATION_RUN_VERSION,
-                "input_sha256": input_hash,
-                "approved_source_sha256": approved_hash,
-                "termbase_sha256": termbase_hash,
-                "project_prompt_sha256": prompt_hash,
-                "project_prompt_file": paths.relative(paths.translation_prompt),
-                "model": active_provider.model_name,
-                "provider_prompt_version": active_provider.prompt_version,
-                "hard_rules_version": TRANSLATION_HARD_RULES_VERSION,
-                "max_characters": max_characters,
-                "total_blocks": len(blocks),
-                "total_chunks": len(chunks),
-                "completed_blocks": len(completed),
-                "completed_chunks": completed_chunks,
-                "translation_output_sha256": output_digest.hexdigest(),
-                "translation_output_bytes": output_bytes,
-                "failed_chunk": None,
-                "failure_reason": None,
-                "validation_issue_count": len(validation_issue_messages),
-                "validation_issue_blocks": len(validation_issue_block_ids),
-                "updated_at": _utc_now(),
-            },
+        _write_partial_translation_state(
+            inputs,
+            active_provider,
+            max_characters=max_characters,
+            completed_blocks=len(completed),
+            completed_chunks=completed_chunks,
+            output_hash=output_digest.hexdigest(),
+            output_bytes=output_bytes,
+            failed_chunk=None,
+            failure_reason=None,
+            validation_issue_count=len(validation_issue_messages),
+            validation_issue_blocks=len(validation_issue_block_ids),
         )
 
-    ordered_segments = sorted(completed.values(), key=lambda item: item.source_order)
-    if len(ordered_segments) != len(blocks):
-        raise TranslationError("Translation completed without every approved source block.")
-    output_data = _serialize_segments(ordered_segments)
-    if output_bytes == 0:
-        _write_bytes_atomic(output_path, output_data)
-        output_digest = hashlib.sha256(output_data)
-        output_bytes = len(output_data)
-    output_hash = output_digest.hexdigest()
-    if (
-        output_bytes != len(output_data)
-        or output_hash != _sha256_bytes(output_data)
-    ):
-        raise TranslationError(
-            "Translation checkpoint does not match completed segments."
-        )
-    review_data = _render_translation_review(ordered_segments)
-    draft_hash = _sha256_bytes(review_data)
-    _write_bytes_atomic(draft_path, review_data)
-
-    review_created = not review_path.is_file()
-    if review_created:
-        _write_bytes_atomic(review_path, review_data)
-        review_status = "current"
-        review_base_draft_hash = draft_hash
-    else:
-        previous_base = (
-            previous_state.get("review_base_draft_sha256")
-            if previous_state
-            else None
-        )
-        review_status = "current" if previous_base == draft_hash else "stale"
-        review_base_draft_hash = previous_base
-
-    _write_json_atomic(
-        state_path,
-        {
-            "schema_version": 1,
-            "status": "complete",
-            "version": TRANSLATION_RUN_VERSION,
-            "input_sha256": input_hash,
-            "approved_source_sha256": approved_hash,
-            "termbase_sha256": termbase_hash,
-            "project_prompt_sha256": prompt_hash,
-            "project_prompt_file": paths.relative(paths.translation_prompt),
-            "hard_rules_version": TRANSLATION_HARD_RULES_VERSION,
-            "model": active_provider.model_name,
-            "provider_prompt_version": active_provider.prompt_version,
-            "max_characters": max_characters,
-            "total_blocks": len(blocks),
-            "total_chunks": len(chunks),
-            "completed_blocks": len(ordered_segments),
-            "completed_chunks": len(chunks),
-            "translation_output_file": paths.relative(paths.translation_segments),
-            "translation_output_sha256": output_hash,
-            "translation_output_bytes": output_bytes,
-            "draft_file": paths.relative(paths.translation_draft),
-            "draft_sha256": draft_hash,
-            "review_file": paths.relative(paths.translation_review),
-            "review_status": review_status,
-            "review_base_draft_sha256": review_base_draft_hash,
-            "failed_chunk": None,
-            "failure_reason": None,
-            "validation_issue_count": len(validation_issue_messages),
-            "validation_issue_blocks": len(validation_issue_block_ids),
-            "updated_at": _utc_now(),
-        },
-    )
-    return TranslationRunResult(
-        project_path=str(inputs.project_path),
-        model=active_provider.model_name,
-        approved_source_sha256=approved_hash,
-        termbase_sha256=termbase_hash,
-        project_prompt_sha256=prompt_hash,
-        input_sha256=input_hash,
-        total_blocks=len(blocks),
-        total_chunks=len(chunks),
-        completed_blocks=len(ordered_segments),
-        completed_chunks=len(chunks),
-        output_file=str(output_path),
-        draft_file=str(draft_path),
-        review_file=str(review_path),
-        review_status=review_status,
-        prompt_file=str(canonical_prompt_path),
-        validation_issue_count=len(validation_issue_messages),
-        validation_issue_blocks=len(validation_issue_block_ids),
+    return _finalize_translation_run(
+        inputs,
+        canonical_prompt_path,
+        active_provider,
+        max_characters=max_characters,
+        previous_state=previous_state,
         resumed=bool(existing_segments),
-        review_created=review_created,
+        completed=completed,
+        output_digest=output_digest,
+        output_bytes=output_bytes,
+        validation_issue_messages=validation_issue_messages,
+        validation_issue_block_ids=validation_issue_block_ids,
     )
