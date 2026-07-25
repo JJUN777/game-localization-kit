@@ -15,7 +15,7 @@ from send2trash import send2trash
 import tempfile
 import threading
 from typing import Any
-from urllib.parse import parse_qs, quote, unquote, urlsplit
+from urllib.parse import parse_qs, quote
 import webbrowser
 
 from glk.application._io import write_bytes_atomic
@@ -64,6 +64,10 @@ from glk.application.translation_prompt_service import (
 )
 from glk.config import resolve_settings_root
 from glk.error_response import localized_detail_message
+from glk.infrastructure.dashboard_routes import (
+    DashboardRoute,
+    match_dashboard_route,
+)
 from glk.infrastructure.glossary_review_server import (
     create_glossary_review_server,
 )
@@ -386,75 +390,44 @@ class _DashboardHandler(LocalHttpRequestHandler):
             ],
         }
 
-    @staticmethod
-    def _source_upload_project_id(path: str) -> str | None:
-        prefix = "/api/projects/"
-        suffix = "/source"
-        if (
-            not path.startswith(prefix)
-            or not path.endswith(suffix)
-            or path == prefix + suffix.lstrip("/")
-        ):
+    def _route_request(self, method: str) -> DashboardRoute | None:
+        route = match_dashboard_route(method, self.path)
+        if route is None:
+            self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
             return None
-        return unquote(path[len(prefix) : -len(suffix)])
-
-    @staticmethod
-    def _ocr_prompt_project_id(path: str) -> str | None:
-        prefix = "/api/projects/"
-        suffix = "/ocr-prompt"
-        if (
-            not path.startswith(prefix)
-            or not path.endswith(suffix)
-            or path == prefix + suffix.lstrip("/")
-        ):
+        if route.access == "localhost" and not self._host_is_local():
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Only localhost is allowed.",
+            )
             return None
-        return unquote(path[len(prefix) : -len(suffix)])
-
-    @staticmethod
-    def _translation_prompt_project_id(path: str) -> str | None:
-        prefix = "/api/projects/"
-        suffix = "/translation-prompt"
-        if (
-            not path.startswith(prefix)
-            or not path.endswith(suffix)
-            or path == prefix + suffix.lstrip("/")
-        ):
+        if route.access == "session" and not self._api_authorized():
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Invalid review session.",
+            )
             return None
-        return unquote(path[len(prefix) : -len(suffix)])
+        return route
 
     def _handle_source_upload(
         self,
-        path: str,
+        project_id: str,
         *,
         replace: bool,
     ) -> None:
-        upload_project_id = self._source_upload_project_id(path)
         error_code = (
             "SOURCE_REPLACE_FAILED"
             if replace
             else "SOURCE_REGISTER_FAILED"
         )
-        if upload_project_id is None:
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
-            return
-        if not self._api_authorized():
-            self._send_error_json(
-                HTTPStatus.FORBIDDEN,
-                "Invalid review session.",
-            )
-            return
-        if (
-            not upload_project_id
-            or "/" in upload_project_id
-            or "\\" in upload_project_id
-        ):
+        if not project_id or "/" in project_id or "\\" in project_id:
             self._send_error_json(
                 HTTPStatus.BAD_REQUEST,
                 "Project ID must not contain path separators.",
                 code=error_code,
             )
             return
-        if self.server.job_manager.is_project_active(upload_project_id):
+        if self.server.job_manager.is_project_active(project_id):
             self._send_error_json(
                 HTTPStatus.CONFLICT,
                 "Source replacement is unavailable while a source job is running.",
@@ -464,9 +437,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
         try:
             source_type, uploads, ocr_prompt = self._read_source_upload()
             with self.server.mutation_lock:
-                if self.server.job_manager.is_project_active(
-                    upload_project_id
-                ):
+                if self.server.job_manager.is_project_active(project_id):
                     self._send_error_json(
                         HTTPStatus.CONFLICT,
                         (
@@ -477,7 +448,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                     )
                     return
                 source = self._register_uploaded_source(
-                    upload_project_id,
+                    project_id,
                     source_type,
                     uploads,
                     ocr_prompt,
@@ -524,18 +495,13 @@ class _DashboardHandler(LocalHttpRequestHandler):
         )
 
     def do_GET(self) -> None:
-        parsed_url = urlsplit(self.path)
-        path = parsed_url.path
-        if path == "/favicon.ico":
+        route = self._route_request("GET")
+        if route is None:
+            return
+        if route.name == "favicon":
             self._send_bytes(HTTPStatus.NO_CONTENT, b"", "image/x-icon")
             return
-        if not self._host_is_local():
-            self._send_error_json(
-                HTTPStatus.FORBIDDEN,
-                "Only localhost is allowed.",
-            )
-            return
-        if path == "/":
+        if route.name == "dashboard_ui":
             template = (
                 resources.files("glk.web")
                 .joinpath("dashboard.html")
@@ -551,13 +517,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 "text/html; charset=utf-8",
             )
             return
-        if path == "/api/dashboard":
-            if not self._api_authorized():
-                self._send_error_json(
-                    HTTPStatus.FORBIDDEN,
-                    "Invalid review session.",
-                )
-                return
+        if route.name == "dashboard":
             try:
                 document = get_dashboard_document(self.server.workspace_root)
             except (OSError, TypeError, ValueError) as error:
@@ -569,13 +529,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 return
             self._send_json(HTTPStatus.OK, document)
             return
-        if path == "/api/jobs":
-            if not self._api_authorized():
-                self._send_error_json(
-                    HTTPStatus.FORBIDDEN,
-                    "Invalid review session.",
-                )
-                return
+        if route.name == "jobs":
             self._send_json(
                 HTTPStatus.OK,
                 {
@@ -590,13 +544,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 },
             )
             return
-        if path == "/api/settings/ai":
-            if not self._api_authorized():
-                self._send_error_json(
-                    HTTPStatus.FORBIDDEN,
-                    "Invalid review session.",
-                )
-                return
+        if route.name == "ai_settings":
             try:
                 settings = self.server.ai_settings.status()
                 model_catalog = load_gemini_model_catalog()
@@ -619,16 +567,10 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 },
             )
             return
-        if path == "/api/output":
-            if not self._api_authorized():
-                self._send_error_json(
-                    HTTPStatus.FORBIDDEN,
-                    "Invalid review session.",
-                )
-                return
+        if route.name == "output":
             try:
                 query = parse_qs(
-                    parsed_url.query,
+                    route.query,
                     keep_blank_values=True,
                     strict_parsing=True,
                 )
@@ -670,35 +612,18 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 },
             )
             return
-        self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
 
     def do_POST(self) -> None:
-        path = urlsplit(self.path).path
-        is_source_upload = self._source_upload_project_id(path) is not None
-        if (
-            path not in {
-                "/api/projects",
-                "/api/review/open",
-                "/api/jobs/source",
-                "/api/jobs/glossary",
-                "/api/jobs/translation",
-            }
-            and not is_source_upload
-        ):
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
+        route = self._route_request("POST")
+        if route is None:
             return
-        if not self._api_authorized():
-            self._send_error_json(
-                HTTPStatus.FORBIDDEN,
-                "Invalid review session.",
-            )
-            return
-        if is_source_upload:
-            self._handle_source_upload(path, replace=False)
+        if route.name == "source_upload":
+            assert route.project_id is not None
+            self._handle_source_upload(route.project_id, replace=False)
             return
         try:
             request = self._read_request_json(max_bytes=_MAX_REQUEST_BYTES)
-            if path == "/api/jobs/source":
+            if route.name == "source_job":
                 project_id = request.get("project_id")
                 if not isinstance(project_id, str) or not project_id.strip():
                     raise DashboardJobError("project_id is required.")
@@ -721,7 +646,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                     {"ok": True, "job": job},
                 )
                 return
-            if path == "/api/jobs/glossary":
+            if route.name == "glossary_job":
                 project_id = request.get("project_id")
                 if not isinstance(project_id, str) or not project_id.strip():
                     raise DashboardJobError("project_id is required.")
@@ -738,7 +663,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                     {"ok": True, "job": job},
                 )
                 return
-            if path == "/api/jobs/translation":
+            if route.name == "translation_job":
                 project_id = request.get("project_id")
                 prompt = request.get("prompt")
                 force = request.get("force", False)
@@ -769,7 +694,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                     {"ok": True, "job": job},
                 )
                 return
-            if path == "/api/projects":
+            if route.name == "projects":
                 name = request.get("name")
                 project_id = request.get("project_id")
                 if not isinstance(name, str) or not name.strip():
@@ -805,9 +730,9 @@ class _DashboardHandler(LocalHttpRequestHandler):
         except DashboardJobConflict as error:
             conflict_code = (
                 "GLOSSARY_JOB_CONFLICT"
-                if path == "/api/jobs/glossary"
+                if route.name == "glossary_job"
                 else "TRANSLATION_JOB_CONFLICT"
-                if path == "/api/jobs/translation"
+                if route.name == "translation_job"
                 else "SOURCE_JOB_CONFLICT"
             )
             self._send_error_json(
@@ -826,13 +751,13 @@ class _DashboardHandler(LocalHttpRequestHandler):
         ) as error:
             code = (
                 "PROJECT_INIT_FAILED"
-                if path == "/api/projects"
+                if route.name == "projects"
                 else "SOURCE_JOB_START_FAILED"
-                if path == "/api/jobs/source"
+                if route.name == "source_job"
                 else "GLOSSARY_JOB_START_FAILED"
-                if path == "/api/jobs/glossary"
+                if route.name == "glossary_job"
                 else "TRANSLATION_JOB_START_FAILED"
-                if path == "/api/jobs/translation"
+                if route.name == "translation_job"
                 else "INVALID_REQUEST"
             )
             self._send_error_json(
@@ -846,14 +771,10 @@ class _DashboardHandler(LocalHttpRequestHandler):
         self._send_json(HTTPStatus.OK, {"ok": True, "url": url})
 
     def do_PUT(self) -> None:
-        path = urlsplit(self.path).path
-        if path == "/api/settings/ai":
-            if not self._api_authorized():
-                self._send_error_json(
-                    HTTPStatus.FORBIDDEN,
-                    "Invalid review session.",
-                )
-                return
+        route = self._route_request("PUT")
+        if route is None:
+            return
+        if route.name == "ai_settings":
             try:
                 request = self._read_request_json(max_bytes=_MAX_REQUEST_BYTES)
                 api_key = request.get("api_key")
@@ -893,24 +814,16 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 {"ok": True, "settings": settings.to_dict()},
             )
             return
-        self._handle_source_upload(path, replace=True)
+        assert route.project_id is not None
+        self._handle_source_upload(route.project_id, replace=True)
 
     def do_PATCH(self) -> None:
-        path = urlsplit(self.path).path
-        prompt_kind = "ocr"
-        project_id = self._ocr_prompt_project_id(path)
-        if project_id is None:
-            prompt_kind = "translation"
-            project_id = self._translation_prompt_project_id(path)
-        if project_id is None:
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
+        route = self._route_request("PATCH")
+        if route is None:
             return
-        if not self._api_authorized():
-            self._send_error_json(
-                HTTPStatus.FORBIDDEN,
-                "Invalid review session.",
-            )
-            return
+        prompt_kind = "ocr" if route.name == "ocr_prompt" else "translation"
+        assert route.project_id is not None
+        project_id = route.project_id
         if not project_id or "/" in project_id or "\\" in project_id:
             self._send_error_json(
                 HTTPStatus.BAD_REQUEST,
@@ -1044,19 +957,11 @@ class _DashboardHandler(LocalHttpRequestHandler):
         )
 
     def do_DELETE(self) -> None:
-        path = urlsplit(self.path).path
-        prefix = "/api/projects/"
-        if not path.startswith(prefix) or path == prefix:
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
+        route = self._route_request("DELETE")
+        if route is None:
             return
-        if not self._api_authorized():
-            self._send_error_json(
-                HTTPStatus.FORBIDDEN,
-                "Invalid review session.",
-            )
-            return
-
-        project_id = unquote(path[len(prefix) :])
+        assert route.project_id is not None
+        project_id = route.project_id
         if "/" in project_id or "\\" in project_id:
             self._send_error_json(
                 HTTPStatus.BAD_REQUEST,
