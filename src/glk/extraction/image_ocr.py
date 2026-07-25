@@ -51,6 +51,8 @@ OCR_RESPONSE_SCHEMA = {
 class ImageOcrValidationError(ValueError):
     """Raised when a structured OCR response has an invalid shape."""
 
+    code = "GEMINI_RESPONSE_INVALID"
+
 
 def build_ocr_prompt(
     common_instructions: str,

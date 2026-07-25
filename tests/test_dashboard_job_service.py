@@ -25,6 +25,10 @@ from glk.application.glossary_service import (
 )
 from glk.application.project_service import create_project
 from glk.application.source_registration_service import register_project_pdf
+from glk.application.translation_types import (
+    TranslationError,
+    TranslationValidationError,
+)
 from glk.domain.workspace import WorkspacePaths
 from tests.test_glossary_service import create_approved_project, sample_blocks
 from tests.test_translation_service import (
@@ -55,10 +59,11 @@ class DashboardJobManagerTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def test_translation_validation_error_keeps_actionable_cause(self) -> None:
-        error = ValueError(
-            "Translation failed for chunk-test. Cause: "
+        cause = TranslationValidationError(
             "block-1: 원문 유지 용어 'player'가 번역문에서 변경되었습니다."
         )
+        error = TranslationError("Translation failed for chunk-test.")
+        error.__cause__ = cause
 
         message = _safe_translation_error(error, "gemini-test")
 
@@ -314,8 +319,9 @@ class DashboardJobManagerTests(unittest.TestCase):
 
         job = manager.list_jobs()[0]
         self.assertEqual(job["status"], "failed")
-        self.assertIn("'missing-model'", job["error"])
-        self.assertIn("모델을 확인", job["error"])
+        self.assertIn("원본 파일을 확인", job["error"])
+        self.assertNotIn("missing-model", job["error"])
+        self.assertNotIn("v1beta", job["error"])
         persisted = json.loads(state_path.read_text(encoding="utf-8"))
         self.assertEqual(persisted["status"], "failed")
         self.assertEqual(persisted["result"]["status"], "failed")
@@ -388,6 +394,7 @@ class DashboardJobManagerTests(unittest.TestCase):
             "failures": (
                 {
                     "page": 1,
+                    "code": "GEMINI_MODEL_NOT_FOUND",
                     "error": (
                         "404 NOT_FOUND: models/missing-model is not found "
                         "for API version v1beta"
@@ -395,6 +402,7 @@ class DashboardJobManagerTests(unittest.TestCase):
                 },
                 {
                     "page": 2,
+                    "code": "GEMINI_MODEL_NOT_FOUND",
                     "error": (
                         "404 NOT_FOUND: model is not supported for "
                         "generateContent"
@@ -443,6 +451,7 @@ class DashboardJobManagerTests(unittest.TestCase):
             "failures": (
                 {
                     "page": 2,
+                    "code": "GEMINI_QUOTA_EXCEEDED",
                     "error": "429 RESOURCE_EXHAUSTED: quota exceeded",
                 },
             ),

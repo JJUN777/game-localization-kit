@@ -32,6 +32,26 @@ class SourceRegistrationError(ValueError):
     """Raised when originals cannot be registered safely."""
 
 
+class OcrPromptEmptyError(SourceRegistrationError):
+    code = "OCR_PROMPT_EMPTY"
+
+
+class OcrPromptInvalidCharacterError(SourceRegistrationError):
+    code = "OCR_PROMPT_INVALID_CHARACTER"
+
+
+class OcrPromptTooLargeError(SourceRegistrationError):
+    code = "OCR_PROMPT_TOO_LARGE"
+
+
+class OcrPromptSourceRequiredError(SourceRegistrationError):
+    code = "OCR_PROMPT_SOURCE_REQUIRED"
+
+
+class OcrPromptEditLockedError(SourceRegistrationError):
+    code = "OCR_PROMPT_EDIT_LOCKED"
+
+
 class SourceRecoveryError(SourceRegistrationError):
     """Raised when source replacement fails and rollback is incomplete."""
 
@@ -48,11 +68,13 @@ class SourceRecoveryError(SourceRegistrationError):
 def validate_ocr_prompt(value: str) -> str:
     """Validate a project-wide OCR prompt supplied with image originals."""
     if not value.strip():
-        raise SourceRegistrationError("OCR prompt must not be empty.")
+        raise OcrPromptEmptyError("OCR prompt must not be empty.")
     if "\x00" in value:
-        raise SourceRegistrationError("OCR prompt must not contain null bytes.")
+        raise OcrPromptInvalidCharacterError(
+            "OCR prompt must not contain null bytes."
+        )
     if len(value.encode("utf-8")) > MAX_OCR_PROMPT_BYTES:
-        raise SourceRegistrationError(
+        raise OcrPromptTooLargeError(
             "OCR prompt must be 64 KiB or smaller."
         )
     return value
@@ -64,11 +86,11 @@ def save_project_ocr_prompt(
 ) -> Path:
     """Update only the image OCR prompt before source processing starts."""
     if location.manifest.source_file != IMAGE_SOURCE_ROOT:
-        raise SourceRegistrationError(
+        raise OcrPromptSourceRequiredError(
             "OCR prompt editing requires a registered image source."
         )
     if source_processing_started(location):
-        raise SourceRegistrationError(
+        raise OcrPromptEditLockedError(
             "OCR prompt editing is unavailable after OCR has started."
         )
     prompt_path = WorkspacePaths(location.path).input_ocr_prompt

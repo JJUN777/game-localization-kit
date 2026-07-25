@@ -100,8 +100,18 @@ _WINDOWS_RESERVED_NAMES = {
     *(f"COM{number}" for number in range(1, 10)),
     *(f"LPT{number}" for number in range(1, 10)),
 }
+
+
 class DashboardError(ValueError):
     """Raised when the local dashboard cannot be started or used."""
+
+
+class DashboardRequestError(DashboardError):
+    """Raised for a request with stable user-facing recovery guidance."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        self.code = code
+        super().__init__(detail)
 
 
 class DashboardHttpServer(LocalHttpServer):
@@ -328,7 +338,8 @@ class _DashboardHandler(LocalHttpRequestHandler):
         source_type = source_types[0]
         if source_type == "pdf":
             if ocr_prompts:
-                raise DashboardError(
+                raise DashboardRequestError(
+                    "OCR_PROMPT_IMAGE_ONLY",
                     "OCR prompt is available only for image sources."
                 )
             if len(files) != 1 or Path(files[0][0]).suffix.casefold() != ".pdf":
@@ -430,12 +441,14 @@ class _DashboardHandler(LocalHttpRequestHandler):
             self._send_error_json(
                 HTTPStatus.FORBIDDEN,
                 "Only localhost is allowed.",
+                code="LOCAL_ACCESS_REQUIRED",
             )
             return None
         if route.access == "session" and not self._api_authorized():
             self._send_error_json(
                 HTTPStatus.FORBIDDEN,
                 "Invalid review session.",
+                code="REVIEW_SESSION_INVALID",
             )
             return None
         if route.name not in self.handled_route_names.get(method, frozenset()):
@@ -742,7 +755,10 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 if not isinstance(name, str) or not name.strip():
                     raise DashboardError("Project name is required.")
                 if not isinstance(project_id, str) or not project_id.strip():
-                    raise DashboardError("Project ID is required.")
+                    raise DashboardRequestError(
+                        "PROJECT_ID_REQUIRED",
+                        "Project ID is required.",
+                    )
                 normalized_id = project_id.strip()
                 with self.server.mutation_lock:
                     location = create_project_workspace(

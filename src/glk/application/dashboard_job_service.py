@@ -37,12 +37,14 @@ from glk.application.translation_review_service import (
     run_project_translation_qa,
 )
 from glk.application.translation_service import translate_project
+from glk.application.translation_types import TranslationValidationError
 from glk.config import resolve_settings_root
 from glk.domain.workspace import (
     IMAGE_SOURCE_ROOT,
     WorkspacePaths,
     is_pdf_source_file,
 )
+from glk.infrastructure.gemini_common import gemini_failure_code
 
 
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running"})
@@ -297,95 +299,44 @@ def _utc_now() -> str:
     )
 
 
-def _safe_provider_error(errors: list[str], model: str) -> str:
-    """Translate provider details into a safe, actionable user message."""
-    combined = "\n".join(errors).casefold()
-    if any(
-        marker in combined
-        for marker in (
-            "api key not valid",
-            "api_key_invalid",
-            "invalid api key",
-            "unauthenticated",
-            "401 unauthorized",
+def _safe_provider_error(codes: list[str], model: str) -> str:
+    """Translate stable provider failure codes into actionable guidance."""
+    code_set = set(codes)
+    if "GEMINI_API_KEY_MISSING" in code_set:
+        return (
+            "Gemini API 키가 설정되지 않았습니다. "
+            "대시보드의 AI 설정에서 키를 저장한 뒤 다시 시도하세요."
         )
-    ):
+    if "GEMINI_API_KEY_OR_REQUEST_INVALID" in code_set:
         return "Gemini API 키가 올바르지 않습니다. AI 설정에서 키를 확인하세요."
-    if any(
-        marker in combined
-        for marker in (
-            "resource_exhausted",
-            "resource exhausted",
-            "quota",
-            "rate limit",
-            "too many requests",
-            "429",
-        )
-    ):
+    if "GEMINI_QUOTA_EXCEEDED" in code_set:
         return (
             "Gemini API 사용량 한도를 초과했습니다. "
             "사용량 또는 결제 설정을 확인한 뒤 다시 시도하세요."
         )
-    if any(
-        marker in combined
-        for marker in (
-            "permission_denied",
-            "permission denied",
-            "403 forbidden",
-            "403 permission",
-        )
-    ):
+    if "GEMINI_PERMISSION_DENIED" in code_set:
         return (
             "Gemini API 호출 권한이 없습니다. "
             "API 키 권한과 Google AI 프로젝트 설정을 확인하세요."
         )
-    if any(
-        marker in combined
-        for marker in (
-            "not_found",
-            "not found for api version",
-            "not supported for generatecontent",
-            "model was not found",
-            "404 not found",
-        )
-    ):
+    if "GEMINI_MODEL_NOT_FOUND" in code_set:
         return (
             f"선택한 Gemini 모델 '{model}'을 사용할 수 없습니다. "
             "AI 설정에서 모델을 확인하세요."
         )
-    if any(
-        marker in combined
-        for marker in (
-            "timed out",
-            "timeout",
-            "connection error",
-            "connection refused",
-            "name resolution",
-            "network",
-        )
-    ):
+    if "GEMINI_NETWORK_ERROR" in code_set:
         return (
             "Gemini API에 연결하지 못했습니다. "
             "네트워크 연결을 확인한 뒤 다시 시도하세요."
         )
-    if any(
-        marker in combined
-        for marker in (
-            "empty ocr response",
-            "empty layout response",
-            "empty response",
+    if "GEMINI_TEMPORARILY_UNAVAILABLE" in code_set:
+        return (
+            "Gemini API가 일시적으로 응답하지 않습니다. "
+            "잠시 후 다시 시도하세요."
         )
-    ):
+    if "GEMINI_RESPONSE_EMPTY" in code_set:
         return "Gemini가 빈 응답을 반환했습니다. 다시 시도하세요."
-    if any(
-        marker in combined
-        for marker in (
-            "json",
-            "schema",
-            "fragment validation",
-            "non-object",
-        )
-    ):
+    if "GEMINI_RESPONSE_INVALID" in code_set:
         return "Gemini 응답 형식을 검증하지 못했습니다. 다시 시도하세요."
     return "원본을 처리하지 못했습니다. 원본 파일을 확인한 뒤 다시 시도하세요."
 
@@ -401,12 +352,12 @@ def _acquisition_failure_message(
     failure_items = (
         list(failures) if isinstance(failures, (list, tuple)) else []
     )
-    errors = [
-        str(item.get("error"))
+    codes = [
+        str(item.get("code"))
         for item in failure_items
-        if isinstance(item, dict) and item.get("error")
+        if isinstance(item, dict) and item.get("code")
     ]
-    detail = _safe_provider_error(errors, model)
+    detail = _safe_provider_error(codes, model)
     if all_failed:
         return detail
     failed_count = len(failure_items)
@@ -416,23 +367,36 @@ def _acquisition_failure_message(
 
 
 def _safe_translation_error(error: BaseException, model: str) -> str:
-    message = str(error)
-    detail = _safe_provider_error([message], model)
-    if detail.startswith("원본을 처리하지 못했습니다."):
-        _prefix, separator, cause = message.rpartition("Cause:")
-        if separator and cause.strip():
-            compact_cause = " ".join(cause.split())
-            if len(compact_cause) > 600:
-                compact_cause = compact_cause[:597] + "..."
-            return (
-                "Gemini 번역 결과가 검증 규칙을 통과하지 못했습니다. "
-                f"검증 사유: {compact_cause}"
-            )
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        chain.append(current)
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    validation = next(
+        (
+            item
+            for item in chain
+            if isinstance(item, TranslationValidationError)
+        ),
+        None,
+    )
+    if validation is not None:
+        compact_cause = " ".join(str(validation).split())
+        if len(compact_cause) > 600:
+            compact_cause = compact_cause[:597] + "..."
         return (
-            "초벌 번역에 실패했습니다. 완료된 청크는 보존되었습니다. "
-            "다시 시도하면 이어서 진행합니다."
+            "Gemini 번역 결과가 검증 규칙을 통과하지 못했습니다. "
+            f"검증 사유: {compact_cause}"
         )
-    return detail
+    code = gemini_failure_code(error)
+    if code != "SOURCE_PROCESSING_FAILED":
+        return _safe_provider_error([code], model)
+    return (
+        "초벌 번역에 실패했습니다. 완료된 청크는 보존되었습니다. "
+        "다시 시도하면 이어서 진행합니다."
+    )
 
 
 def _safe_glossary_error(error: BaseException) -> str:
@@ -1314,7 +1278,7 @@ class DashboardJobManager:
             ),
             result_error=result_error,
             exception_error=lambda caught, job: _safe_provider_error(
-                [str(caught)],
+                [gemini_failure_code(caught)],
                 job.model,
             ),
             completion_message=completion_message,

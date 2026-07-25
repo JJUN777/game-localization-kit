@@ -53,6 +53,8 @@ RESPONSE_SCHEMA = {
 class LayoutValidationError(ValueError):
     """Raised when a layout response loses or invents source fragments."""
 
+    code = "GEMINI_RESPONSE_INVALID"
+
 
 class LayoutProvider(Protocol):
     model_name: str

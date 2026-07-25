@@ -34,6 +34,7 @@ from glk.extraction.image_ocr import (
     validate_ocr_result,
 )
 from glk.infrastructure.gemini_ocr import GeminiImageOcrProvider
+from glk.infrastructure.gemini_common import gemini_failure_code
 
 
 IMAGE_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS
@@ -55,6 +56,7 @@ class ImageOcrProvider(Protocol):
 class ImageOcrFailure:
     file: str
     error: str
+    code: str = "SOURCE_PROCESSING_FAILED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,7 +324,13 @@ def ocr_project_images(
                 failure_message += (
                     f"; could not preserve existing OCR text: {previous_error}"
                 )
-            failures.append(ImageOcrFailure(relative_name, failure_message))
+            failures.append(
+                ImageOcrFailure(
+                    relative_name,
+                    failure_message,
+                    gemini_failure_code(error),
+                )
+            )
             combined_items.append((text_relative.as_posix(), previous_text))
             notify(f"Image {index}/{len(registered_images)}: failed: {error}")
 

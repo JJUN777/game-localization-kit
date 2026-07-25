@@ -152,6 +152,10 @@ class ImageOcrServiceTests(unittest.TestCase):
             )
             self.assertEqual(state["status"], "partial")
             self.assertEqual(state["failures"][0]["file"], "card.png")
+            self.assertEqual(
+                state["failures"][0]["code"],
+                "SOURCE_PROCESSING_FAILED",
+            )
 
     def test_corrupt_cache_is_reported_without_calling_provider(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

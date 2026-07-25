@@ -48,6 +48,8 @@ DEFAULT_OCR_PROMPT = "01_input/images/ocr_prompt.txt"
 class ProjectExistsError(ProjectError):
     """Raised when initialization would overwrite an existing project."""
 
+    code = "PROJECT_ALREADY_EXISTS"
+
 
 class ProjectNotFoundError(ProjectError):
     """Raised when a project workspace cannot be found."""

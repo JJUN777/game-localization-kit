@@ -14,7 +14,9 @@ from glk.extraction.image_ocr import (
     validate_ocr_result,
 )
 from glk.infrastructure.gemini_common import (
+    GeminiEmptyResponseError,
     GeminiProviderBase,
+    GeminiResponseError,
 )
 
 
@@ -38,7 +40,14 @@ class GeminiImageOcrProvider(GeminiProviderBase):
                 config=config,
             )
             if not response.text:
-                raise ValueError("Gemini returned an empty OCR response.")
-            return validate_ocr_result(json.loads(response.text))
+                raise GeminiEmptyResponseError(
+                    "Gemini returned an empty OCR response."
+                )
+            try:
+                return validate_ocr_result(json.loads(response.text))
+            except (json.JSONDecodeError, ValueError, TypeError) as error:
+                raise GeminiResponseError(
+                    "Gemini returned an invalid OCR response."
+                ) from error
 
         return self.run_request(request)

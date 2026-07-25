@@ -45,6 +45,15 @@ class ErrorResponseTests(unittest.TestCase):
         self.assertEqual(error.code, "INVALID_REQUEST")
         self.assertEqual(error.message, "요청 형식이 올바르지 않습니다.")
 
+    def test_detail_text_does_not_change_status_based_error_code(self) -> None:
+        error = make_http_error_response(
+            403,
+            "Invalid review session and stale changed after marker.",
+        )
+
+        self.assertEqual(error.code, "ACCESS_DENIED")
+        self.assertEqual(error.message, "요청을 처리할 권한이 없습니다.")
+
     def test_unknown_error_code_uses_safe_korean_fallback(self) -> None:
         error = make_error_response("UNKNOWN_FAILURE", "technical failure")
 

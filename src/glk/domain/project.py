@@ -31,20 +31,28 @@ class ProjectValidationError(ProjectError):
     """Raised when a project manifest or identifier is invalid."""
 
 
+class ProjectIdValidationError(ProjectValidationError):
+    """Raised when a project identifier is not portable or valid."""
+
+    code = "PROJECT_ID_INVALID"
+
+
 def normalize_project_id(value: str) -> str:
     """Convert a human-readable name into a portable workspace directory name."""
     normalized = unicodedata.normalize("NFKC", value).casefold().strip()
     normalized = re.sub(r"[^a-z0-9]+", "_", normalized).strip("_")
     normalized = re.sub(r"_+", "_", normalized)
     if not normalized:
-        raise ProjectValidationError(
+        raise ProjectIdValidationError(
             "Project ID is empty after normalization; provide an ID using lowercase "
             "English letters, numbers, and underscores."
         )
     if len(normalized) > 80:
-        raise ProjectValidationError("Project ID must be 80 characters or fewer.")
+        raise ProjectIdValidationError("Project ID must be 80 characters or fewer.")
     if normalized.upper() in _WINDOWS_RESERVED_NAMES:
-        raise ProjectValidationError(f"Project ID is reserved on Windows: {normalized}")
+        raise ProjectIdValidationError(
+            f"Project ID is reserved on Windows: {normalized}"
+        )
     return normalized
 
 
@@ -102,7 +110,7 @@ class ProjectManifest:
         else:
             normalized_id = unicodedata.normalize("NFKC", project_id).strip()
             if not _PROJECT_ID_PATTERN.fullmatch(normalized_id):
-                raise ProjectValidationError(
+                raise ProjectIdValidationError(
                     "Project ID must use lowercase English letters, numbers, and "
                     "single underscores only."
                 )

@@ -32,6 +32,59 @@ ProviderT = TypeVar("ProviderT", bound="GeminiProviderBase")
 class GeminiConfigurationError(ValueError):
     """Raised when Gemini credentials or model settings are unavailable."""
 
+    code = "GEMINI_API_KEY_MISSING"
+
+
+class GeminiResponseError(ValueError):
+    """Raised when Gemini returns an unusable structured response."""
+
+    code = "GEMINI_RESPONSE_INVALID"
+
+
+class GeminiEmptyResponseError(GeminiResponseError):
+    """Raised when Gemini returns no response text."""
+
+    code = "GEMINI_RESPONSE_EMPTY"
+
+
+def _exception_chain(error: BaseException) -> tuple[BaseException, ...]:
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        chain.append(current)
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return tuple(chain)
+
+
+def gemini_failure_code(error: BaseException) -> str:
+    """Classify provider failures without inspecting exception messages."""
+    chain = _exception_chain(error)
+    for item in chain:
+        code = getattr(item, "code", None)
+        if isinstance(code, str) and code.isupper():
+            return code
+    api_error = next(
+        (item for item in chain if isinstance(item, errors.APIError)),
+        None,
+    )
+    if api_error is not None:
+        status = gemini_status_code(api_error)
+        if status in {400, 401}:
+            return "GEMINI_API_KEY_OR_REQUEST_INVALID"
+        if status == 403:
+            return "GEMINI_PERMISSION_DENIED"
+        if status == 404:
+            return "GEMINI_MODEL_NOT_FOUND"
+        if status == 429:
+            return "GEMINI_QUOTA_EXCEEDED"
+        if status == 408 or (status is not None and 500 <= status <= 599):
+            return "GEMINI_TEMPORARILY_UNAVAILABLE"
+    if any(isinstance(item, (ConnectionError, TimeoutError)) for item in chain):
+        return "GEMINI_NETWORK_ERROR"
+    return "SOURCE_PROCESSING_FAILED"
+
 
 def load_gemini_environment(
     settings_root: str | os.PathLike[str] | None = None,

@@ -16,7 +16,9 @@ from glk.extraction.layout import (
 from glk.infrastructure.gemini_common import (
     DEFAULT_MODEL,
     GeminiConfigurationError,
+    GeminiEmptyResponseError,
     GeminiProviderBase,
+    GeminiResponseError,
     load_gemini_environment,
     resolve_model_name,
 )
@@ -52,10 +54,19 @@ class GeminiLayoutProvider(GeminiProviderBase):
                 config=config,
             )
             if not response.text:
-                raise ValueError("Gemini returned an empty layout response.")
-            layout = json.loads(response.text)
+                raise GeminiEmptyResponseError(
+                    "Gemini returned an empty layout response."
+                )
+            try:
+                layout = json.loads(response.text)
+            except json.JSONDecodeError as error:
+                raise GeminiResponseError(
+                    "Gemini returned an invalid layout response."
+                ) from error
             if not isinstance(layout, dict):
-                raise ValueError("Gemini returned a non-object layout response.")
+                raise GeminiResponseError(
+                    "Gemini returned a non-object layout response."
+                )
             return layout
 
         return self.run_request(request)

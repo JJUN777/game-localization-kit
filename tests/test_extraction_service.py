@@ -198,6 +198,10 @@ class ExtractionServiceTests(unittest.TestCase):
             self.assertFalse(result.ok)
             self.assertEqual(result.successful_pages, ())
             self.assertIn("fragment validation", result.failures[0].error)
+            self.assertEqual(
+                result.failures[0].code,
+                "GEMINI_RESPONSE_INVALID",
+            )
             self.assertEqual(provider.calls, 3)
             self.assertFalse(
                 (workspace_root / "rulebook/.glk/cache/pdf/layouts/page_001.json").exists()

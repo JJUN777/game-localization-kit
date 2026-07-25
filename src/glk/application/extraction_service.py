@@ -38,6 +38,7 @@ from glk.extraction.layout import (
     validate_layout,
 )
 from glk.infrastructure.gemini_layout import GeminiLayoutProvider
+from glk.infrastructure.gemini_common import gemini_failure_code
 
 
 ProgressCallback = Callable[[str], None]
@@ -52,6 +53,7 @@ class ExtractionError(ValueError):
 class PageFailure:
     page: int
     error: str
+    code: str = "SOURCE_PROCESSING_FAILED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,7 +306,13 @@ def extract_project_pdf(
                 successful_text[page_number] = page_text
                 successful_pages.append(page_number)
             except Exception as error:
-                failures.append(PageFailure(page_number, str(error)))
+                failures.append(
+                    PageFailure(
+                        page_number,
+                        str(error),
+                        gemini_failure_code(error),
+                    )
+                )
                 notify(f"Page {page_number}: failed: {error}")
     finally:
         document.close()

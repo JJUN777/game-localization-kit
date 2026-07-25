@@ -14,6 +14,8 @@ from google.genai import errors
 from glk.infrastructure.gemini_common import (
     DEFAULT_REQUEST_TIMEOUT_MS,
     GeminiConfigurationError,
+    GeminiResponseError,
+    gemini_failure_code,
     gemini_http_options,
     gemini_retry_delay,
     is_retryable_gemini_error,
@@ -45,6 +47,33 @@ def api_error(
 
 
 class GeminiCommonPolicyTests(unittest.TestCase):
+    def test_classifies_user_facing_failures_without_message_matching(self) -> None:
+        expected = {
+            400: "GEMINI_API_KEY_OR_REQUEST_INVALID",
+            403: "GEMINI_PERMISSION_DENIED",
+            404: "GEMINI_MODEL_NOT_FOUND",
+            429: "GEMINI_QUOTA_EXCEEDED",
+            503: "GEMINI_TEMPORARILY_UNAVAILABLE",
+        }
+        for status, code in expected.items():
+            with self.subTest(status=status):
+                self.assertEqual(gemini_failure_code(api_error(status)), code)
+
+        self.assertEqual(
+            gemini_failure_code(GeminiConfigurationError("hidden detail")),
+            "GEMINI_API_KEY_MISSING",
+        )
+        self.assertEqual(
+            gemini_failure_code(GeminiResponseError("hidden detail")),
+            "GEMINI_RESPONSE_INVALID",
+        )
+        self.assertEqual(
+            gemini_failure_code(
+                RuntimeError("404 model not found and 429 quota exceeded")
+            ),
+            "SOURCE_PROCESSING_FAILED",
+        )
+
     def test_builds_finite_http_options_without_sdk_retries(self) -> None:
         options = gemini_http_options()
 

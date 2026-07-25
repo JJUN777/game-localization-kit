@@ -171,6 +171,12 @@ class GlossaryImportError(ValueError):
     """Raised when a reviewed glossary cannot be imported safely."""
 
 
+class GlossaryReviewIncompleteError(GlossaryImportError):
+    """Raised when glossary rows still require a user decision."""
+
+    code = "GLOSSARY_REVIEW_INCOMPLETE"
+
+
 @dataclass(frozen=True, slots=True)
 class GlossaryCandidate:
     candidate_id: str
@@ -1007,7 +1013,7 @@ def _normalize_glossary_row_fields(
             f"Record {record_number} has invalid status {status!r}."
         )
     if status == "review":
-        raise GlossaryImportError(
+        raise GlossaryReviewIncompleteError(
             f"Record {record_number} ({source_term or 'empty term'}) is still in review."
         )
     if not source_term:
