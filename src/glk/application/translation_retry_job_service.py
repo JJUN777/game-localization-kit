@@ -42,9 +42,13 @@ TranslationRetryJobRunner = Callable[
 class TranslationRetryJobError(ValueError):
     """Raised when a translation retry job cannot be started."""
 
+    code = "TRANSLATION_RETRY_FAILED"
+
 
 class TranslationRetryJobConflict(TranslationRetryJobError):
     """Raised when another translation retry is already active."""
+
+    code = "TRANSLATION_RETRY_CONFLICT"
 
 
 @dataclass(slots=True)

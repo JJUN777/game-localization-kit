@@ -209,7 +209,10 @@ class GlossaryReviewServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 400)
-        self.assertEqual(payload["code"], "INVALID_REQUEST")
+        self.assertEqual(
+            payload["code"],
+            "GLOSSARY_GENERATED_CANDIDATE_DELETE",
+        )
         self.assertIn("삭제할 수 없습니다", payload["message"])
         self.assertIn("cannot be deleted", payload["detail"])
 

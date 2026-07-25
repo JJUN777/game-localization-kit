@@ -46,11 +46,19 @@ _LATIN_PATTERN = re.compile(r"[A-Za-z]")
 class TranslationReviewError(ValueError):
     """Raised when a translation review cannot be processed safely."""
 
+    code = "INVALID_REQUEST"
+
 
 class TranslationReviewConflictError(TranslationReviewError):
     """Raised when optimistic review locking detects a concurrent change."""
 
     code = "REVIEW_CONFLICT"
+
+
+class TranslationReviewBlockMismatchError(TranslationReviewError):
+    """Raised when submitted block IDs do not match the active review."""
+
+    code = "TRANSLATION_REVIEW_BLOCK_MISMATCH"
 
 
 class TranslationReviewParseError(TranslationReviewError):
@@ -796,7 +804,7 @@ def save_project_translation_review(
             details.append("missing: " + ", ".join(missing[:5]))
         if extra:
             details.append("unknown: " + ", ".join(extra[:5]))
-        raise TranslationReviewError(
+        raise TranslationReviewBlockMismatchError(
             "Submitted translation block IDs do not match the current review ("
             + "; ".join(details)
             + ")."

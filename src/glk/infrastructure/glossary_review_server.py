@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import webbrowser
 
 from glk.application.glossary_review_service import (
+    GlossaryReviewConflictError,
     GlossaryReviewError,
     get_project_glossary_review_document,
     save_project_glossary_review,
@@ -68,7 +69,11 @@ class _GlossaryReviewHandler(LocalHttpRequestHandler):
             self._send_bytes(HTTPStatus.NO_CONTENT, b"", "image/x-icon")
             return
         if not self._host_is_local():
-            self._send_error_json(HTTPStatus.FORBIDDEN, "Only localhost is allowed.")
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Only localhost is allowed.",
+                code="LOCAL_ACCESS_REQUIRED",
+            )
             return
         if path == "/":
             template = (
@@ -85,27 +90,61 @@ class _GlossaryReviewHandler(LocalHttpRequestHandler):
             return
         if path == "/api/review":
             if not self._api_authorized():
-                self._send_error_json(HTTPStatus.FORBIDDEN, "Invalid review session.")
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                    code="REVIEW_SESSION_INVALID",
+                )
                 return
             try:
                 document = get_project_glossary_review_document(
                     project=self.server.project,
                     workspace_root=self.server.workspace_root,
                 )
-            except (GlossaryReviewError, OSError, ValueError) as error:
-                self._send_error_json(HTTPStatus.CONFLICT, str(error))
+            except GlossaryReviewConflictError as error:
+                self._send_error_json(
+                    HTTPStatus.CONFLICT,
+                    error,
+                    code=error.code,
+                )
+                return
+            except GlossaryReviewError as error:
+                self._send_error_json(
+                    HTTPStatus.BAD_REQUEST,
+                    error,
+                    code=error.code,
+                )
+                return
+            except (OSError, ValueError) as error:
+                self._send_error_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    error,
+                    code="INTERNAL_ERROR",
+                )
                 return
             self._send_json(HTTPStatus.OK, document)
             return
-        self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
+        self._send_error_json(
+            HTTPStatus.NOT_FOUND,
+            "Not found.",
+            code="RESOURCE_NOT_FOUND",
+        )
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
         if path not in {"/api/save", "/api/import"}:
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
+            self._send_error_json(
+                HTTPStatus.NOT_FOUND,
+                "Not found.",
+                code="RESOURCE_NOT_FOUND",
+            )
             return
         if not self._api_authorized():
-            self._send_error_json(HTTPStatus.FORBIDDEN, "Invalid review session.")
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Invalid review session.",
+                code="REVIEW_SESSION_INVALID",
+            )
             return
         try:
             body = self._read_request_json(max_bytes=_MAX_REQUEST_BYTES)
@@ -158,10 +197,15 @@ class _GlossaryReviewHandler(LocalHttpRequestHandler):
         except (GlossaryReviewError, OSError, ValueError) as error:
             status = (
                 HTTPStatus.CONFLICT
-                if "changed after this page was loaded" in str(error)
+                if isinstance(error, GlossaryReviewConflictError)
                 else HTTPStatus.BAD_REQUEST
             )
-            self._send_error_json(status, str(error))
+            code = (
+                error.code
+                if isinstance(error, GlossaryReviewError)
+                else "INVALID_REQUEST"
+            )
+            self._send_error_json(status, error, code=code)
             return
         self._send_json(HTTPStatus.OK, response)
 

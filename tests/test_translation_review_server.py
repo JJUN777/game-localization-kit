@@ -243,7 +243,10 @@ class TranslationReviewServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 400)
-        self.assertEqual(payload["code"], "INVALID_REQUEST")
+        self.assertEqual(
+            payload["code"],
+            "TRANSLATION_REVIEW_BLOCK_MISMATCH",
+        )
         self.assertIn("알 수 없는 블록", payload["message"])
         self.assertIn("unknown", payload["detail"])
         self.assertEqual(

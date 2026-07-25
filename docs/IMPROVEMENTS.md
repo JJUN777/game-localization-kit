@@ -446,9 +446,17 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     입력·본문을 검증하는 정상 문자열 검사는 범위에 포함하지 않는다.
   - `ERROR-004`와 `ERROR-005`에서 새 예외 코드를 먼저 도입하고 이후
     source·glossary·translation·review 순서로 기존 fallback을 축소한다.
+  - 1차 전환: source·glossary·translation 검수의 충돌 여부를 전용 예외
+    타입으로 판정하고, 로컬 접근·세션·리소스·잘못된 요청을 명시적 HTTP
+    오류 코드로 전달한다. 자동 용어 후보 삭제와 번역 block 불일치도 전용
+    코드로 분리해 기존 한글 행동 안내를 보존했다.
+  - 남은 범위: `error_response.py`의 detail fallback과 dashboard의 provider
+    문자열 분류, glossary import의 행동 안내를 명시적 코드로 교체한다.
   - 완료 기준: 예외 문구 부분 검색이 오류 코드, HTTP 상태 또는 사용자 메시지를
     결정하는 지점이 0개이고, 같은 예외 타입·code가 CLI와 HTTP에서 같은
     행동 안내를 만들어야 한다.
+  - 1차 검증: 세 검수 서버의 충돌·세션·접근·요청 오류 회귀 테스트를 포함해
+    전체 289개 테스트와 mypy·ruff 검사를 통과했다.
 - [x] `DOMAIN-002` 번역 내용 검증 문제가 있는 `TranslationSegment`를
   `flagged` 상태로 기록한다.
   - `TRANSLATION_STATUSES`에는 `flagged`가 있지만 현재 생성 코드는 모든
@@ -494,7 +502,8 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
 완료된 작업 순서는 각 항목의 상태와 검증 기록으로 보존합니다. 앞으로의 작업은
 서로 연관된 항목을 다음 순서로 나눠 커밋합니다.
 
-1. `ERROR-003`: source·glossary·translation·review 순서로 문구 추론 제거
+1. `ERROR-003`: 공통 HTTP 응답·dashboard provider·glossary import의 남은
+   문구 추론 제거
 2. `ARCH-006`: 선택한 use case를 각각 독립 커밋으로 분리
 3. `DOMAIN-001`: 하이픈 결합 경고의 검수 화면 표시 방법 확정과 구현
 4. 제품 기능 후속 항목의 우선순위 결정

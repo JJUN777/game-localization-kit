@@ -40,6 +40,14 @@ _UNRESOLVED_ICON_PATTERN = re.compile(r"\[ICON:\s*[^\]]+\]", re.IGNORECASE)
 class SourceReviewError(ValueError):
     """Raised when a review file cannot be prepared, edited, or finalized safely."""
 
+    code = "INVALID_REQUEST"
+
+
+class SourceReviewConflictError(SourceReviewError):
+    """Raised when source review state changed after it was loaded."""
+
+    code = "REVIEW_CONFLICT"
+
 
 @dataclass(frozen=True, slots=True)
 class ReviewPrepareResult:
@@ -301,7 +309,7 @@ def _review_context(
     source_sha256 = _sha256_bytes(source_data)
     state = _read_state(paths.source_review_state)
     if _review_status(paths.source_review_state, source_sha256) != "current":
-        raise SourceReviewError(
+        raise SourceReviewConflictError(
             "Review TXT is stale or has no matching source state. "
             "Compare your edits, then run glk review prepare --force to reset it."
         )
@@ -455,12 +463,14 @@ def save_project_source_review(
     originals, source_data = _load_source_blocks(location.path)
     source_sha256 = _sha256_bytes(source_data)
     if _review_status(paths.source_review_state, source_sha256) != "current":
-        raise SourceReviewError("Source review is stale; refresh it before saving.")
+        raise SourceReviewConflictError(
+            "Source review is stale; refresh it before saving."
+        )
     if not paths.source_review.is_file():
         raise SourceReviewError("Source review TXT does not exist.")
     current_hash = _sha256_bytes(paths.source_review.read_bytes())
     if current_hash != expected_review_sha256:
-        raise SourceReviewError(
+        raise SourceReviewConflictError(
             "Source review changed after this browser loaded it. Reload before saving."
         )
     if not isinstance(blocks, list) or not blocks:

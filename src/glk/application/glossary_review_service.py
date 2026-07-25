@@ -33,6 +33,20 @@ GLOSSARY_REVIEW_CATEGORIES = (
 class GlossaryReviewError(ValueError):
     """Raised when the browser glossary review cannot be processed safely."""
 
+    code = "INVALID_REQUEST"
+
+
+class GlossaryReviewConflictError(GlossaryReviewError):
+    """Raised when glossary review state changed after it was loaded."""
+
+    code = "REVIEW_CONFLICT"
+
+
+class GlossaryGeneratedCandidateDeleteError(GlossaryReviewError):
+    """Raised when a generated glossary candidate is omitted from a save."""
+
+    code = "GLOSSARY_GENERATED_CANDIDATE_DELETE"
+
 
 def _parse_tsv(data: bytes) -> list[dict[str, str]]:
     try:
@@ -192,7 +206,7 @@ def save_project_glossary_review(
     paths = WorkspacePaths(location.path)
     pipeline = inspect_project(location.path)["pipeline"]
     if pipeline["glossary_status"] != "current":
-        raise GlossaryReviewError(
+        raise GlossaryReviewConflictError(
             "Glossary review is stale. Rebuild or resolve the candidate TSV first."
         )
     if not paths.glossary_review.is_file():
@@ -201,7 +215,7 @@ def save_project_glossary_review(
     current_data = paths.glossary_review.read_bytes()
     current_hash = _sha256_bytes(current_data)
     if current_hash != expected_review_sha256:
-        raise GlossaryReviewError(
+        raise GlossaryReviewConflictError(
             "Glossary review changed after this page was loaded. Reload before saving."
         )
     current_rows = _parse_tsv(current_data)
@@ -294,7 +308,7 @@ def save_project_glossary_review(
     if missing_ids:
         preview = ", ".join(missing_ids[:5])
         suffix = "..." if len(missing_ids) > 5 else ""
-        raise GlossaryReviewError(
+        raise GlossaryGeneratedCandidateDeleteError(
             "Generated candidates cannot be deleted. Mark them rejected instead: "
             f"{preview}{suffix}"
         )
