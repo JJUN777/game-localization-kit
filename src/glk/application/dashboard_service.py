@@ -15,7 +15,10 @@ from glk.application.project_service import (
     load_workspace_project_id,
 )
 from glk.application.source_registration_service import discover_source_images
-from glk.application.translation_types import DEFAULT_PROJECT_INSTRUCTIONS
+from glk.application.translation_prompt_service import (
+    TranslationPromptError,
+    load_translation_prompt_document,
+)
 from glk.domain.workspace import WorkspacePaths, is_pdf_source_file
 
 
@@ -245,20 +248,10 @@ def _project_ocr_prompt(summary: Any) -> str:
 
 
 def _project_translation_prompt(summary: Any) -> dict[str, Any]:
-    prompt_path = WorkspacePaths(Path(summary.path)).translation_prompt
-    if not prompt_path.is_file():
-        return {
-            "value": DEFAULT_PROJECT_INSTRUCTIONS,
-            "saved": False,
-        }
     try:
-        value = prompt_path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        value = ""
-    return {
-        "value": value,
-        "saved": True,
-    }
+        return load_translation_prompt_document(Path(summary.path)).to_dict()
+    except TranslationPromptError:
+        return {"value": "", "saved": True, "sha256": ""}
 
 
 def _project_document(summary: Any, status: dict[str, Any]) -> dict[str, Any]:

@@ -390,11 +390,18 @@ glk translate --project primal             # 실제 번역
 ```
 
 대시보드에서는 `번역 준비 완료` 프로젝트 카드의 `초벌 번역 시작`을 누릅니다.
-실행 전 모달에서 적용 모델, API 비용 안내와 프로젝트 번역 지침을 확인·수정할
-수 있습니다. 작업은 background job으로 실행되며 청크 진행률과 실패 원인을
-카드에 표시합니다. 중간 실패 뒤에는 저장된 청크부터 이어서 실행하고, 입력
-hash를 보호하기 위해 기존 번역 지침을 고정합니다. 기존 번역이 stale이면
-사람의 검수 내용을 보호하기 위해 대시보드에서 자동 덮어쓰지 않습니다.
+카드의 `번역 프롬프트 설정`에서는 Gemini를 호출하지 않고 프로젝트 번역
+지침만 `04_translation/prompt.txt`에 미리 저장·수정합니다. 실행 모달에서는
+적용 모델, API 비용과 저장된 지침을 최종 확인합니다. 작업은 background
+job으로 실행되며 청크 진행률과 실패 원인을 카드에 표시합니다. 중간 실패
+뒤에는 저장된 청크부터 이어서 실행하고, 입력 hash를 보호하기 위해 기존 번역
+지침을 고정합니다.
+
+초벌 번역 뒤 프롬프트를 변경하면 기존 번역은 stale이 되고 이어하기 대신 전체
+재번역이 필요합니다. `변경된 프롬프트로 전체 재번역` 확인 뒤 기존 prompt,
+translation JSONL, draft, review, QA, 승인 state와 최종 출력은 timestamp
+revision에 보관합니다. 재번역이 성공한 경우에만 검수본을 새 draft 기준으로
+초기화하며 실패하면 기존 검수본과 최종 출력 파일을 그대로 유지합니다.
 
 처음 실행할 때 기본 지침을 `04_translation/prompt.txt`에 기록합니다. 게임별 지침을 사용하려면:
 
@@ -435,8 +442,12 @@ glk translate --project primal --resume   # 중단 후 완료된 청크부터 �
 | `04_translation/draft.txt` | 자동 번역 기준본 |
 | `04_translation/review.txt` | 사람이 수정할 작업본 |
 | `04_translation/prompt.txt` | 실제 사용한 프로젝트 번역 지침 |
+| `04_translation/revisions/translation_prompt_change_*.json` | 번역 결과를 stale로 만든 prompt 변경 이력 |
+| `04_translation/revisions/translation_restart_*/` | 전체 재번역 전 번역·검수·최종 출력 snapshot |
 
-재번역으로 draft가 달라져도 기존 `review.txt`는 덮어쓰지 않고 `stale`로 보존합니다.
+CLI `glk translate --force`는 draft가 달라져도 기존 `review.txt`를 덮어쓰지
+않고 stale로 보존합니다. 대시보드의 전체 재번역은 기존 review를 revisions에
+먼저 보관한 뒤 새 draft로 검수본을 초기화합니다.
 
 ---
 

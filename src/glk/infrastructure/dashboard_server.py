@@ -58,6 +58,11 @@ from glk.application.source_registration_service import (
     replace_pdf_source,
     save_project_ocr_prompt,
 )
+from glk.application.translation_prompt_service import (
+    MAX_TRANSLATION_PROMPT_BYTES,
+    TranslationPromptError,
+    save_project_translation_prompt,
+)
 from glk.error_response import make_http_error_response
 from glk.infrastructure.glossary_review_server import (
     create_glossary_review_server,
@@ -70,6 +75,9 @@ from glk.infrastructure.translation_review_server import (
 
 _MAX_REQUEST_BYTES = 128 * 1024
 _MAX_OCR_PROMPT_REQUEST_BYTES = MAX_OCR_PROMPT_BYTES * 6 + 1024
+_MAX_TRANSLATION_PROMPT_REQUEST_BYTES = (
+    MAX_TRANSLATION_PROMPT_BYTES * 6 + 1024
+)
 _MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 _MAX_UPLOAD_FILES = 200
 _REVIEW_TYPES = {"source", "glossary", "translation"}
@@ -503,6 +511,18 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             return None
         return unquote(path[len(prefix) : -len(suffix)])
 
+    @staticmethod
+    def _translation_prompt_project_id(path: str) -> str | None:
+        prefix = "/api/projects/"
+        suffix = "/translation-prompt"
+        if (
+            not path.startswith(prefix)
+            or not path.endswith(suffix)
+            or path == prefix + suffix.lstrip("/")
+        ):
+            return None
+        return unquote(path[len(prefix) : -len(suffix)])
+
     def _handle_source_upload(
         self,
         path: str,
@@ -801,6 +821,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             if path == "/api/jobs/translation":
                 project_id = request.get("project_id")
                 prompt = request.get("prompt")
+                force = request.get("force", False)
                 if not isinstance(project_id, str) or not project_id.strip():
                     raise DashboardJobError("project_id is required.")
                 if "/" in project_id or "\\" in project_id:
@@ -809,6 +830,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                     )
                 if not isinstance(prompt, str):
                     raise DashboardJobError("prompt must be a string.")
+                if not isinstance(force, bool):
+                    raise DashboardJobError("force must be a boolean.")
                 settings = self.server.ai_settings.status()
                 if not settings.api_key_configured:
                     raise DashboardJobError(
@@ -819,6 +842,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
                         project_id=project_id.strip(),
                         model=settings.model,
                         prompt=prompt,
+                        force=force,
                     )
                 self._send_json(
                     HTTPStatus.ACCEPTED,
@@ -947,7 +971,11 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def do_PATCH(self) -> None:
         path = urlsplit(self.path).path
+        prompt_kind = "ocr"
         project_id = self._ocr_prompt_project_id(path)
+        if project_id is None:
+            prompt_kind = "translation"
+            project_id = self._translation_prompt_project_id(path)
         if project_id is None:
             self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
             return
@@ -961,32 +989,71 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._send_error_json(
                 HTTPStatus.BAD_REQUEST,
                 "Project ID must not contain path separators.",
-                code="OCR_PROMPT_UPDATE_FAILED",
+                code=(
+                    "OCR_PROMPT_UPDATE_FAILED"
+                    if prompt_kind == "ocr"
+                    else "TRANSLATION_PROMPT_UPDATE_FAILED"
+                ),
             )
             return
         if self.server.job_manager.is_project_active(project_id):
             self._send_error_json(
                 HTTPStatus.CONFLICT,
-                "OCR prompt editing is unavailable while a source job is running.",
-                code="SOURCE_JOB_CONFLICT",
+                (
+                    "OCR prompt editing is unavailable while a source job is running."
+                    if prompt_kind == "ocr"
+                    else "번역 프롬프트는 백그라운드 작업 중에 수정할 수 없습니다."
+                ),
+                code=(
+                    "SOURCE_JOB_CONFLICT"
+                    if prompt_kind == "ocr"
+                    else "TRANSLATION_JOB_CONFLICT"
+                ),
             )
             return
         try:
             request = self._read_request_json(
-                max_bytes=_MAX_OCR_PROMPT_REQUEST_BYTES,
+                max_bytes=(
+                    _MAX_OCR_PROMPT_REQUEST_BYTES
+                    if prompt_kind == "ocr"
+                    else _MAX_TRANSLATION_PROMPT_REQUEST_BYTES
+                ),
             )
-            ocr_prompt = request.get("ocr_prompt")
-            if not isinstance(ocr_prompt, str):
-                raise DashboardError("ocr_prompt must be a string.")
             with self.server.mutation_lock:
                 location = load_workspace_project_id(
                     project_id,
                     self.server.workspace_root,
                 )
-                prompt_path = save_project_ocr_prompt(
-                    location,
-                    ocr_prompt,
-                )
+                if prompt_kind == "ocr":
+                    ocr_prompt = request.get("ocr_prompt")
+                    if not isinstance(ocr_prompt, str):
+                        raise DashboardError("ocr_prompt must be a string.")
+                    prompt_path = save_project_ocr_prompt(
+                        location,
+                        ocr_prompt,
+                    )
+                    result: dict[str, Any] = {
+                        "updated": True,
+                        "path": prompt_path.relative_to(
+                            location.path
+                        ).as_posix(),
+                    }
+                else:
+                    translation_prompt = request.get("translation_prompt")
+                    expected_sha256 = request.get("expected_sha256")
+                    if not isinstance(translation_prompt, str):
+                        raise DashboardError(
+                            "translation_prompt must be a string."
+                        )
+                    if not isinstance(expected_sha256, str):
+                        raise DashboardError(
+                            "expected_sha256 must be a string."
+                        )
+                    result = save_project_translation_prompt(
+                        location,
+                        translation_prompt,
+                        expected_sha256=expected_sha256,
+                    ).to_dict()
         except ProjectNotFoundError as error:
             self._send_error_json(
                 HTTPStatus.NOT_FOUND,
@@ -997,30 +1064,36 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         except (
             DashboardError,
             SourceRegistrationError,
+            TranslationPromptError,
             TypeError,
             ValueError,
         ) as error:
             self._send_error_json(
                 HTTPStatus.BAD_REQUEST,
                 error,
-                code="OCR_PROMPT_UPDATE_FAILED",
+                code=(
+                    "OCR_PROMPT_UPDATE_FAILED"
+                    if prompt_kind == "ocr"
+                    else "TRANSLATION_PROMPT_UPDATE_FAILED"
+                ),
             )
             return
         except (OSError, RuntimeError) as error:
             self._send_error_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 error,
-                code="OCR_PROMPT_UPDATE_FAILED",
+                code=(
+                    "OCR_PROMPT_UPDATE_FAILED"
+                    if prompt_kind == "ocr"
+                    else "TRANSLATION_PROMPT_UPDATE_FAILED"
+                ),
             )
             return
         self._send_json(
             HTTPStatus.OK,
             {
                 "ok": True,
-                "ocr_prompt": {
-                    "updated": True,
-                    "path": prompt_path.relative_to(location.path).as_posix(),
-                },
+                f"{prompt_kind}_prompt": result,
             },
         )
 

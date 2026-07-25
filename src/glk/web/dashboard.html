@@ -612,7 +612,8 @@
       transform: translateY(-1px);
     }
 
-    .ocr-prompt-button {
+    .ocr-prompt-button,
+    .translation-prompt-button {
       grid-column: 1 / -1;
       padding: 10px 12px;
       border: 1px solid rgb(40 115 90 / 38%);
@@ -624,9 +625,15 @@
       transition: border-color .15s ease, transform .15s ease;
     }
 
-    .ocr-prompt-button:hover {
+    .ocr-prompt-button:hover,
+    .translation-prompt-button:hover:not(:disabled) {
       border-color: var(--green);
       transform: translateY(-1px);
+    }
+
+    .translation-prompt-button:disabled {
+      cursor: not-allowed;
+      opacity: .55;
     }
 
     .source-job-button,
@@ -1451,6 +1458,55 @@
     </form>
   </dialog>
 
+  <dialog id="translationPromptDialog"
+    aria-labelledby="translationPromptDialogTitle">
+    <form class="modal-form" id="translationPromptForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Edit translation prompt</p>
+          <h2 id="translationPromptDialogTitle">번역 프롬프트 설정</h2>
+        </div>
+        <button class="modal-close" id="translationPromptDialogClose"
+          type="button" aria-label="닫기">×</button>
+      </div>
+
+      <p class="source-note">
+        Gemini를 호출하지 않고 프로젝트 공통 번역 지침만
+        <code>04_translation/prompt.txt</code>에 저장합니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="translationPromptProjectName"></strong>
+        <code id="translationPromptProjectId"></code>
+      </div>
+
+      <p class="source-note" id="translationPromptImpact" hidden></p>
+
+      <div class="field">
+        <div class="field-label-row">
+          <label for="translationPromptEdit">번역 문체·표현 지침</label>
+          <button class="field-reset" id="translationPromptEditReset"
+            type="button">편집 전 내용으로 되돌리기</button>
+        </div>
+        <textarea id="translationPromptEdit" name="translation_prompt"
+          aria-describedby="translationPromptEditHelp" spellcheck="false"
+          required></textarea>
+        <div class="field-help-row">
+          <p class="field-help" id="translationPromptEditHelp">
+            용어집, 숫자, token과 블록 보존 규칙보다 우선할 수 없습니다.
+          </p>
+          <span class="field-count" id="translationPromptEditCount"></span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel"
+          id="translationPromptDialogCancel" type="button">취소</button>
+        <button class="modal-button modal-submit"
+          id="translationPromptSave" type="submit">프롬프트 저장</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="sourceFilesDialog" aria-labelledby="sourceFilesDialogTitle">
     <div class="modal-form">
       <div class="modal-head">
@@ -1664,7 +1720,7 @@
           required></textarea>
         <div class="field-help-row">
           <p class="field-help" id="translationPromptHelp">
-            용어집, 숫자, token과 블록 보존 규칙보다 우선할 수 없습니다.
+            카드의 번역 프롬프트 설정에서 저장한 내용을 사용합니다.
           </p>
           <span class="field-count" id="translationPromptCount"></span>
         </div>
@@ -1673,6 +1729,11 @@
         style="margin-top:14px" hidden>
         중간 실패 뒤 이어하기에서는 저장된 청크의 입력 hash를 보호하기 위해
         번역 지침을 변경할 수 없습니다.
+      </p>
+      <p class="source-note" id="translationForceNote"
+        style="margin-top:14px" hidden>
+        기존 번역·검수·최종 출력은 revisions에 보관한 뒤 새 프롬프트로 전체
+        재번역합니다. 성공하면 번역 검수는 새 초벌을 기준으로 초기화됩니다.
       </p>
 
       <div class="modal-actions">
@@ -1741,7 +1802,9 @@
     let pendingSourceProject = null;
     let pendingSourceFilesProject = null;
     let pendingOcrPromptProject = null;
+    let pendingTranslationPromptProject = null;
     let pendingDeleteProject = null;
+    let pendingTranslationForce = false;
 
     const byId = (id) => document.getElementById(id);
 
@@ -2188,13 +2251,7 @@
       ) {
         return "";
       }
-      if (status === "stale") {
-        return `<button class="translation-job-button" type="button" disabled
-          title="기존 번역과 사람의 검수 내용을 보호하기 위해 자동으로 덮어쓰지 않습니다.">
-          기존 번역 확인 후 CLI에서 재실행
-        </button>`;
-      }
-      if (!["not_run", "partial"].includes(status)) return "";
+      if (!["not_run", "partial", "stale"].includes(status)) return "";
       const active = activeBackgroundJob();
       if (active) {
         return `<button class="translation-job-button" type="button" disabled
@@ -2209,9 +2266,14 @@
         </button>`;
       }
       const resume = status === "partial";
+      const force = status === "stale";
       return `<button class="translation-job-button" type="button"
         data-start-translation-job="${escapeHtml(project.project_id)}">
-        ${resume ? "초벌 번역 이어서 실행" : "초벌 번역 시작"}
+        ${force
+          ? "변경된 프롬프트로 전체 재번역"
+          : resume
+          ? "초벌 번역 이어서 실행"
+          : "초벌 번역 시작"}
       </button>`;
     }
 
@@ -2453,22 +2515,32 @@
         return;
       }
       const resume = project.pipeline.translation_status === "partial";
+      const force = project.pipeline.translation_status === "stale";
       pendingTranslationJobProject = project;
+      pendingTranslationForce = force;
       byId("translationJobProjectName").textContent = project.name;
       byId("translationJobProjectId").textContent = project.project_id;
       byId("translationJobModel").textContent = aiSettings.model;
       byId("translationJobMode").textContent =
-        resume ? "저장된 청크부터 이어하기" : "새 초벌 번역";
+        force
+          ? "기존 결과 보관 후 전체 재번역"
+          : resume
+          ? "저장된 청크부터 이어하기"
+          : "새 초벌 번역";
       byId("translationPrompt").value =
         project.translation_prompt?.value || "";
-      byId("translationPrompt").readOnly = resume;
+      byId("translationPrompt").readOnly = true;
       byId("translationResumeNote").hidden = !resume;
+      byId("translationForceNote").hidden = !force;
       byId("translationJobSubmit").textContent =
-        resume ? "초벌 번역 이어서 실행" : "초벌 번역 시작";
+        force
+          ? "전체 재번역 시작"
+          : resume
+          ? "초벌 번역 이어서 실행"
+          : "초벌 번역 시작";
       updateTranslationPromptCount();
       byId("translationJobDialog").showModal();
-      if (resume) byId("translationJobDialogCancel").focus();
-      else byId("translationPrompt").focus();
+      byId("translationJobDialogCancel").focus();
     }
 
     function closeTranslationJobDialog() {
@@ -2486,6 +2558,7 @@
           body: JSON.stringify({
             project_id: pendingTranslationJobProject.project_id,
             prompt: byId("translationPrompt").value,
+            force: pendingTranslationForce,
           }),
         });
         translationJobs.set(result.job.project_id, result.job);
@@ -2495,6 +2568,8 @@
         showToast(
           result.job.resume
             ? "저장된 초벌 번역을 이어서 실행합니다."
+            : result.job.force
+            ? "기존 결과를 보관하고 전체 재번역을 시작했습니다."
             : "초벌 번역 작업을 시작했습니다.",
         );
       } catch (error) {
@@ -2592,6 +2667,22 @@
         data-edit-ocr-prompt="${escapeHtml(project.project_id)}"
         title="${escapeHtml(project.ocr_prompt_edit.reason)}">
         OCR 프롬프트 수정
+      </button>`;
+    }
+
+    function translationPromptEditButton(project) {
+      const active = activeBackgroundJob();
+      const disabled = active ? " disabled" : "";
+      const title = active
+        ? `${active.project_id} 백그라운드 작업이 실행 중입니다.`
+        : "Gemini 호출 없이 프로젝트 번역 지침만 저장합니다.";
+      const label = project.translation_prompt?.saved
+        ? "번역 프롬프트 수정"
+        : "번역 프롬프트 설정";
+      return `<button class="translation-prompt-button" type="button"
+        data-edit-translation-prompt="${escapeHtml(project.project_id)}"
+        title="${escapeHtml(title)}"${disabled}>
+        ${label}
       </button>`;
     }
 
@@ -2696,6 +2787,7 @@
           ${translationJobStatus(project)}
           ${sourceJobButton(project)}
           ${glossaryJobButton(project)}
+          ${translationPromptEditButton(project)}
           ${translationJobButton(project)}
           ${sourceRegistrationButton(project)}
           ${ocrPromptEditButton(project)}
@@ -2974,6 +3066,107 @@
 
     function closeOcrPromptDialog() {
       byId("ocrPromptDialog").close();
+    }
+
+    function updateTranslationPromptEditCount() {
+      const value = byId("translationPromptEdit").value;
+      const byteCount = new TextEncoder().encode(value).length;
+      const overLimit = byteCount > MAX_TRANSLATION_PROMPT_BYTES;
+      const count = byId("translationPromptEditCount");
+      count.textContent =
+        `${byteCount.toLocaleString()} / ${MAX_TRANSLATION_PROMPT_BYTES.toLocaleString()} bytes`;
+      count.classList.toggle("limit", overLimit);
+      byId("translationPromptSave").disabled =
+        overLimit || !value.trim();
+    }
+
+    function openTranslationPromptDialog(projectId) {
+      const project = dashboard?.projects.find(
+        (value) => value.project_id === projectId,
+      );
+      if (!project) {
+        showToast("프로젝트 정보를 찾지 못했습니다.", true);
+        return;
+      }
+      if (activeBackgroundJob()) {
+        showToast(
+          "백그라운드 작업 중에는 번역 프롬프트를 수정할 수 없습니다.",
+          true,
+        );
+        return;
+      }
+      const savedPrompt = project.translation_prompt?.value || "";
+      pendingTranslationPromptProject = {
+        projectId,
+        savedPrompt,
+        expectedSha256: project.translation_prompt?.sha256 || "",
+      };
+      byId("translationPromptProjectName").textContent = project.name;
+      byId("translationPromptProjectId").textContent = project.project_id;
+      byId("translationPromptEdit").value = savedPrompt;
+      const status = project.pipeline.translation_status;
+      const impact = byId("translationPromptImpact");
+      impact.hidden = !["partial", "current", "stale"].includes(status);
+      impact.textContent = status === "partial"
+        ? "프롬프트를 변경하면 저장된 일부 청크를 이어갈 수 없으며 전체 재번역이 필요합니다."
+        : "프롬프트를 변경하면 현재 번역 승인이 해제되고 전체 재번역이 필요합니다. 기존 파일은 revisions에 보관됩니다.";
+      updateTranslationPromptEditCount();
+      byId("translationPromptDialog").showModal();
+      byId("translationPromptEdit").focus();
+    }
+
+    function closeTranslationPromptDialog() {
+      byId("translationPromptDialog").close();
+    }
+
+    async function saveTranslationPrompt(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!pendingTranslationPromptProject || !form.reportValidity()) return;
+      const prompt = byId("translationPromptEdit").value;
+      if (!prompt.trim()) {
+        showToast("번역 프롬프트를 입력하세요.", true);
+        byId("translationPromptEdit").focus();
+        return;
+      }
+      if (
+        new TextEncoder().encode(prompt).length
+        > MAX_TRANSLATION_PROMPT_BYTES
+      ) {
+        showToast("번역 프롬프트는 64 KiB 이하여야 합니다.", true);
+        byId("translationPromptEdit").focus();
+        return;
+      }
+      const submit = byId("translationPromptSave");
+      submit.disabled = true;
+      try {
+        const response = await api(
+          `/api/projects/${encodeURIComponent(
+            pendingTranslationPromptProject.projectId
+          )}/translation-prompt`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              translation_prompt: prompt,
+              expected_sha256:
+                pendingTranslationPromptProject.expectedSha256,
+            }),
+          },
+        );
+        const invalidated =
+          response.translation_prompt?.translation_invalidated;
+        closeTranslationPromptDialog();
+        await refresh(true);
+        showToast(
+          invalidated
+            ? "번역 프롬프트를 저장했습니다. 전체 재번역이 필요합니다."
+            : "번역 프롬프트를 저장했습니다.",
+        );
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
     }
 
     function openSourceFilesDialog(projectId) {
@@ -3259,9 +3452,11 @@
     );
     byId("translationJobDialog").addEventListener("close", () => {
       pendingTranslationJobProject = null;
+      pendingTranslationForce = false;
       byId("translationJobForm").reset();
       byId("translationPrompt").readOnly = false;
       byId("translationResumeNote").hidden = true;
+      byId("translationForceNote").hidden = true;
       byId("translationJobSubmit").disabled = false;
       updateTranslationPromptCount();
     });
@@ -3316,6 +3511,35 @@
       byId("ocrPromptForm").reset();
       byId("ocrPromptSubmit").disabled = false;
       updateOcrPromptEditCount();
+    });
+    byId("translationPromptDialogClose").addEventListener(
+      "click",
+      closeTranslationPromptDialog,
+    );
+    byId("translationPromptDialogCancel").addEventListener(
+      "click",
+      closeTranslationPromptDialog,
+    );
+    byId("translationPromptForm").addEventListener(
+      "submit",
+      saveTranslationPrompt,
+    );
+    byId("translationPromptEdit").addEventListener(
+      "input",
+      updateTranslationPromptEditCount,
+    );
+    byId("translationPromptEditReset").addEventListener("click", () => {
+      byId("translationPromptEdit").value =
+        pendingTranslationPromptProject?.savedPrompt || "";
+      updateTranslationPromptEditCount();
+      byId("translationPromptEdit").focus();
+    });
+    byId("translationPromptDialog").addEventListener("close", () => {
+      pendingTranslationPromptProject = null;
+      byId("translationPromptForm").reset();
+      byId("translationPromptImpact").hidden = true;
+      byId("translationPromptSave").disabled = false;
+      updateTranslationPromptEditCount();
     });
     byId("sourceFilesDialogClose").addEventListener(
       "click",
@@ -3383,6 +3607,15 @@
       if (translationStartButton) {
         openTranslationJobDialog(
           translationStartButton.dataset.startTranslationJob,
+        );
+        return;
+      }
+      const translationPromptButton = event.target.closest(
+        "[data-edit-translation-prompt]",
+      );
+      if (translationPromptButton) {
+        openTranslationPromptDialog(
+          translationPromptButton.dataset.editTranslationPrompt,
         );
         return;
       }

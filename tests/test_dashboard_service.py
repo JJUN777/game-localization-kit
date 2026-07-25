@@ -67,6 +67,7 @@ class DashboardServiceTests(unittest.TestCase):
             self.assertFalse(project["reviews"]["translation"]["enabled"])
             self.assertIn("프로젝트 공통 OCR", project["ocr_prompt"])
             self.assertFalse(project["translation_prompt"]["saved"])
+            self.assertEqual(len(project["translation_prompt"]["sha256"]), 64)
             self.assertIn(
                 "natural Korean",
                 project["translation_prompt"]["value"],

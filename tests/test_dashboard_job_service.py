@@ -553,12 +553,14 @@ class DashboardJobManagerTests(unittest.TestCase):
             workspace_root: str | Path,
             model: str,
             resume: bool,
+            force: bool,
             progress: object,
         ) -> dict[str, object]:
             self.assertEqual(project_id, "translation_project")
             self.assertEqual(Path(workspace_root), self.workspace_root.resolve())
             self.assertEqual(model, "gemini-test")
             self.assertFalse(resume)
+            self.assertFalse(force)
             progress("Chunk 1/1: requesting translation", 0, 1)  # type: ignore[operator]
             completed.set()
             return {
@@ -677,6 +679,7 @@ class DashboardJobManagerTests(unittest.TestCase):
                 self.workspace_root,
                 "gemini-test",
                 False,
+                False,
                 lambda message, current, total: progress.append(
                     (message, current, total)
                 ),
@@ -686,6 +689,7 @@ class DashboardJobManagerTests(unittest.TestCase):
         self.assertEqual(translate.call_count, 2)
         self.assertTrue(translate.call_args_list[0].kwargs["dry_run"])
         self.assertFalse(translate.call_args_list[1].kwargs["resume"])
+        self.assertFalse(translate.call_args_list[1].kwargs["force"])
         translate.call_args_list[1].kwargs["progress"](
             "Chunk 2/2: requesting translation"
         )

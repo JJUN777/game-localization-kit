@@ -574,6 +574,12 @@ glk translate --project primal --prompt prompts/primal_translation.txt
 
 프로젝트 prompt와 termbase가 충돌하면 termbase가 우선합니다.
 
+`glk ui`에서는 프로젝트 카드의 `번역 프롬프트 설정`에서 Gemini를 호출하지
+않고 지침만 미리 저장·수정할 수 있습니다. 초벌 번역이 생성된 뒤 프롬프트를
+바꾸면 기존 결과는 stale이 되며, 카드의 `변경된 프롬프트로 전체 재번역`에서
+명시적으로 다시 실행합니다. 재번역 전 기존 prompt·draft·review·QA·최종
+출력은 `04_translation/revisions/translation_restart_*`에 보관됩니다.
+
 ```bash
 glk translate --project primal --resume   # 중단 후 이어서 실행
 ```
@@ -722,7 +728,8 @@ glk ui
 있습니다. 기존 프로젝트의 휴지통 이동, 전체 진행 상황 조회와 준비된 검수 화면
 열기도 지원합니다. 원문 준비, 용어 후보 생성, 초벌 번역은 카드에서 background
 job으로 실행할 수 있으며 최종 번역 승인 후에는 결과 파일 목록과 다운로드
-버튼이 표시됩니다.
+버튼이 표시됩니다. 번역 프롬프트는 번역 실행과 별도로 미리 저장할 수 있고,
+변경된 프롬프트로 전체 재번역할 때는 기존 결과를 revisions에 보관합니다.
 
 ### `glk projects`의 진행 단계
 

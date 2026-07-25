@@ -24,6 +24,16 @@ from glk.application.project_service import (
 )
 from glk.application.segmentation_service import segment_project_source
 from glk.application.source_qa_service import run_project_source_qa
+from glk.application.translation_prompt_service import (
+    MAX_TRANSLATION_PROMPT_BYTES,
+)
+from glk.application.translation_restart_service import (
+    archive_translation_restart,
+    clear_stale_translation_review_artifacts,
+)
+from glk.application.translation_review_service import (
+    prepare_project_translation_review,
+)
 from glk.application.translation_service import translate_project
 from glk.domain.workspace import (
     IMAGE_SOURCE_ROOT,
@@ -39,7 +49,6 @@ TERMINAL_JOB_STATUSES = frozenset(
 _PDF_PROGRESS = re.compile(r"^Page (\d+):")
 _IMAGE_PROGRESS = re.compile(r"^Image (\d+)/(\d+):")
 _TRANSLATION_PROGRESS = re.compile(r"^Chunk (\d+)/(\d+):")
-MAX_TRANSLATION_PROMPT_BYTES = 64 * 1024
 
 JobProgress = Callable[[str, int | None, int | None], None]
 SourceJobRunner = Callable[
@@ -51,7 +60,7 @@ GlossaryJobRunner = Callable[
     dict[str, Any],
 ]
 TranslationJobRunner = Callable[
-    [str, str | Path, str, bool, JobProgress],
+    [str, str | Path, str, bool, bool, JobProgress],
     dict[str, Any],
 ]
 
@@ -110,6 +119,7 @@ class DashboardTranslationJob:
     project_id: str
     model: str
     resume: bool
+    force: bool
     status: str
     progress_message: str
     progress_current: int | None
@@ -412,6 +422,7 @@ def run_translation_pipeline(
     workspace_root: str | Path,
     model: str,
     resume: bool,
+    force: bool,
     progress: JobProgress,
 ) -> dict[str, Any]:
     """Translate approved source blocks with the current termbase."""
@@ -421,10 +432,21 @@ def run_translation_pipeline(
         workspace_root=workspace_root,
         model_name=model,
         resume=resume,
+        force=force,
         dry_run=True,
     )
     total = planned.total_chunks
     progress("초벌 번역 청크를 준비하고 있습니다.", 0, total)
+    location = (
+        load_workspace_project_id(project_id, workspace_root)
+        if force
+        else None
+    )
+    revision_path = (
+        archive_translation_restart(location)
+        if location is not None
+        else None
+    )
 
     def report_translation(message: str) -> None:
         match = _TRANSLATION_PROGRESS.match(message)
@@ -437,13 +459,29 @@ def run_translation_pipeline(
         workspace_root=workspace_root,
         model_name=model,
         resume=resume,
+        force=force,
         progress=report_translation,
     )
+    review_reset = False
+    if location is not None:
+        clear_stale_translation_review_artifacts(location)
+        prepare_project_translation_review(
+            project=location.path,
+            workspace_root=workspace_root,
+            force=True,
+        )
+        review_reset = True
     progress("초벌 번역과 검수 파일 생성이 완료되었습니다.", total, total)
     return {
         "ok": True,
         "status": "succeeded",
         "translation": result.to_dict(),
+        "revision_path": (
+            WorkspacePaths(location.path).relative(revision_path)
+            if location is not None and revision_path is not None
+            else None
+        ),
+        "review_reset": review_reset,
     }
 
 
@@ -634,6 +672,8 @@ class DashboardJobManager:
         ):
             try:
                 value = json.loads(state_path.read_text(encoding="utf-8"))
+                if isinstance(value, dict):
+                    value.setdefault("force", False)
                 translation_job = DashboardTranslationJob(**value)
                 if translation_job.status in ACTIVE_JOB_STATUSES:
                     now = _utc_now()
@@ -859,6 +899,7 @@ class DashboardJobManager:
         project_id: str,
         model: str,
         prompt: str,
+        force: bool = False,
     ) -> dict[str, Any]:
         prompt_data = prompt.encode("utf-8")
         if not prompt.strip():
@@ -893,21 +934,30 @@ class DashboardJobManager:
                     "Complete the current termbase before starting translation."
                 )
             translation_status = pipeline["translation_status"]
-            if translation_status == "current":
+            if translation_status == "current" and not force:
                 raise DashboardJobError(
                     "Translation draft is already current."
                 )
-            if translation_status == "stale":
+            if translation_status == "stale" and not force:
                 raise DashboardJobError(
                     "Existing translation files are stale and cannot be "
-                    "overwritten from the dashboard."
+                    "overwritten without an explicit full restart."
                 )
-            if translation_status not in {"not_run", "partial"}:
+            if translation_status not in {
+                "not_run",
+                "partial",
+                "current",
+                "stale",
+            }:
                 raise DashboardJobError(
                     "Translation is not ready to start."
                 )
+            if force and translation_status == "not_run":
+                raise DashboardJobError(
+                    "A full restart requires an existing translation."
+                )
             paths = WorkspacePaths(location.path)
-            resume = translation_status == "partial"
+            resume = translation_status == "partial" and not force
             if resume:
                 if not paths.translation_prompt.is_file():
                     raise DashboardJobError(
@@ -926,13 +976,28 @@ class DashboardJobManager:
                         "A partial translation must resume with its saved prompt."
                     )
             else:
-                write_bytes_atomic(paths.translation_prompt, prompt_data)
+                if paths.translation_prompt.is_file():
+                    try:
+                        saved_prompt = paths.translation_prompt.read_text(
+                            encoding="utf-8"
+                        )
+                    except UnicodeDecodeError as error:
+                        raise DashboardJobError(
+                            "The saved translation prompt must be UTF-8."
+                        ) from error
+                    if saved_prompt != prompt:
+                        raise DashboardJobError(
+                            "Save the translation prompt before starting translation."
+                        )
+                else:
+                    write_bytes_atomic(paths.translation_prompt, prompt_data)
             now = _utc_now()
             job = DashboardTranslationJob(
                 job_id=uuid4().hex,
                 project_id=project_id,
                 model=model,
                 resume=resume,
+                force=force,
                 status="queued",
                 progress_message="초벌 번역 실행을 준비하고 있습니다.",
                 progress_current=0,
@@ -1147,6 +1212,7 @@ class DashboardJobManager:
                 self.workspace_root,
                 job.model,
                 job.resume,
+                job.force,
                 report,
             )
             status = str(result.get("status") or "")

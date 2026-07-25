@@ -51,7 +51,7 @@ class DashboardServerTests(unittest.TestCase):
         self.source_job_calls: list[tuple[str, Path, str]] = []
         self.glossary_job_calls: list[tuple[str, Path]] = []
         self.translation_job_calls: list[
-            tuple[str, Path, str, bool]
+            tuple[str, Path, str, bool, bool]
         ] = []
         location = create_project(
             name="Dashboard Review",
@@ -124,6 +124,7 @@ class DashboardServerTests(unittest.TestCase):
         workspace_root: str | Path,
         model: str,
         resume: bool,
+        force: bool,
         progress: object,
     ) -> dict[str, object]:
         self.translation_job_calls.append(
@@ -132,6 +133,7 @@ class DashboardServerTests(unittest.TestCase):
                 Path(workspace_root),
                 model,
                 resume,
+                force,
             )
         )
         progress("Chunk 1/1: requesting translation", 0, 1)  # type: ignore[operator]
@@ -249,6 +251,9 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("Gemini API를 사용하지 않으며", html)
         self.assertIn("초벌 번역 시작", html)
         self.assertIn("번역 문체·표현 지침", html)
+        self.assertIn("번역 프롬프트 설정", html)
+        self.assertIn("data-edit-translation-prompt", html)
+        self.assertIn("변경된 프롬프트로 전체 재번역", html)
         self.assertIn("청크마다 API를 호출", html)
         self.assertIn("최종 번역 결과", html)
         self.assertIn("data-download-output", html)
@@ -545,6 +550,7 @@ class DashboardServerTests(unittest.TestCase):
                     self.workspace_root.resolve(),
                     "gemini-3.5-flash",
                     False,
+                    False,
                 )
             ],
         )
@@ -555,6 +561,101 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(
             prompt_path.read_text(encoding="utf-8"),
             "Translate naturally.",
+        )
+
+    def test_saves_translation_prompt_and_starts_full_retranslation(self) -> None:
+        blocks = translation_sample_blocks()
+        project_path = create_translation_project(
+            self.workspace_root,
+            blocks,
+        )
+        translate_project(
+            project="translation_project",
+            workspace_root=self.workspace_root,
+            provider=SequenceProvider([valid_response(blocks)]),
+        )
+        status, dashboard = self._request("/api/dashboard")
+        self.assertEqual(status, 200)
+        project = next(
+            item
+            for item in dashboard["projects"]
+            if item["project_id"] == "translation_project"
+        )
+
+        status, unauthorized = self._request(
+            "/api/projects/translation_project/translation-prompt",
+            method="PATCH",
+            payload={
+                "translation_prompt": "Use a terse rulebook style.",
+                "expected_sha256": project["translation_prompt"]["sha256"],
+            },
+            authorized=False,
+        )
+        self.assertEqual(status, 403)
+        self.assertFalse(unauthorized["ok"])
+
+        status, updated = self._request(
+            "/api/projects/translation_project/translation-prompt",
+            method="PATCH",
+            payload={
+                "translation_prompt": "Use a terse rulebook style.",
+                "expected_sha256": project["translation_prompt"]["sha256"],
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(
+            updated["translation_prompt"]["translation_invalidated"]
+        )
+        self.assertTrue(updated["translation_prompt"]["revision_file"])
+        self.assertEqual(
+            (project_path / "04_translation/prompt.txt").read_text(
+                encoding="utf-8"
+            ),
+            "Use a terse rulebook style.\n",
+        )
+
+        status, refreshed = self._request("/api/dashboard")
+        self.assertEqual(status, 200)
+        project = next(
+            item
+            for item in refreshed["projects"]
+            if item["project_id"] == "translation_project"
+        )
+        self.assertEqual(project["pipeline"]["translation_status"], "stale")
+
+        status, _ = self._request(
+            "/api/settings/ai",
+            method="PUT",
+            payload={
+                "api_key": "dashboard-translation-key",
+                "model": "gemini-3.5-flash",
+            },
+        )
+        self.assertEqual(status, 200)
+        status, started = self._request(
+            "/api/jobs/translation",
+            method="POST",
+            payload={
+                "project_id": "translation_project",
+                "prompt": project["translation_prompt"]["value"],
+                "force": True,
+            },
+        )
+        self.assertEqual(status, 202)
+        self.assertTrue(started["job"]["force"])
+        for _ in range(100):
+            if self.translation_job_calls:
+                break
+            time.sleep(0.01)
+        self.assertEqual(
+            self.translation_job_calls[-1],
+            (
+                "translation_project",
+                self.workspace_root.resolve(),
+                "gemini-3.5-flash",
+                False,
+                True,
+            ),
         )
 
     def test_opens_ready_review_and_rejects_unknown_type(self) -> None:
