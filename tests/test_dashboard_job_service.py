@@ -960,6 +960,10 @@ class DashboardJobManagerTests(unittest.TestCase):
         )
         self.assertTrue(started["resume"])
         manager.close()
+        state = json.loads(
+            paths.dashboard_translation_job_state.read_text(encoding="utf-8")
+        )
+        self.assertEqual(state["status"], "succeeded")
 
     def test_translation_pipeline_reports_chunk_progress(self) -> None:
         settings_root = self.root / "custom-settings"

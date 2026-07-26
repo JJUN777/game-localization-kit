@@ -791,6 +791,7 @@ class DashboardJobManager:
         self._glossary_runner = glossary_runner or run_glossary_pipeline
         self._translation_runner = translation_runner
         self._lock = threading.RLock()
+        self._threads: set[threading.Thread] = set()
         self._source_jobs = _JobStore[DashboardSourceJob](
             self.workspace_root,
             state_filename="dashboard_source_job.json",
@@ -930,12 +931,19 @@ class DashboardJobManager:
     ) -> dict[str, Any]:
         store.put(job)
         queued_job = job.to_dict()
+        def run() -> None:
+            try:
+                target(job.job_id, job.project_id)
+            finally:
+                with self._lock:
+                    self._threads.discard(threading.current_thread())
+
         thread = threading.Thread(
-            target=target,
-            args=(job.job_id, job.project_id),
+            target=run,
             name=thread_name,
             daemon=True,
         )
+        self._threads.add(thread)
         thread.start()
         return queued_job
 
@@ -1406,3 +1414,8 @@ class DashboardJobManager:
     def close(self) -> None:
         with self._lock:
             self._closed = True
+            threads = tuple(self._threads)
+        current = threading.current_thread()
+        for thread in threads:
+            if thread is not current:
+                thread.join()

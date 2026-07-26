@@ -51,9 +51,13 @@ def _directory_fsync_is_unsupported(error: OSError) -> bool:
     return error.errno in _UNSUPPORTED_DIRECTORY_FSYNC_ERRNOS
 
 
+def _supports_directory_fsync() -> bool:
+    return os.name != "nt"
+
+
 def _fsync_parent(path: Path) -> None:
     """Persist a replaced or newly created directory entry where supported."""
-    if os.name == "nt":
+    if not _supports_directory_fsync():
         return
     try:
         descriptor = _open_parent_directory(path)

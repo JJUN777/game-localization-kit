@@ -95,7 +95,10 @@ class ApplicationIoTests(unittest.TestCase):
                 "directory open is unsupported",
             )
             with (
-                patch("glk.application._io.os.name", "posix"),
+                patch(
+                    "glk.application._io._supports_directory_fsync",
+                    return_value=True,
+                ),
                 patch(
                     "glk.application._io._open_parent_directory",
                     side_effect=unsupported,
@@ -124,7 +127,10 @@ class ApplicationIoTests(unittest.TestCase):
                     )
 
             with (
-                patch("glk.application._io.os.name", "posix"),
+                patch(
+                    "glk.application._io._supports_directory_fsync",
+                    return_value=True,
+                ),
                 patch(
                     "glk.application._io._open_parent_directory",
                     return_value=fake_descriptor,
@@ -161,7 +167,10 @@ class ApplicationIoTests(unittest.TestCase):
                     )
 
             with (
-                patch("glk.application._io.os.name", "posix"),
+                patch(
+                    "glk.application._io._supports_directory_fsync",
+                    return_value=True,
+                ),
                 patch(
                     "glk.application._io._open_parent_directory",
                     return_value=fake_descriptor,
@@ -190,7 +199,10 @@ class ApplicationIoTests(unittest.TestCase):
                     raise OSError(errno.EIO, "directory storage failure")
 
             with (
-                patch("glk.application._io.os.name", "posix"),
+                patch(
+                    "glk.application._io._supports_directory_fsync",
+                    return_value=True,
+                ),
                 patch(
                     "glk.application._io._open_parent_directory",
                     return_value=fake_descriptor,
@@ -215,7 +227,10 @@ class ApplicationIoTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             path = Path(temporary) / "data.bin"
             with (
-                patch("glk.application._io.os.name", "posix"),
+                patch(
+                    "glk.application._io._supports_directory_fsync",
+                    return_value=True,
+                ),
                 patch(
                     "glk.application._io._open_parent_directory",
                     side_effect=PermissionError(
