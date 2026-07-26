@@ -612,6 +612,12 @@
       transform: translateY(-1px);
     }
 
+    .source-register-button.replace {
+      border-color: rgb(169 110 22 / 45%);
+      color: var(--amber);
+      background: rgb(169 110 22 / 8%);
+    }
+
     .ocr-prompt-button,
     .translation-prompt-button {
       grid-column: 1 / -1;
@@ -649,8 +655,8 @@
     }
 
     .source-job-button {
-      border: 1px solid var(--accent);
-      background: var(--accent);
+      border: 1px solid var(--green);
+      background: var(--green);
     }
 
     .glossary-job-button {
@@ -676,6 +682,16 @@
       border-color: var(--line);
       color: #999d99;
       background: #f2f0ea;
+    }
+
+    #sourceJobSubmit {
+      border-color: var(--green);
+      background: var(--green);
+    }
+
+    #sourceSubmit.source-replace-submit {
+      border-color: var(--amber);
+      background: var(--amber);
     }
 
     .job-status {
@@ -1399,24 +1415,6 @@
         </p>
         <ul class="selected-files" id="selectedFiles"
           aria-live="polite"></ul>
-      </div>
-
-      <div class="field" id="ocrPromptField" hidden>
-        <div class="field-label-row">
-          <label for="ocrPrompt">OCR 프롬프트</label>
-          <button class="field-reset" id="ocrPromptReset" type="button">
-            편집 전 내용으로 되돌리기
-          </button>
-        </div>
-        <textarea id="ocrPrompt" name="ocr_prompt"
-          aria-describedby="ocrPromptHelp" spellcheck="false"></textarea>
-        <div class="field-help-row">
-          <p class="field-help" id="ocrPromptHelp">
-            모든 이미지 OCR에 적용되며
-            <code>01_input/images/ocr_prompt.txt</code>에 저장됩니다.
-          </p>
-          <span class="field-count" id="ocrPromptCount"></span>
-        </div>
       </div>
 
       <div class="modal-actions">
@@ -2667,7 +2665,7 @@
       if (sourceJobIsActive(project.project_id)) return "";
       if (project.source_type) {
         if (!project.source_replacement?.allowed) return "";
-        return `<button class="source-register-button" type="button"
+        return `<button class="source-register-button replace" type="button"
           data-register-source="${escapeHtml(project.project_id)}"
           data-project-name="${escapeHtml(project.name)}"
           data-source-type="${escapeHtml(project.source_type)}"
@@ -2700,6 +2698,7 @@
     }
 
     function translationPromptEditButton(project) {
+      if (project.pipeline.termbase_status !== "current") return "";
       const active = activeBackgroundJob();
       const disabled = active ? " disabled" : "";
       const title = active
@@ -2762,7 +2761,8 @@
             data-download-output="${escapeHtml(output.path)}"
             data-project="${escapeHtml(project.project_id)}"
             data-download-name="${escapeHtml(output.download_name)}"
-            aria-label="${escapeHtml(output.name)} 다운로드">
+            title="저장 위치를 선택해 다운로드"
+            aria-label="${escapeHtml(output.name)} 저장 위치 선택">
             다운로드
           </button>
         </div>`).join("");
@@ -2819,11 +2819,11 @@
           ${glossaryJobButton(project)}
           ${translationPromptEditButton(project)}
           ${translationJobButton(project)}
-          ${sourceRegistrationButton(project)}
           ${ocrPromptEditButton(project)}
           ${reviewButton(project, "source")}
           ${reviewButton(project, "glossary")}
           ${reviewButton(project, "translation")}
+          ${sourceRegistrationButton(project)}
         </div>
         <div class="path" title="${pathTitle}">${pathTitle}</div>
       </article>`;
@@ -2932,6 +2932,22 @@
       const downloadName = button.dataset.downloadName || "translation.txt";
       button.disabled = true;
       try {
+        let fileHandle = null;
+        if (typeof window.showSaveFilePicker === "function") {
+          try {
+            fileHandle = await window.showSaveFilePicker({
+              suggestedName: downloadName,
+              types: [{
+                description: "텍스트 파일",
+                accept: {"text/plain": [".txt"]},
+              }],
+            });
+          } catch (error) {
+            if (error?.name === "AbortError") return;
+            throw error;
+          }
+        }
+
         const query = new URLSearchParams({
           project_id: projectId,
           path: outputPath,
@@ -2946,16 +2962,28 @@
           throw new Error(payload.message || `HTTP ${response.status}`);
         }
         const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement("a");
-        anchor.href = url;
-        anchor.download = downloadName;
-        anchor.hidden = true;
-        document.body.append(anchor);
-        anchor.click();
-        anchor.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        showToast(`'${downloadName}' 다운로드를 시작했습니다.`);
+        if (fileHandle) {
+          const writable = await fileHandle.createWritable();
+          try {
+            await writable.write(blob);
+            await writable.close();
+          } catch (error) {
+            await writable.abort().catch(() => {});
+            throw error;
+          }
+          showToast(`'${downloadName}' 파일을 저장했습니다.`);
+        } else {
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = downloadName;
+          anchor.hidden = true;
+          document.body.append(anchor);
+          anchor.click();
+          anchor.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          showToast(`'${downloadName}' 다운로드를 시작했습니다.`);
+        }
       } catch (error) {
         showToast(error.message, true);
         await refresh(true);
@@ -2990,10 +3018,6 @@
       return bytes;
     }
 
-    function updateOcrPromptCount() {
-      updatePromptCount("ocrPrompt", "ocrPromptCount");
-    }
-
     function updateOcrPromptEditCount() {
       updatePromptCount("ocrPromptEdit", "ocrPromptEditCount");
     }
@@ -3012,9 +3036,6 @@
         ? "PNG, JPG, JPEG, WebP 파일을 최대 200개 선택하세요. 파일명 자연순으로 등록합니다."
         : "PDF 파일 한 개를 선택하세요. 전체 업로드 한도는 256 MiB입니다.";
       byId("selectedFiles").replaceChildren();
-      byId("ocrPromptField").hidden = !images;
-      byId("ocrPrompt").required = images;
-      updateOcrPromptCount();
     }
 
     function renderSelectedFiles() {
@@ -3035,30 +3056,28 @@
 
     function openSourceDialog(projectId, projectName, replace, sourceType) {
       const form = byId("sourceForm");
-      const project = dashboard?.projects.find(
-        (value) => value.project_id === projectId
-      );
-      const savedOcrPrompt = project?.ocr_prompt || "";
       form.reset();
       if (replace && ["pdf", "images"].includes(sourceType)) {
         form.elements.source_type.value = sourceType;
       }
-      byId("ocrPrompt").value = savedOcrPrompt;
       pendingSourceProject = {
         projectId,
         projectName,
         replace,
-        savedOcrPrompt,
       };
       byId("sourceDialogKicker").textContent =
         replace ? "Replace originals" : "Register originals";
       byId("sourceDialogTitle").textContent =
         replace ? "원본 교체" : "원본 등록";
       byId("sourceDialogNote").innerHTML = replace
-        ? "기존 원본은 삭제되고 선택한 파일로 교체됩니다. 이미지 형식에서는 저장된 OCR 프롬프트도 확인·수정할 수 있으며, 원문 추출·OCR 시작 전까지만 교체할 수 있습니다."
-        : "선택한 파일은 프로젝트의 <code>01_input</code>에 복사합니다. 이미지 형식에서는 OCR 프롬프트를 함께 저장하며, 이 단계에서는 Gemini 호출을 실행하지 않습니다.";
+        ? "기존 원본은 삭제되고 선택한 파일로 교체됩니다. 저장된 OCR 프롬프트는 유지되며 별도의 <code>OCR 프롬프트 수정</code> 버튼에서 변경할 수 있습니다. 원문 추출·OCR 시작 전까지만 교체할 수 있습니다."
+        : "선택한 파일은 프로젝트의 <code>01_input</code>에 복사합니다. 이미지 형식은 프로젝트 기본 OCR 프롬프트를 유지하며, 등록 뒤 별도의 <code>OCR 프롬프트 수정</code> 버튼에서 변경할 수 있습니다. 이 단계에서는 Gemini 호출을 실행하지 않습니다.";
       byId("sourceSubmit").textContent =
         replace ? "기존 원본 교체" : "원본 등록";
+      byId("sourceSubmit").classList.toggle(
+        "source-replace-submit",
+        replace,
+      );
       byId("sourceProjectName").textContent = projectName;
       byId("sourceProjectId").textContent = projectId;
       updateSourceFileInput();
@@ -3328,24 +3347,9 @@
         showToast("전체 파일 크기는 255 MiB 이하여야 합니다.", true);
         return;
       }
-      const ocrPrompt = byId("ocrPrompt").value;
-      if (sourceType === "images" && !ocrPrompt.trim()) {
-        showToast("이미지 OCR 프롬프트를 입력하세요.", true);
-        byId("ocrPrompt").focus();
-        return;
-      }
-      if (
-        sourceType === "images"
-        && promptBytes("ocrPrompt") > MAX_OCR_PROMPT_BYTES
-      ) {
-        showToast("OCR 프롬프트는 64 KiB 이하여야 합니다.", true);
-        byId("ocrPrompt").focus();
-        return;
-      }
 
       const body = new FormData();
       body.append("source_type", sourceType);
-      if (sourceType === "images") body.append("ocr_prompt", ocrPrompt);
       for (const file of files) body.append("files", file, file.name);
       submit.disabled = true;
       try {
@@ -3503,13 +3507,6 @@
     byId("sourceForm").addEventListener("change", (event) => {
       if (event.target.name === "source_type") updateSourceFileInput();
       if (event.target.id === "sourceFiles") renderSelectedFiles();
-    });
-    byId("ocrPrompt").addEventListener("input", updateOcrPromptCount);
-    byId("ocrPromptReset").addEventListener("click", () => {
-      byId("ocrPrompt").value =
-        pendingSourceProject?.savedOcrPrompt || "";
-      updateOcrPromptCount();
-      byId("ocrPrompt").focus();
     });
     byId("sourceDialog").addEventListener("close", () => {
       pendingSourceProject = null;

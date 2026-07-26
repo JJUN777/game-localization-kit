@@ -253,6 +253,10 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("원본 파일 목록", html)
         self.assertIn("OCR 프롬프트", html)
         self.assertIn("OCR 프롬프트 수정", html)
+        self.assertNotIn('id="ocrPromptField"', html)
+        self.assertNotIn('id="ocrPrompt"', html)
+        self.assertIn("프로젝트 기본 OCR 프롬프트를 유지하며", html)
+        self.assertIn("저장된 OCR 프롬프트는 유지되며", html)
         self.assertIn("편집 전 내용으로 되돌리기", html)
         self.assertIn("AI 설정", html)
         self.assertIn("원문 준비 시작", html)
@@ -262,14 +266,33 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("번역 문체·표현 지침", html)
         self.assertIn("번역 프롬프트 설정", html)
         self.assertIn("data-edit-translation-prompt", html)
+        self.assertIn(
+            'project.pipeline.termbase_status !== "current"',
+            html,
+        )
         self.assertIn("변경된 프롬프트로 전체 재번역", html)
         self.assertIn("청크마다 API를 호출", html)
         self.assertIn("초벌 번역 완료 ·", html)
         self.assertIn("translation-review-attention", html)
         self.assertIn("최종 번역 결과", html)
         self.assertIn("data-download-output", html)
+        self.assertIn("window.showSaveFilePicker", html)
+        self.assertIn("fileHandle.createWritable()", html)
+        self.assertIn('error?.name === "AbortError"', html)
+        self.assertIn("저장 위치를 선택해 다운로드", html)
+        self.assertIn('class="source-register-button replace"', html)
+        self.assertIn('"source-replace-submit"', html)
         self.assertIn("휴지통으로 이동", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
+
+        project_card = html.split(
+            "function projectCard(project)",
+            maxsplit=1,
+        )[1].split("function createProjectCard()", maxsplit=1)[0]
+        self.assertLess(
+            project_card.index('${reviewButton(project, "translation")}'),
+            project_card.index("${sourceRegistrationButton(project)}"),
+        )
 
         status, unauthorized = self._request(
             "/api/dashboard",
@@ -1123,12 +1146,14 @@ class DashboardServerTests(unittest.TestCase):
             (backups[0] / "pdf/restore-old.pdf").is_file()
         )
 
-    def test_registers_multiple_images_in_natural_order(self) -> None:
-        create_project(
+    def test_registers_images_and_preserves_default_ocr_prompt(self) -> None:
+        location = create_project(
             name="Upload Images",
             project_id="upload_images",
             workspace_root=self.workspace_root,
         )
+        prompt_path = location.path / "01_input/images/ocr_prompt.txt"
+        prompt_before = prompt_path.read_bytes()
 
         def png_bytes(color: str) -> bytes:
             output = BytesIO()
@@ -1141,7 +1166,6 @@ class DashboardServerTests(unittest.TestCase):
                 ("card-10.png", png_bytes("white"), "image/png"),
                 ("card-2.png", png_bytes("black"), "image/png"),
             ],
-            ocr_prompt="Keep icon names and read title before body.",
         )
         status, uploaded = self._request(
             "/api/projects/upload_images/source",
@@ -1158,7 +1182,7 @@ class DashboardServerTests(unittest.TestCase):
                 "01_input/images/card-10.png",
             ],
         )
-        self.assertTrue(uploaded["source"]["ocr_prompt_updated"])
+        self.assertFalse(uploaded["source"]["ocr_prompt_updated"])
         project_path = self.workspace_root / "upload_images"
         self.assertTrue(
             (project_path / "01_input/images/card-2.png").is_file()
@@ -1166,12 +1190,7 @@ class DashboardServerTests(unittest.TestCase):
         self.assertFalse(
             (project_path / ".glk/state/image_ocr.json").exists()
         )
-        self.assertEqual(
-            (project_path / "01_input/images/ocr_prompt.txt").read_text(
-                encoding="utf-8"
-            ),
-            "Keep icon names and read title before body.\n",
-        )
+        self.assertEqual(prompt_path.read_bytes(), prompt_before)
 
     def test_rejects_invalid_ocr_prompt_uploads(self) -> None:
         create_project(
