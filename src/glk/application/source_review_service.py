@@ -776,7 +776,11 @@ def _qa_issues(project_path: Path) -> dict[str, list[dict[str, Any]]]:
     result: dict[str, list[dict[str, Any]]] = {}
     if isinstance(issues, list):
         for issue in issues:
-            if isinstance(issue, dict) and isinstance(issue.get("block_id"), str):
+            if (
+                isinstance(issue, dict)
+                and isinstance(issue.get("block_id"), str)
+                and issue.get("code") != "SOURCE_WARNING"
+            ):
                 result.setdefault(issue["block_id"], []).append(issue)
     return result
 

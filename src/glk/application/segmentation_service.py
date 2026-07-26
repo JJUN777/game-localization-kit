@@ -19,9 +19,10 @@ from glk.application.project_service import load_project
 from glk.application.source_review_service import prepare_project_source_review
 from glk.domain.source_block import SOURCE_BLOCK_SCHEMA_VERSION, SourceBlock
 from glk.domain.workspace import IMAGE_SOURCE_ROOT, WorkspacePaths, is_pdf_source_file
+from glk.extraction.layout import join_fragment_texts_with_warnings
 
 
-SEGMENTATION_VERSION = "source-block-v2"
+SEGMENTATION_VERSION = "source-block-v3"
 _VOLATILE_ACQUISITION_FIELDS = {"updated_at", "cached_pages", "cached_images"}
 
 
@@ -195,22 +196,13 @@ def _line_wrap_hyphen_warnings(
     fragment_ids: list[str],
     fragments: dict[str, dict[str, Any]],
 ) -> tuple[str, ...]:
-    warnings: list[str] = []
-    for previous_id, next_id in zip(fragment_ids, fragment_ids[1:]):
-        previous_text = str(fragments.get(previous_id, {}).get("text") or "").strip()
-        next_text = str(fragments.get(next_id, {}).get("text") or "").strip()
-        if not previous_text.endswith("-") or not next_text[:1].islower():
-            continue
-        left_match = re.search(r"(\S+)-$", previous_text)
-        right_match = re.match(r"(\S+)", next_text)
-        if left_match is None or right_match is None:
-            continue
-        left = left_match.group(1) + "-"
-        right = right_match.group(1)
-        warnings.append(
-            f"줄바꿈 하이픈 결합 확인: {left} + {right} → {left[:-1]}{right}"
-        )
-    return tuple(warnings)
+    _, warnings = join_fragment_texts_with_warnings(
+        [
+            str(fragments.get(fragment_id, {}).get("text") or "")
+            for fragment_id in fragment_ids
+        ]
+    )
+    return warnings
 
 
 def _build_pdf_blocks(

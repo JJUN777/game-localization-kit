@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from PIL import Image, ImageOps
 
@@ -15,6 +15,11 @@ from glk.application._hashing import sha256_text as _sha256_text
 from glk.application._io import copy_file_atomic as _copy_file_atomic
 from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.application._io import write_text_atomic as _write_text_atomic
+from glk.application._progress import (
+    ProgressCallback,
+    ProgressCallbackError,
+    guard_progress_callback,
+)
 from glk.application.project_service import (
     ProjectLocation,
     load_project,
@@ -38,7 +43,6 @@ from glk.infrastructure.gemini_common import gemini_failure_code
 
 
 IMAGE_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS
-ProgressCallback = Callable[[str], None]
 
 
 class ImageOcrError(ValueError):
@@ -382,6 +386,8 @@ def _ocr_registered_images(
             )
             successful.append(output)
             combined_items.append((output.text_name, output.text))
+        except ProgressCallbackError:
+            raise
         except Exception as error:
             previous_text, failure_message = _preserve_previous_ocr_text(
                 paths.ocr_individual / relative.with_suffix(".txt"),
@@ -465,7 +471,7 @@ def ocr_project_images(
     provider: ImageOcrProvider | None = None,
     progress: ProgressCallback | None = None,
 ) -> ImageOcrRunResult:
-    notify = progress or (lambda _: None)
+    notify = guard_progress_callback(progress)
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
     source_folder, images, requested_prompt = _resolve_ocr_request(

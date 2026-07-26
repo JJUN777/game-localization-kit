@@ -519,8 +519,76 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     형식·페이지 수·해시가 유지되어야 한다.
   - 검증: PNG 2개의 1800×1140 크기와 PDF의 2페이지 구성·이동 전후 SHA-256
     일치를 확인했고, 전체 269개 테스트와 mypy·ruff 검사를 통과했다.
+
+## 3차 정적 검증 지적 사항 (2026-07-26)
+
+2차 분석 이후 모든 P1~P3 항목 반영을 확인했습니다. 리팩터링 5개 커밋을
+`git diff`로 전후 대조한 결과, 아래 캐시·도메인 규칙과 의도하지 않은 예외 범위
+변경 4건에 추가 조치가 필요했습니다.
+
+- [x] `CACHE-002` `DOMAIN-001` 커밋이 segmentation 출력 형식을 바꿨지만
+  `SEGMENTATION_VERSION`을 올리지 않았다.
+  - `_build_pdf_blocks`가 하이픈 경고를 `warnings`에 넣고 해당 block을
+    `status:"flagged"`로 설정하지만 캐시 버전이 `"source-block-v2"`로
+    유지되어, cd623a7 이전에 segmentation을 마친 프로젝트는 재실행해도
+    캐시가 적중해 새 경고를 받지 못한다.
+  - `_fingerprint_files`의 입력 지문과 `_load_cached_result`의 버전 게이트에
+    모두 `SEGMENTATION_VERSION`이 들어가므로 출력 규칙을 확정한 뒤
+    `"source-block-v3"`로 올리면 기존 캐시가 자동 무효화된다.
+  - 완료 기준: 기존 `"source-block-v2"` state가 있는 프로젝트에서
+    `segment_project_source`를 실행하면 캐시를 무시하고 재생성해야 한다.
+  - 회귀 테스트는 v2 상수로 생성한 state·입력 지문을 v3 실행에서 거부하고,
+    이어지는 동일 v3 실행은 cache를 재사용하는 경로를 함께 확인한다.
+  - 구현: 결합 이벤트 출력 규칙을 확정한 뒤 `source-block-v3`로 올렸고,
+    v2 결과의 1회 재생성과 이어지는 v3 cache 재사용을 확인했다.
+- [x] `DOMAIN-003` 구체적인 추출 경고와 QA의 일반 `SOURCE_WARNING`이 원문
+  검수 화면에서 중복 표시된다.
+  - `block.warnings`가 있으면 QA가 먼저 `SOURCE_WARNING`을 생성하므로
+    `SOURCE_PRE_FLAGGED`는 발생하지 않는다. 중복은 검수 카드가 직접 표시하는
+    추출 경고와 browser document에 포함된 일반 QA 경고 사이에서 발생한다.
+  - source QA JSON·보고서와 dashboard 집계에는 `SOURCE_WARNING`을 유지하되,
+    원문 검수 browser document에서는 이미 직접 표시한 `SOURCE_WARNING`을
+    제외한다.
+  - `flagged`는 이미지 OCR의 일반 warnings에도 사용하는 기존 계약이므로
+    하이픈 block의 상태를 `raw`로 되돌리지 않는다.
+  - 완료 기준: source QA 결과에는 `SOURCE_WARNING`이 보존되지만 원문 검수
+    카드와 요약에는 같은 추출 경고가 QA 항목으로 중복되지 않아야 한다.
+  - 구현: source QA 산출물은 유지하고 browser document를 만들 때만
+    `SOURCE_WARNING`을 제외해 구체적인 추출 경고와 다른 QA 항목을 분리했다.
+- [x] `DOMAIN-004` 하이픈 경고 감지가 실제 결합 규칙과 미세하게 다르다.
+  - `join_fragment_texts`는 빈 fragment를 건너뛰고 누적 텍스트로 판정하지만,
+    `_line_wrap_hyphen_warnings`는 인접 fragment 쌍만 검사한다.
+  - PDF fragment 생성은 빈 텍스트를 제외하므로 즉시 재현되는 제품 오류는
+    아니지만, 결합과 경고 규칙의 이중 구현은 이후 변경 시 다시 어긋날 수 있다.
+  - 내부 결합 함수가 텍스트와 결합 이벤트를 함께 반환하고, 기존
+    `join_fragment_texts`는 텍스트만 반환하는 호환 wrapper로 유지한다.
+    `reconstruct_blocks`와 문단 연속 병합은 같은 이벤트로 warnings를 만들고,
+    segmentation은 재판정 없이 저장된 warnings를 전달한다.
+  - 완료 기준: `join_fragment_texts`에서 하이픈 결합이 발생하는 모든 경우에
+    대응하는 경고가 생성되어야 한다.
+  - 구현: 공통 결합 함수가 텍스트와 하이픈 결합 warnings를 함께 반환하고,
+    block 재구성과 문단 연속 병합이 이를 보존한다. segmentation의 기존 layout
+    승격도 같은 함수를 사용해 별도 판정 규칙을 제거했다.
+- [x] `REFACTOR-001` 리팩터링으로 예외 처리 범위가 넓어진 지점을 의도적
+  결정으로 확정한다.
+  - `image_ocr_service.py`: 이미지 해시·프롬프트 읽기의 `OSError`가
+    이전에는 전체 실행을 중단했으나 현재는 `ImageOcrFailure`로 흡수된다.
+  - `extraction_service.py`: progress 콜백 예외가 이전에는 전파됐으나
+    현재는 `PageFailure`로 흡수된다.
+  - 이미지 해시·개별 prompt 읽기처럼 한 원본에 종속된 I/O 실패는 해당
+    이미지의 부분 실패로 유지한다.
+  - progress callback 예외는 원본 처리 실패가 아니므로 `ImageOcrFailure`나
+    `PageFailure`로 흡수하지 않고 실행자에게 전파한다.
+  - 완료 기준: 이미지별 I/O 실패는 다른 이미지의 성공을 보존하고, PDF·OCR의
+    progress callback 예외는 부분 실패 상태를 기록하지 않고 전파해야 한다.
+  - 구현: 공통 progress callback guard와 전용 예외를 추가하고 per-item
+    `except`에서 다시 전파한다. 이미지 hash I/O 실패의 부분 성공 보존, PDF
+    callback 실패의 state 미기록과 OCR cache 알림 실패의 기존 완료 state 보존을
+    회귀 테스트로 고정했다.
+  - 3차 최종 검증: 전체 300개 테스트, mypy 49개 파일과 ruff 검사를 통과했다.
+
 ## 다음 구현 계획
 
-현재 계획한 안정화 작업은 모두 완료했습니다. 다음 작업은
-[`BACKLOG.md`](BACKLOG.md)의 제품 기능과 정책 항목에서 실제 사용 우선순위에
-따라 하나를 선택한 뒤, 완료 기준과 회귀 테스트를 구체화해 진행합니다.
+3차 정적 검증 지적 사항까지 모두 완료했습니다. 다음 작업은
+[`BACKLOG.md`](BACKLOG.md)의 제품 기능 중 실제 사용 우선순위에 따라 하나를
+선택하고 완료 기준과 검증 범위를 정한 뒤 진행합니다.

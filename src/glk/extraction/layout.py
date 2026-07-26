@@ -13,7 +13,7 @@ from PIL import Image
 
 
 PROMPT_VERSION = "layout-fragment-v1"
-POSTPROCESS_VERSION = "column-continuation-v1"
+POSTPROCESS_VERSION = "column-continuation-v2"
 BLOCK_TYPES = (
     "heading",
     "paragraph",
@@ -222,22 +222,38 @@ def validate_layout(
     return report
 
 
-def join_fragment_texts(texts: list[str]) -> str:
-    """Remove visual line wraps while preserving extracted words."""
-    if not texts:
-        return ""
-    result = texts[0].strip()
-    for raw_text in texts[1:]:
+def join_fragment_texts_with_warnings(
+    texts: list[str],
+) -> tuple[str, tuple[str, ...]]:
+    """Remove visual wraps and report every automatic hyphen join."""
+    result = ""
+    warnings: list[str] = []
+    for raw_text in texts:
         next_text = raw_text.strip()
         if not next_text:
             continue
+        if not result:
+            result = next_text
+            continue
         if result.endswith("-") and next_text[:1].islower():
+            left = result.rsplit(maxsplit=1)[-1]
+            right = next_text.split(maxsplit=1)[0]
+            warnings.append(
+                f"줄바꿈 하이픈 결합 확인: {left} + {right} → "
+                f"{left[:-1]}{right}"
+            )
             result = result[:-1] + next_text
         elif result.endswith(("/", "(", "[", "{", "‘", "“")):
             result += next_text
         else:
             result += " " + next_text
-    return " ".join(result.split())
+    return " ".join(result.split()), tuple(warnings)
+
+
+def join_fragment_texts(texts: list[str]) -> str:
+    """Remove visual line wraps while preserving extracted words."""
+    text, _ = join_fragment_texts_with_warnings(texts)
+    return text
 
 
 def reconstruct_blocks(
@@ -247,12 +263,14 @@ def reconstruct_blocks(
     blocks = []
     for block in layout["blocks"]:
         fragment_ids = block["fragment_ids"]
+        text, warnings = join_fragment_texts_with_warnings(
+            [by_id[fragment_id]["text"] for fragment_id in fragment_ids]
+        )
         blocks.append(
             {
                 **block,
-                "text": join_fragment_texts(
-                    [by_id[fragment_id]["text"] for fragment_id in fragment_ids]
-                ),
+                "text": text,
+                "warnings": list(warnings),
             }
         )
     return blocks
@@ -284,7 +302,15 @@ def merge_paragraph_continuations(
             *previous["fragment_ids"],
             *block["fragment_ids"],
         ]
-        previous["text"] = join_fragment_texts([previous["text"], block["text"]])
+        text, warnings = join_fragment_texts_with_warnings(
+            [previous["text"], block["text"]]
+        )
+        previous["text"] = text
+        previous["warnings"] = [
+            *previous.get("warnings", []),
+            *block.get("warnings", []),
+            *warnings,
+        ]
         previous["postprocess"] = "column-boundary continuation merged"
     return merged
 

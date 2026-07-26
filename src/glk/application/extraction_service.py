@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pymupdf
 
@@ -16,6 +16,11 @@ from glk.application._hashing import sha256_file as _sha256_file
 from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.application._io import write_text_atomic as _write_text_atomic
+from glk.application._progress import (
+    ProgressCallback,
+    ProgressCallbackError,
+    guard_progress_callback,
+)
 from glk.application.project_service import (
     ProjectLocation,
     load_project,
@@ -41,7 +46,6 @@ from glk.infrastructure.gemini_layout import GeminiLayoutProvider
 from glk.infrastructure.gemini_common import gemini_failure_code
 
 
-ProgressCallback = Callable[[str], None]
 LAYOUT_VALIDATION_ATTEMPTS = 3
 
 
@@ -287,6 +291,8 @@ def _extract_selected_pages(
                         notify=notify,
                     )
                 )
+            except ProgressCallbackError:
+                raise
             except Exception as error:
                 failures.append(
                     PageFailure(
@@ -359,7 +365,7 @@ def extract_project_pdf(
 ) -> ExtractionResult:
     if scale <= 0:
         raise ExtractionError("Render scale must be greater than zero.")
-    notify = progress or (lambda _: None)
+    notify = guard_progress_callback(progress)
     location = load_project(project, workspace_root)
     source_path = _resolve_project_source(location, file)
     source_hash = _sha256_file(source_path)

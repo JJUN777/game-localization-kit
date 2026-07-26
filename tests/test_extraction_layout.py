@@ -6,6 +6,7 @@ from glk.extraction.layout import (
     LayoutValidationError,
     build_page_text,
     join_fragment_texts,
+    join_fragment_texts_with_warnings,
     merge_paragraph_continuations,
     parse_page_selection,
     reconstruct_blocks,
@@ -84,6 +85,7 @@ class LayoutRuleTests(unittest.TestCase):
             },
         )
         self.assertEqual(blocks[0]["text"], "First line continues.")
+        self.assertEqual(blocks[0]["warnings"], [])
 
     def test_rejects_missing_unknown_and_duplicate_fragments(self) -> None:
         cases = (
@@ -143,6 +145,48 @@ class LayoutRuleTests(unittest.TestCase):
         self.assertEqual(
             join_fragment_texts(["Cost /", "value"]),
             "Cost /value",
+        )
+
+    def test_hyphen_join_warnings_use_the_same_wrap_decision(self) -> None:
+        text, warnings = join_fragment_texts_with_warnings(
+            ["A multi-", "", "player rule"]
+        )
+
+        self.assertEqual(text, "A multiplayer rule")
+        self.assertEqual(
+            warnings,
+            ("줄바꿈 하이픈 결합 확인: multi- + player → multiplayer",),
+        )
+
+    def test_paragraph_merge_preserves_and_adds_hyphen_warnings(self) -> None:
+        merged = merge_paragraph_continuations(
+            [
+                {
+                    "type": "paragraph",
+                    "fragment_ids": ["P001-F001"],
+                    "include_in_text": True,
+                    "reason": "",
+                    "text": "A multi-",
+                    "warnings": ["existing warning"],
+                },
+                {
+                    "type": "paragraph",
+                    "fragment_ids": ["P001-F002"],
+                    "include_in_text": True,
+                    "reason": "",
+                    "text": "player rule.",
+                    "warnings": [],
+                },
+            ]
+        )
+
+        self.assertEqual(merged[0]["text"], "A multiplayer rule.")
+        self.assertEqual(
+            merged[0]["warnings"],
+            [
+                "existing warning",
+                "줄바꿈 하이픈 결합 확인: multi- + player → multiplayer",
+            ],
         )
 
     def test_paragraph_merge_stops_at_semantic_boundaries(self) -> None:

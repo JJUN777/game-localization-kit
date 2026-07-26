@@ -5,9 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from PIL import Image
 
+from glk.application import image_ocr_service
+from glk.application._progress import ProgressCallbackError
 from glk.application.image_ocr_service import ocr_project_images
 from glk.application.project_service import create_project, load_project
 
@@ -46,6 +49,93 @@ class FakeImageOcrProvider:
 
 
 class ImageOcrServiceTests(unittest.TestCase):
+    def test_image_hash_io_failure_is_partial_and_preserves_other_images(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            image_folder = root / "images"
+            image_folder.mkdir()
+            Image.new("RGB", (20, 10), "white").save(
+                image_folder / "bad.png"
+            )
+            Image.new("RGB", (20, 10), "white").save(
+                image_folder / "good.png"
+            )
+            create_project(name="Partial IO", workspace_root=workspace_root)
+            original_hash = image_ocr_service._sha256_file
+
+            def hash_or_fail(path: Path) -> str:
+                if path.name == "bad.png":
+                    raise OSError("cannot read image")
+                return original_hash(path)
+
+            provider = FakeImageOcrProvider()
+            with patch.object(
+                image_ocr_service,
+                "_sha256_file",
+                side_effect=hash_or_fail,
+            ):
+                result = ocr_project_images(
+                    project="partial_io",
+                    folder=image_folder,
+                    workspace_root=workspace_root,
+                    provider=provider,
+                )
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.successful_images, ("good.png",))
+            self.assertEqual(result.failures[0].file, "bad.png")
+            self.assertIn("cannot read image", result.failures[0].error)
+            self.assertEqual(provider.calls, 1)
+
+    def test_cached_progress_callback_failure_is_not_an_image_failure(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            image_folder = root / "images"
+            image_folder.mkdir()
+            Image.new("RGB", (20, 10), "white").save(
+                image_folder / "card.png"
+            )
+            project = create_project(
+                name="Callback OCR", workspace_root=workspace_root
+            )
+            ocr_project_images(
+                project="callback_ocr",
+                folder=image_folder,
+                workspace_root=workspace_root,
+                provider=FakeImageOcrProvider(),
+            )
+            callback_count = 0
+
+            def fail_cached_progress(_message: str) -> None:
+                nonlocal callback_count
+                callback_count += 1
+                if callback_count == 2:
+                    raise RuntimeError("observer failed")
+
+            with self.assertRaisesRegex(
+                ProgressCallbackError,
+                "observer failed",
+            ):
+                ocr_project_images(
+                    project="callback_ocr",
+                    workspace_root=workspace_root,
+                    provider=FakeImageOcrProvider(fail_if_called=True),
+                    progress=fail_cached_progress,
+                )
+
+            state = json.loads(
+                (project.path / ".glk/state/image_ocr.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(state["status"], "complete")
+
     def test_registers_images_writes_outputs_and_reuses_cache(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

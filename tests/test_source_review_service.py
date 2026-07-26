@@ -235,6 +235,51 @@ class SourceReviewServiceTests(unittest.TestCase):
             self.assertEqual(document["summary"]["warnings"], 1)
             self.assertEqual(document["summary"]["issues"], 0)
 
+    def test_browser_document_does_not_duplicate_source_warning_as_qa(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            warning = "줄바꿈 하이픈 결합 확인: multi- + player → multiplayer"
+            project_path = self.create_source(
+                workspace_root,
+                [make_block(1, "multiplayer rule.", warnings=(warning,))],
+            )
+            prepare_project_source_review(
+                project="review_project", workspace_root=workspace_root
+            )
+            write_json_path = project_path / ".glk/reports/source_qa.json"
+            write_json_path.parent.mkdir(parents=True, exist_ok=True)
+            write_json_path.write_text(
+                json.dumps(
+                    {
+                        "issues": [
+                            {
+                                "block_id": "pdf-p0001-b0001-0000000001",
+                                "code": "SOURCE_WARNING",
+                                "message": "generic source warning",
+                            },
+                            {
+                                "block_id": "pdf-p0001-b0001-0000000001",
+                                "code": "TOKEN_UNKNOWN",
+                                "message": "specific QA warning",
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            document = get_project_source_review_document(
+                project="review_project", workspace_root=workspace_root
+            )
+
+            self.assertEqual(document["blocks"][0]["warnings"], [warning])
+            self.assertEqual(
+                [issue["code"] for issue in document["blocks"][0]["issues"]],
+                ["TOKEN_UNKNOWN"],
+            )
+            self.assertEqual(document["summary"]["warnings"], 1)
+            self.assertEqual(document["summary"]["issues"], 1)
+
     def test_browser_save_reorders_excludes_and_adds_manual_block(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"

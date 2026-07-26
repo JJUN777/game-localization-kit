@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from glk.application.project_service import create_project, update_project_source
 from glk.application.segmentation_service import (
@@ -116,6 +117,35 @@ def read_blocks(path: Path) -> list[SourceBlock]:
 
 
 class SegmentationServiceTests(unittest.TestCase):
+    def test_rebuilds_v2_cache_once_before_reusing_v3_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            project_path = create_pdf_source(workspace_root)
+            with patch(
+                "glk.application.segmentation_service.SEGMENTATION_VERSION",
+                "source-block-v2",
+            ):
+                previous = segment_project_source(
+                    project="pdf_source", workspace_root=workspace_root
+                )
+            self.assertFalse(previous.cached)
+
+            rebuilt = segment_project_source(
+                project="pdf_source", workspace_root=workspace_root
+            )
+            cached = segment_project_source(
+                project="pdf_source", workspace_root=workspace_root
+            )
+
+            self.assertFalse(rebuilt.cached)
+            self.assertTrue(cached.cached)
+            state = json.loads(
+                (project_path / ".glk/state/segmentation.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(state["version"], "source-block-v3")
+
     def test_normalizes_pdf_blocks_and_reuses_cache(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
