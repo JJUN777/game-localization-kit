@@ -120,6 +120,7 @@ class SourceReviewServerTests(unittest.TestCase):
         self.assertNotIn("__GLK_RETURN_URL_JSON__", html)
         self.assertIn("const RETURN_URL = null;", html)
         self.assertIn("원문 승인이 완료되었습니다", html)
+        self.assertIn("추출 경고", html)
 
         status, payload = self._request("/api/review", authorized=False)
         self.assertEqual(status, 403)

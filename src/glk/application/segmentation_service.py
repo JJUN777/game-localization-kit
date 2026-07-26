@@ -191,6 +191,28 @@ def _validate_complete_run(metadata: dict[str, Any], path: Path) -> None:
         )
 
 
+def _line_wrap_hyphen_warnings(
+    fragment_ids: list[str],
+    fragments: dict[str, dict[str, Any]],
+) -> tuple[str, ...]:
+    warnings: list[str] = []
+    for previous_id, next_id in zip(fragment_ids, fragment_ids[1:]):
+        previous_text = str(fragments.get(previous_id, {}).get("text") or "").strip()
+        next_text = str(fragments.get(next_id, {}).get("text") or "").strip()
+        if not previous_text.endswith("-") or not next_text[:1].islower():
+            continue
+        left_match = re.search(r"(\S+)-$", previous_text)
+        right_match = re.match(r"(\S+)", next_text)
+        if left_match is None or right_match is None:
+            continue
+        left = left_match.group(1) + "-"
+        right = right_match.group(1)
+        warnings.append(
+            f"줄바꿈 하이픈 결합 확인: {left} + {right} → {left[:-1]}{right}"
+        )
+    return tuple(warnings)
+
+
 def _build_pdf_blocks(
     project_path: Path, source_file: str
 ) -> tuple[list[SourceBlock], list[Path]]:
@@ -240,6 +262,7 @@ def _build_pdf_blocks(
                 raise SegmentationError(f"Invalid fragment references on page {page}.")
             source_order += 1
             raw_text = text.strip()
+            warnings = _line_wrap_hyphen_warnings(fragment_ids, fragments)
             block = SourceBlock(
                 schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
                 id=_block_id(
@@ -260,8 +283,8 @@ def _build_pdf_blocks(
                     fragment_ids, fragments, fragment_data.get("page_size")
                 ),
                 legibility=None,
-                status="raw",
-                warnings=(),
+                status="flagged" if warnings else "raw",
+                warnings=warnings,
                 source_refs=tuple(fragment_ids),
                 source_hash=_source_hash(raw_text),
             )

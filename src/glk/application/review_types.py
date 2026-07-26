@@ -34,6 +34,7 @@ class SourceReviewBlock(TypedDict):
     manual: bool
     excluded: bool
     changed: bool
+    warnings: list[str]
     issues: list[dict[str, Any]]
 
 
@@ -43,6 +44,7 @@ class SourceReviewSummary(TypedDict):
     excluded: int
     manual: int
     changed: int
+    warnings: int
     issues: int
 
 

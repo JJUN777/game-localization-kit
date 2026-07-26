@@ -17,7 +17,13 @@ from glk.application.source_review_service import (
 from glk.domain.source_block import SOURCE_BLOCK_SCHEMA_VERSION, SourceBlock
 
 
-def make_block(order: int, text: str, *, page: int | None = 1) -> SourceBlock:
+def make_block(
+    order: int,
+    text: str,
+    *,
+    page: int | None = 1,
+    warnings: tuple[str, ...] = (),
+) -> SourceBlock:
     return SourceBlock(
         schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
         id=f"pdf-p0001-b{order:04d}-{order:010d}",
@@ -31,8 +37,8 @@ def make_block(order: int, text: str, *, page: int | None = 1) -> SourceBlock:
         corrected_text=None,
         bbox=(100.0, 100.0, 900.0, 900.0),
         legibility=None,
-        status="raw",
-        warnings=(),
+        status="flagged" if warnings else "raw",
+        warnings=warnings,
         source_refs=(f"P001-F{order:03d}",),
         source_hash="sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest(),
     )
@@ -208,6 +214,26 @@ class SourceReviewServiceTests(unittest.TestCase):
             self.assertEqual(result.changed_blocks, 1)
             approved = read_blocks(project_path / ".glk/segments/approved_source.jsonl")
             self.assertEqual(approved[0].corrected_text, "Gain {DEF}.")
+
+    def test_browser_document_exposes_source_warnings_without_qa(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            warning = "줄바꿈 하이픈 결합 확인: multi- + player → multiplayer"
+            self.create_source(
+                workspace_root,
+                [make_block(1, "multiplayer rule.", warnings=(warning,))],
+            )
+            prepare_project_source_review(
+                project="review_project", workspace_root=workspace_root
+            )
+
+            document = get_project_source_review_document(
+                project="review_project", workspace_root=workspace_root
+            )
+
+            self.assertEqual(document["blocks"][0]["warnings"], [warning])
+            self.assertEqual(document["summary"]["warnings"], 1)
+            self.assertEqual(document["summary"]["issues"], 0)
 
     def test_browser_save_reorders_excludes_and_adds_manual_block(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

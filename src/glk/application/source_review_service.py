@@ -834,6 +834,7 @@ def get_project_source_review_document(
                 "manual": block.id.startswith("manual-"),
                 "excluded": is_excluded,
                 "changed": text != block.raw_text,
+                "warnings": list(block.warnings),
                 "issues": issues.get(block.id, []),
             }
         )
@@ -855,6 +856,7 @@ def get_project_source_review_document(
             "excluded": sum(block["excluded"] for block in document_blocks),
             "manual": sum(block["manual"] for block in document_blocks),
             "changed": sum(block["changed"] for block in document_blocks),
+            "warnings": sum(len(block["warnings"]) for block in document_blocks),
             "issues": sum(len(block["issues"]) for block in document_blocks),
         },
         "original_pdf_url": "/api/original-pdf" if source_type == "pdf" else None,
