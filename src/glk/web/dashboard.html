@@ -840,11 +840,17 @@
     #sourceDialog,
     #ocrPromptDialog {
       width: min(720px, calc(100% - 28px));
+    }
+
+    #sourceDialog,
+    #ocrPromptDialog,
+    #sourceJobDialog {
       max-height: calc(100vh - 28px);
     }
 
     #sourceDialog .modal-form,
-    #ocrPromptDialog .modal-form {
+    #ocrPromptDialog .modal-form,
+    #sourceJobDialog .modal-form {
       max-height: calc(100vh - 28px);
       overflow-y: auto;
     }
@@ -921,6 +927,12 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 12px;
       line-height: 1.6;
+    }
+
+    #sourceJobOcrPrompt {
+      min-height: 180px;
+      color: #4d524f;
+      background: #f7f5f0;
     }
 
     .field input:focus,
@@ -1648,6 +1660,16 @@
           <span>사용 모델</span>
           <strong id="sourceJobModel"></strong>
         </div>
+      </div>
+      <div class="field" id="sourceJobOcrPromptField" hidden>
+        <label for="sourceJobOcrPrompt">이번 작업에 적용할 OCR 프롬프트</label>
+        <textarea id="sourceJobOcrPrompt" readonly
+          aria-describedby="sourceJobOcrPromptHelp"
+          spellcheck="false"></textarea>
+        <p class="field-help" id="sourceJobOcrPromptHelp">
+          실행 전 확인용 읽기 전용 내용입니다. 변경하려면 취소한 뒤 프로젝트
+          카드의 <strong>OCR 프롬프트 수정</strong>을 사용하세요.
+        </p>
       </div>
       <p class="field-help" style="margin-top:14px">
         동시에 하나의 원문 준비 작업만 실행합니다. 실행 중에는 원본 교체,
@@ -2429,6 +2451,10 @@
       byId("sourceJobType").textContent =
         project.source_type === "pdf" ? "PDF" : "이미지 OCR";
       byId("sourceJobModel").textContent = aiSettings.model;
+      const showsOcrPrompt = project.source_type === "images";
+      byId("sourceJobOcrPromptField").hidden = !showsOcrPrompt;
+      byId("sourceJobOcrPrompt").value =
+        showsOcrPrompt ? project.ocr_prompt || "" : "";
       byId("sourceJobSubmit").textContent =
         project.source_type === "pdf"
           ? "PDF 원문 준비 시작"
@@ -2747,7 +2773,7 @@
     function outputFiles(project) {
       const outputs = project.outputs || [];
       if (!outputs.length) return "";
-      const rows = outputs.map((output) => `
+      const outputRow = (output, label) => `
         <div class="output-file">
           <div class="output-file-info">
             <span class="output-file-name" title="${escapeHtml(output.name)}">
@@ -2763,13 +2789,61 @@
             data-download-name="${escapeHtml(output.download_name)}"
             title="저장 위치를 선택해 다운로드"
             aria-label="${escapeHtml(output.name)} 저장 위치 선택">
-            다운로드
+            ${escapeHtml(label)}
           </button>
-        </div>`).join("");
+        </div>`;
+
+      let rows;
+      let summary;
+      const combined = outputs.find(
+        (output) => output.name === "combined_kor.txt",
+      );
+      const imageOutputs = outputs.filter(
+        (output) => output.name !== "combined_kor.txt",
+      );
+      if (
+        project.source_type === "images"
+        && combined
+        && imageOutputs.length
+      ) {
+        const archiveName =
+          `${project.project_id}_image_outputs.zip`;
+        const totalBytes = imageOutputs.reduce(
+          (sum, output) => sum + output.size_bytes,
+          0,
+        );
+        rows = outputRow(combined, "통합본 저장") + `
+          <div class="output-file">
+            <div class="output-file-info">
+              <span class="output-file-name"
+                title="이미지별 번역 파일 전체">
+                이미지별 번역 파일
+              </span>
+              <span class="output-file-size">
+                ${imageOutputs.length}개 TXT ·
+                ${escapeHtml(formatFileSize(totalBytes))}
+              </span>
+            </div>
+            <button class="output-download-button" type="button"
+              data-download-output-archive
+              data-project="${escapeHtml(project.project_id)}"
+              data-download-name="${escapeHtml(archiveName)}"
+              title="이미지별 파일을 ZIP으로 저장"
+              aria-label="이미지별 파일 ${imageOutputs.length}개 전체 저장">
+              이미지별 파일 전체 저장
+            </button>
+          </div>`;
+        summary = `이미지별 파일 ${imageOutputs.length}개`;
+      } else {
+        rows = outputs.map(
+          (output) => outputRow(output, "번역본 저장"),
+        ).join("");
+        summary = `${outputs.length}개 파일`;
+      }
       return `<section class="output-files" aria-label="최종 번역 결과">
         <div class="output-files-head">
           <strong>최종 번역 결과</strong>
-          <span>${outputs.length}개 파일</span>
+          <span>${escapeHtml(summary)}</span>
         </div>
         <div class="output-file-list">${rows}</div>
       </section>`;
@@ -2926,10 +3000,16 @@
       }
     }
 
-    async function downloadOutput(button) {
-      const projectId = button.dataset.project;
-      const outputPath = button.dataset.downloadOutput;
-      const downloadName = button.dataset.downloadName || "translation.txt";
+    async function saveDownload(
+      button,
+      {
+        requestUrl,
+        downloadName,
+        description,
+        mimeType,
+        extensions,
+      },
+    ) {
       button.disabled = true;
       try {
         let fileHandle = null;
@@ -2938,8 +3018,8 @@
             fileHandle = await window.showSaveFilePicker({
               suggestedName: downloadName,
               types: [{
-                description: "텍스트 파일",
-                accept: {"text/plain": [".txt"]},
+                description,
+                accept: {[mimeType]: extensions},
               }],
             });
           } catch (error) {
@@ -2948,11 +3028,7 @@
           }
         }
 
-        const query = new URLSearchParams({
-          project_id: projectId,
-          path: outputPath,
-        });
-        const response = await fetch(`/api/output?${query}`, {
+        const response = await fetch(requestUrl, {
           headers: {"X-GLK-Token": AUTH_TOKEN},
         });
         if (!response.ok) {
@@ -2990,6 +3066,35 @@
       } finally {
         button.disabled = false;
       }
+    }
+
+    async function downloadOutput(button) {
+      const query = new URLSearchParams({
+        project_id: button.dataset.project,
+        path: button.dataset.downloadOutput,
+      });
+      await saveDownload(button, {
+        requestUrl: `/api/output?${query}`,
+        downloadName:
+          button.dataset.downloadName || "translation.txt",
+        description: "텍스트 파일",
+        mimeType: "text/plain",
+        extensions: [".txt"],
+      });
+    }
+
+    async function downloadOutputArchive(button) {
+      const projectId = button.dataset.project;
+      const query = new URLSearchParams({project_id: projectId});
+      await saveDownload(button, {
+        requestUrl: `/api/output-archive?${query}`,
+        downloadName:
+          button.dataset.downloadName
+          || `${projectId}_image_outputs.zip`,
+        description: "ZIP 압축 파일",
+        mimeType: "application/zip",
+        extensions: [".zip"],
+      });
     }
 
     function openProjectDialog() {
@@ -3453,6 +3558,8 @@
     byId("sourceJobForm").addEventListener("submit", startSourceJob);
     byId("sourceJobDialog").addEventListener("close", () => {
       pendingSourceJobProject = null;
+      byId("sourceJobOcrPromptField").hidden = true;
+      byId("sourceJobOcrPrompt").value = "";
       byId("sourceJobSubmit").disabled = false;
     });
     byId("glossaryJobDialogClose").addEventListener(
@@ -3602,6 +3709,13 @@
       render();
     });
     byId("projectGrid").addEventListener("click", (event) => {
+      const archiveButton = event.target.closest(
+        "[data-download-output-archive]",
+      );
+      if (archiveButton) {
+        downloadOutputArchive(archiveButton);
+        return;
+      }
       const downloadButton = event.target.closest("[data-download-output]");
       if (downloadButton) {
         downloadOutput(downloadButton);

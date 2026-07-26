@@ -58,6 +58,12 @@ class DashboardRouteTests(unittest.TestCase):
             ("GET", "/api/jobs", "jobs", "session"),
             ("GET", "/api/settings/ai", "ai_settings", "session"),
             ("GET", "/api/output", "output", "session"),
+            (
+                "GET",
+                "/api/output-archive",
+                "output_archive",
+                "session",
+            ),
             ("POST", "/api/projects", "projects", "session"),
             ("POST", "/api/review/open", "review_open", "session"),
             ("POST", "/api/jobs/source", "source_job", "session"),
@@ -124,6 +130,15 @@ class DashboardRouteTests(unittest.TestCase):
             route.query,
             "project_id=demo&path=output%2Ftranslated.txt",
         )
+
+        archive_route = match_dashboard_route(
+            "GET",
+            "/api/output-archive?project_id=demo",
+        )
+        self.assertIsNotNone(archive_route)
+        assert archive_route is not None
+        self.assertEqual(archive_route.path, "/api/output-archive")
+        self.assertEqual(archive_route.query, "project_id=demo")
 
     def test_rejects_wrong_methods_and_malformed_project_routes(self) -> None:
         cases = [

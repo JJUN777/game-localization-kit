@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+from io import BytesIO
 import json
 from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from glk.application._hashing import FileHashCache, sha256_file_if_exists
 from glk.application.project_service import (
@@ -79,6 +82,13 @@ class DashboardOutput:
             "size_bytes": self.size_bytes,
             "sha256": self.sha256,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardOutputArchive:
+    data: bytes
+    download_name: str
+    file_count: int
 
 
 def _approved_outputs(
@@ -177,6 +187,51 @@ def get_project_dashboard_output(
         if output.relative_path == output_path:
             return output
     raise DashboardOutputError("다운로드할 결과 파일을 찾지 못했습니다.")
+
+
+def get_project_dashboard_image_output_archive(
+    *,
+    project_id: str,
+    workspace_root: str | Path = "workspaces",
+) -> DashboardOutputArchive:
+    """Build a ZIP containing every approved per-image translation output."""
+    location = load_workspace_project_id(project_id, workspace_root)
+    hash_cache = FileHashCache()
+    status = inspect_project(location.path, hash_cache=hash_cache)
+    if not status["pipeline"]["final_translation_approved"]:
+        raise DashboardOutputError("현재 승인된 최종 번역 결과가 없습니다.")
+
+    outputs = _approved_outputs(location.path, hash_cache=hash_cache)
+    if not any(output.name == "combined_kor.txt" for output in outputs):
+        raise DashboardOutputError(
+            "이미지 프로젝트에서만 이미지별 결과를 받을 수 있습니다."
+        )
+    image_outputs = tuple(
+        output for output in outputs if output.name != "combined_kor.txt"
+    )
+    if not image_outputs:
+        raise DashboardOutputError("이미지별 번역 결과가 없습니다.")
+
+    archive_buffer = BytesIO()
+    with ZipFile(archive_buffer, mode="w", compression=ZIP_DEFLATED) as archive:
+        for output in image_outputs:
+            try:
+                data = output.path.read_bytes()
+            except OSError as error:
+                raise DashboardOutputError(
+                    "이미지별 번역 파일을 읽을 수 없습니다."
+                ) from error
+            if hashlib.sha256(data).hexdigest() != output.sha256:
+                raise DashboardOutputError(
+                    "최종 번역 파일이 승인 이후 변경되었습니다."
+                )
+            archive.writestr(output.name, data)
+
+    return DashboardOutputArchive(
+        data=archive_buffer.getvalue(),
+        download_name=f"{project_id}_image_outputs.zip",
+        file_count=len(image_outputs),
+    )
 
 
 def _review_availability(pipeline: dict[str, Any]) -> dict[str, ReviewAvailability]:

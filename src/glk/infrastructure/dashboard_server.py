@@ -38,6 +38,7 @@ from glk.application.dashboard_job_service import (
 from glk.application.dashboard_service import (
     DashboardOutputError,
     get_dashboard_document,
+    get_project_dashboard_image_output_archive,
     get_project_dashboard_output,
 )
 from glk.application.project_service import (
@@ -223,6 +224,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 "jobs",
                 "ai_settings",
                 "output",
+                "output_archive",
             }
         ),
         "POST": frozenset(
@@ -661,6 +663,44 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 extra_headers={
                     "Content-Disposition": (
                         "attachment; filename=\"translation.txt\"; "
+                        f"filename*=UTF-8''{encoded_name}"
+                    ),
+                },
+            )
+            return
+        if route.name == "output_archive":
+            try:
+                query = parse_qs(
+                    route.query,
+                    keep_blank_values=True,
+                    strict_parsing=True,
+                )
+                if (
+                    set(query) != {"project_id"}
+                    or len(query["project_id"]) != 1
+                ):
+                    raise DashboardOutputError(
+                        "프로젝트를 정확히 하나 선택하세요."
+                    )
+                archive = get_project_dashboard_image_output_archive(
+                    project_id=query["project_id"][0],
+                    workspace_root=self.server.workspace_root,
+                )
+            except (DashboardOutputError, OSError, ValueError) as error:
+                self._send_error_json(
+                    HTTPStatus.BAD_REQUEST,
+                    error,
+                    code="OUTPUT_DOWNLOAD_FAILED",
+                )
+                return
+            encoded_name = quote(archive.download_name, safe="")
+            self._send_bytes(
+                HTTPStatus.OK,
+                archive.data,
+                "application/zip",
+                extra_headers={
+                    "Content-Disposition": (
+                        "attachment; filename=\"image_outputs.zip\"; "
                         f"filename*=UTF-8''{encoded_name}"
                     ),
                 },

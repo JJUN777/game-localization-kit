@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from io import BytesIO
 import json
 import os
@@ -12,6 +13,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from zipfile import ZipFile
 
 from PIL import Image
 
@@ -260,6 +262,13 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("편집 전 내용으로 되돌리기", html)
         self.assertIn("AI 설정", html)
         self.assertIn("원문 준비 시작", html)
+        self.assertIn('id="sourceJobOcrPromptField"', html)
+        self.assertIn('id="sourceJobOcrPrompt" readonly', html)
+        self.assertIn(
+            'showsOcrPrompt ? project.ocr_prompt || "" : ""',
+            html,
+        )
+        self.assertIn("이번 작업에 적용할 OCR 프롬프트", html)
         self.assertIn("용어 후보 생성", html)
         self.assertIn("Gemini API를 사용하지 않으며", html)
         self.assertIn("초벌 번역 시작", html)
@@ -276,6 +285,10 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("translation-review-attention", html)
         self.assertIn("최종 번역 결과", html)
         self.assertIn("data-download-output", html)
+        self.assertIn("data-download-output-archive", html)
+        self.assertIn("통합본 저장", html)
+        self.assertIn("이미지별 파일 전체 저장", html)
+        self.assertIn("/api/output-archive", html)
         self.assertIn("window.showSaveFilePicker", html)
         self.assertIn("fileHandle.createWritable()", html)
         self.assertIn('error?.name === "AbortError"', html)
@@ -846,6 +859,74 @@ class DashboardServerTests(unittest.TestCase):
         status, escaped = self._request(f"/api/output?{escaped_query}")
         self.assertEqual(status, 400)
         self.assertEqual(escaped["code"], "OUTPUT_DOWNLOAD_FAILED")
+
+    def test_downloads_all_per_image_outputs_as_one_archive(self) -> None:
+        pdf_blocks = translation_sample_blocks()
+        blocks = [
+            replace(
+                pdf_blocks[0],
+                source_type="image",
+                source_file="01_input/images/cards/card-01.png",
+                page=None,
+            ),
+            replace(
+                pdf_blocks[1],
+                source_type="image",
+                source_file="01_input/images/cards/card-01.png",
+                page=None,
+            ),
+            replace(
+                pdf_blocks[2],
+                source_type="image",
+                source_file="01_input/images/boards/board-02.png",
+                page=None,
+            ),
+        ]
+        create_translation_project(self.workspace_root, blocks)
+        translate_project(
+            project="translation_project",
+            workspace_root=self.workspace_root,
+            provider=SequenceProvider([valid_response(blocks)]),
+        )
+        finalize_project_translation_review(
+            project="translation_project",
+            workspace_root=self.workspace_root,
+        )
+        path = "/api/output-archive?project_id=translation_project"
+
+        status, unauthorized = self._request(path, authorized=False)
+        self.assertEqual(status, 403)
+        self.assertFalse(unauthorized["ok"])
+
+        request = Request(
+            f"{self.server.origin}{path}",
+            headers={"X-GLK-Token": self.server.auth_token},
+        )
+        with urlopen(request, timeout=3) as response:
+            archive_data = response.read()
+            content_disposition = response.headers["Content-Disposition"]
+            self.assertEqual(response.status, 200)
+            self.assertEqual(
+                response.headers.get_content_type(),
+                "application/zip",
+            )
+        self.assertIn(
+            "translation_project_image_outputs.zip",
+            content_disposition,
+        )
+        with ZipFile(BytesIO(archive_data)) as archive:
+            self.assertEqual(
+                archive.namelist(),
+                [
+                    "boards/board-02_kor.txt",
+                    "cards/card-01_kor.txt",
+                ],
+            )
+            self.assertIn(
+                "전투",
+                archive.read("cards/card-01_kor.txt").decode("utf-8"),
+            )
+            self.assertNotIn("combined_kor.txt", archive.namelist())
 
     def test_creates_project_and_rejects_duplicate_id(self) -> None:
         status, created = self._request(

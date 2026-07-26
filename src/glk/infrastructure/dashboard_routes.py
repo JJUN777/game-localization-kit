@@ -29,6 +29,7 @@ _STATIC_ROUTES: dict[tuple[str, str], tuple[str, DashboardAccess]] = {
     ("GET", "/api/jobs"): ("jobs", "session"),
     ("GET", "/api/settings/ai"): ("ai_settings", "session"),
     ("GET", "/api/output"): ("output", "session"),
+    ("GET", "/api/output-archive"): ("output_archive", "session"),
     ("POST", "/api/projects"): ("projects", "session"),
     ("POST", "/api/review/open"): ("review_open", "session"),
     ("POST", "/api/jobs/source"): ("source_job", "session"),
