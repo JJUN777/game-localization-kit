@@ -15,7 +15,7 @@ from glk.application._translation_context import (
     load_termbase as _load_termbase,
     resolve_translation_prompt as _resolve_prompt,
 )
-from glk.application.project_service import load_project
+from glk.application.project_service import ProjectLocation, load_project
 from glk.application.translation_review_service import (
     TranslationReviewConflictError,
     TranslationReviewError,
@@ -64,6 +64,23 @@ class TranslationRetryResult:
         return value
 
 
+@dataclass(frozen=True, slots=True)
+class _TranslationRetryContext:
+    location: ProjectLocation
+    paths: WorkspacePaths
+    document: Any
+    target_blocks: tuple[Any, ...]
+    target_ids: tuple[str, ...]
+    selected_model: str
+    previous_error_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class _TranslationRetryExecution:
+    translations: dict[str, str]
+    changes: tuple[dict[str, Any], ...]
+
+
 def _read_translation_model(project_path: Path) -> str | None:
     state_path = WorkspacePaths(project_path).translation_state
     try:
@@ -82,19 +99,14 @@ def _revision_path(project_path: Path) -> Path:
     )
 
 
-def retry_failed_translations(
+def _prepare_translation_retry(
     *,
     project: str | Path,
-    workspace_root: str | Path = "workspaces",
-    settings_root: str | Path | None = None,
-    model_name: str | None = None,
-    dry_run: bool = False,
-    provider: TranslationProvider | None = None,
-    expected_review_sha256: str | None = None,
-    progress: ProgressCallback | None = None,
-) -> TranslationRetryResult:
-    """Retranslate only block-linked QA errors and preserve every other review block."""
-    notify = progress or (lambda _: None)
+    workspace_root: str | Path,
+    expected_review_sha256: str | None,
+    provider: TranslationProvider | None,
+    model_name: str | None,
+) -> _TranslationRetryContext:
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
     document = get_project_translation_review_document(
@@ -108,111 +120,144 @@ def retry_failed_translations(
         raise TranslationReviewConflictError(
             "The review TXT changed after this page was loaded. Reload before retrying."
         )
-
-    general_errors = [
-        issue
+    if any(
+        issue["severity"] == "error"
         for issue in document["general_issues"]
-        if issue["severity"] == "error"
-    ]
-    if general_errors:
+    ):
         raise TranslationReviewError(
             "The review TXT structure has errors that cannot be retranslated. "
             "Repair or deliberately reset the review first."
         )
-
-    target_blocks = [
+    target_blocks = tuple(
         block
         for block in document["blocks"]
         if any(issue["severity"] == "error" for issue in block["issues"])
-    ]
-    target_ids = tuple(block["id"] for block in target_blocks)
+    )
     selected_model = (
         provider.model_name
         if provider is not None
-        else model_name or _read_translation_model(location.path) or "configured default"
+        else model_name
+        or _read_translation_model(location.path)
+        or "configured default"
     )
-    previous_error_count = int(document["summary"]["errors"])
-    if dry_run or not target_blocks:
-        return TranslationRetryResult(
-            project_path=str(location.path),
-            model=selected_model,
-            requested_blocks=len(target_blocks),
-            retried_blocks=0,
-            block_ids=target_ids,
-            previous_error_count=previous_error_count,
-            remaining_error_count=previous_error_count,
-            warning_count=int(document["summary"]["warnings"]),
-            review_file=None if dry_run else str(paths.translation_review),
-            revision_file=None,
-            dry_run=dry_run,
-        )
-
-    approved_blocks, _ = _load_approved_blocks(location.path)
-    approved_by_id = {block.id: block for block in approved_blocks}
-    missing = [block_id for block_id in target_ids if block_id not in approved_by_id]
-    if missing:
-        raise TranslationError(
-            "QA error blocks are missing from approved source: " + ", ".join(missing)
-        )
-    termbase_entries, _ = _load_termbase(location.path)
-    project_instructions, _, _ = _resolve_prompt(None, location.path)
-    active_provider = provider or GeminiTranslationProvider.from_environment(
-        model_name or _read_translation_model(location.path),
-        settings_root=settings_root,
+    return _TranslationRetryContext(
+        location,
+        paths,
+        document,
+        target_blocks,
+        tuple(block["id"] for block in target_blocks),
+        selected_model,
+        int(document["summary"]["errors"]),
     )
 
-    translations = {
-        block["id"]: block["translation"] for block in document["blocks"]
-    }
-    changes: list[dict[str, Any]] = []
-    for index, review_block in enumerate(target_blocks, start=1):
-        block_id = review_block["id"]
-        source_block = approved_by_id[block_id]
-        qa_feedback = "\n".join(
-            f"{issue['code']}: {issue['message']}"
-            for issue in review_block["issues"]
-            if issue["severity"] == "error"
-        )
-        translated: dict[str, str] | None = None
-        validation_feedback = qa_feedback
-        notify(
-            f"오류 블록 {index}/{len(target_blocks)} 재번역 중: {block_id}"
-        )
-        try:
-            for attempt in range(2):
-                prompt = compile_translation_prompt(
+
+def _unchanged_retry_result(
+    context: _TranslationRetryContext,
+    *,
+    dry_run: bool,
+) -> TranslationRetryResult:
+    return TranslationRetryResult(
+        project_path=str(context.location.path),
+        model=context.selected_model,
+        requested_blocks=len(context.target_blocks),
+        retried_blocks=0,
+        block_ids=context.target_ids,
+        previous_error_count=context.previous_error_count,
+        remaining_error_count=context.previous_error_count,
+        warning_count=int(context.document["summary"]["warnings"]),
+        review_file=(
+            None if dry_run else str(context.paths.translation_review)
+        ),
+        revision_file=None,
+        dry_run=dry_run,
+    )
+
+
+def _retry_translation_block(
+    *,
+    review_block: Any,
+    source_block: Any,
+    provider: TranslationProvider,
+    termbase_entries: Any,
+    project_instructions: str,
+    index: int,
+    total: int,
+    notify: ProgressCallback,
+) -> str:
+    block_id = review_block["id"]
+    qa_feedback = "\n".join(
+        f"{issue['code']}: {issue['message']}"
+        for issue in review_block["issues"]
+        if issue["severity"] == "error"
+    )
+    translated: dict[str, str] | None = None
+    validation_feedback = qa_feedback
+    notify(f"오류 블록 {index}/{total} 재번역 중: {block_id}")
+    try:
+        for attempt in range(2):
+            prompt = compile_translation_prompt(
+                blocks=(source_block,),
+                termbase_entries=termbase_entries,
+                project_instructions=project_instructions,
+                validation_feedback=validation_feedback,
+            )
+            try:
+                translated = validate_translation_response(
+                    response=provider.translate(prompt),
                     blocks=(source_block,),
                     termbase_entries=termbase_entries,
-                    project_instructions=project_instructions,
-                    validation_feedback=validation_feedback,
                 )
-                try:
-                    translated = validate_translation_response(
-                        response=active_provider.translate(prompt),
-                        blocks=(source_block,),
-                        termbase_entries=termbase_entries,
-                    )
-                    break
-                except TranslationValidationError as error:
-                    validation_feedback = (
-                        f"Original QA errors:\n{qa_feedback}\n"
-                        f"Latest response errors:\n{error}"
-                    )
-                    notify(
-                        f"오류 블록 {index}/{len(target_blocks)} 검증 재시도 "
-                        f"({attempt + 1}/2)"
-                    )
-        except Exception as error:
-            raise TranslationError(
-                f"Selective retranslation failed for {block_id}; "
-                f"the review was not changed. Cause: {error}"
-            ) from error
-        if translated is None:
-            raise TranslationValidationError(
-                f"Selective retranslation failed validation for {block_id}; "
-                "the review was not changed."
-            )
-        new_text = translated[block_id]
+                break
+            except TranslationValidationError as error:
+                validation_feedback = (
+                    f"Original QA errors:\n{qa_feedback}\n"
+                    f"Latest response errors:\n{error}"
+                )
+                notify(
+                    f"오류 블록 {index}/{total} 검증 재시도 "
+                    f"({attempt + 1}/2)"
+                )
+    except Exception as error:
+        raise TranslationError(
+            f"Selective retranslation failed for {block_id}; "
+            f"the review was not changed. Cause: {error}"
+        ) from error
+    if translated is None:
+        raise TranslationValidationError(
+            f"Selective retranslation failed validation for {block_id}; "
+            "the review was not changed."
+        )
+    return translated[block_id]
+
+
+def _execute_translation_retry(
+    *,
+    context: _TranslationRetryContext,
+    provider: TranslationProvider,
+    approved_by_id: dict[str, Any],
+    termbase_entries: Any,
+    project_instructions: str,
+    notify: ProgressCallback,
+) -> _TranslationRetryExecution:
+    translations = {
+        block["id"]: block["translation"]
+        for block in context.document["blocks"]
+    }
+    changes: list[dict[str, Any]] = []
+    total = len(context.target_blocks)
+    for index, review_block in enumerate(context.target_blocks, start=1):
+        block_id = review_block["id"]
+        source_block = approved_by_id[block_id]
+        new_text = _retry_translation_block(
+            review_block=review_block,
+            source_block=source_block,
+            provider=provider,
+            termbase_entries=termbase_entries,
+            project_instructions=project_instructions,
+            index=index,
+            total=total,
+            notify=notify,
+        )
         old_text = translations[block_id]
         translations[block_id] = new_text
         changes.append(
@@ -228,41 +273,114 @@ def retry_failed_translations(
                 ],
             }
         )
+    return _TranslationRetryExecution(translations, tuple(changes))
 
+
+def _save_translation_retry(
+    *,
+    context: _TranslationRetryContext,
+    execution: _TranslationRetryExecution,
+    provider: TranslationProvider,
+    workspace_root: str | Path,
+) -> TranslationRetryResult:
     saved_document = save_project_translation_review(
-        project=location.path,
+        project=context.location.path,
         workspace_root=workspace_root,
-        translations=translations,
-        expected_review_sha256=document["review_sha256"],
+        translations=execution.translations,
+        expected_review_sha256=context.document["review_sha256"],
     )
-    revision_path = _revision_path(location.path)
+    revision_path = _revision_path(context.location.path)
     _write_json_atomic(
         revision_path,
         {
             "schema_version": 1,
-            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "project_id": document["project"]["id"],
-            "model": active_provider.model_name,
-            "provider_prompt_version": active_provider.prompt_version,
-            "review_sha256_before": document["review_sha256"],
+            "created_at": (
+                datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            ),
+            "project_id": context.document["project"]["id"],
+            "model": provider.model_name,
+            "provider_prompt_version": provider.prompt_version,
+            "review_sha256_before": context.document["review_sha256"],
             "review_sha256_after": saved_document["review_sha256"],
-            "retried_blocks": len(changes),
-            "changes": changes,
+            "retried_blocks": len(execution.changes),
+            "changes": list(execution.changes),
         },
     )
     qa_result = run_project_translation_qa(
-        project=location.path,
+        project=context.location.path,
         workspace_root=workspace_root,
     )
     return TranslationRetryResult(
-        project_path=str(location.path),
-        model=active_provider.model_name,
-        requested_blocks=len(target_blocks),
-        retried_blocks=len(changes),
-        block_ids=target_ids,
-        previous_error_count=previous_error_count,
+        project_path=str(context.location.path),
+        model=provider.model_name,
+        requested_blocks=len(context.target_blocks),
+        retried_blocks=len(execution.changes),
+        block_ids=context.target_ids,
+        previous_error_count=context.previous_error_count,
         remaining_error_count=qa_result.error_count,
         warning_count=qa_result.warning_count,
-        review_file=str(paths.translation_review),
+        review_file=str(context.paths.translation_review),
         revision_file=str(revision_path),
+    )
+
+
+def retry_failed_translations(
+    *,
+    project: str | Path,
+    workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
+    model_name: str | None = None,
+    dry_run: bool = False,
+    provider: TranslationProvider | None = None,
+    expected_review_sha256: str | None = None,
+    progress: ProgressCallback | None = None,
+) -> TranslationRetryResult:
+    """Retranslate only block-linked QA errors and preserve every other review block."""
+    notify = progress or (lambda _: None)
+    context = _prepare_translation_retry(
+        project=project,
+        workspace_root=workspace_root,
+        expected_review_sha256=expected_review_sha256,
+        provider=provider,
+        model_name=model_name,
+    )
+    if dry_run or not context.target_blocks:
+        return _unchanged_retry_result(context, dry_run=dry_run)
+
+    approved_blocks, _ = _load_approved_blocks(context.location.path)
+    approved_by_id = {block.id: block for block in approved_blocks}
+    missing = [
+        block_id
+        for block_id in context.target_ids
+        if block_id not in approved_by_id
+    ]
+    if missing:
+        raise TranslationError(
+            "QA error blocks are missing from approved source: "
+            + ", ".join(missing)
+        )
+    termbase_entries, _ = _load_termbase(context.location.path)
+    project_instructions, _, _ = _resolve_prompt(
+        None,
+        context.location.path,
+    )
+    active_provider = provider or GeminiTranslationProvider.from_environment(
+        model_name or _read_translation_model(context.location.path),
+        settings_root=settings_root,
+    )
+    execution = _execute_translation_retry(
+        context=context,
+        provider=active_provider,
+        approved_by_id=approved_by_id,
+        termbase_entries=termbase_entries,
+        project_instructions=project_instructions,
+        notify=notify,
+    )
+    return _save_translation_retry(
+        context=context,
+        execution=execution,
+        provider=active_provider,
+        workspace_root=workspace_root,
     )
