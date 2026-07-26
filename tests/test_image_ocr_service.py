@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from PIL import Image
 
+from glk.application import image_ocr_service
+from glk.application._progress import ProgressCallbackError
 from glk.application.image_ocr_service import ocr_project_images
 from glk.application.project_service import create_project, load_project
 
@@ -45,6 +49,93 @@ class FakeImageOcrProvider:
 
 
 class ImageOcrServiceTests(unittest.TestCase):
+    def test_image_hash_io_failure_is_partial_and_preserves_other_images(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            image_folder = root / "images"
+            image_folder.mkdir()
+            Image.new("RGB", (20, 10), "white").save(
+                image_folder / "bad.png"
+            )
+            Image.new("RGB", (20, 10), "white").save(
+                image_folder / "good.png"
+            )
+            create_project(name="Partial IO", workspace_root=workspace_root)
+            original_hash = image_ocr_service._sha256_file
+
+            def hash_or_fail(path: Path) -> str:
+                if path.name == "bad.png":
+                    raise OSError("cannot read image")
+                return original_hash(path)
+
+            provider = FakeImageOcrProvider()
+            with patch.object(
+                image_ocr_service,
+                "_sha256_file",
+                side_effect=hash_or_fail,
+            ):
+                result = ocr_project_images(
+                    project="partial_io",
+                    folder=image_folder,
+                    workspace_root=workspace_root,
+                    provider=provider,
+                )
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.successful_images, ("good.png",))
+            self.assertEqual(result.failures[0].file, "bad.png")
+            self.assertIn("cannot read image", result.failures[0].error)
+            self.assertEqual(provider.calls, 1)
+
+    def test_cached_progress_callback_failure_is_not_an_image_failure(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            image_folder = root / "images"
+            image_folder.mkdir()
+            Image.new("RGB", (20, 10), "white").save(
+                image_folder / "card.png"
+            )
+            project = create_project(
+                name="Callback OCR", workspace_root=workspace_root
+            )
+            ocr_project_images(
+                project="callback_ocr",
+                folder=image_folder,
+                workspace_root=workspace_root,
+                provider=FakeImageOcrProvider(),
+            )
+            callback_count = 0
+
+            def fail_cached_progress(_message: str) -> None:
+                nonlocal callback_count
+                callback_count += 1
+                if callback_count == 2:
+                    raise RuntimeError("observer failed")
+
+            with self.assertRaisesRegex(
+                ProgressCallbackError,
+                "observer failed",
+            ):
+                ocr_project_images(
+                    project="callback_ocr",
+                    workspace_root=workspace_root,
+                    provider=FakeImageOcrProvider(fail_if_called=True),
+                    progress=fail_cached_progress,
+                )
+
+            state = json.loads(
+                (project.path / ".glk/state/image_ocr.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(state["status"], "complete")
+
     def test_registers_images_writes_outputs_and_reuses_cache(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -53,7 +144,8 @@ class ImageOcrServiceTests(unittest.TestCase):
             image_folder.mkdir()
             Image.new("RGB", (20, 10), "white").save(image_folder / "card-1.png")
             (image_folder / "ocr_prompt.txt").write_text(
-                "Eight-point burst is {DMGR}.", encoding="utf-8"
+                "Eight-point burst is {DMGR}.\nKeep line order.\n",
+                encoding="utf-8",
             )
             (image_folder / "card-1.png.prompt.txt").write_text(
                 "Read the footer.", encoding="utf-8"
@@ -86,6 +178,12 @@ class ImageOcrServiceTests(unittest.TestCase):
                 (project_path / "02_source/ocr/combined.txt").read_text().strip(),
                 "[card-1.txt]\nDeal 1{DMGR}.\n\n======================",
             )
+            prompt_path = project_path / "01_input/images/ocr_prompt.txt"
+            prompt_path.write_bytes(
+                prompt_path.read_text(encoding="utf-8")
+                .replace("\n", "\r\n")
+                .encode("utf-8")
+            )
 
             cached_provider = FakeImageOcrProvider(fail_if_called=True)
             second = ocr_project_images(
@@ -96,6 +194,94 @@ class ImageOcrServiceTests(unittest.TestCase):
             self.assertTrue(second.ok)
             self.assertEqual(cached_provider.calls, 0)
             self.assertEqual(second.cached_images, ("card-1.png",))
+
+    def test_failed_forced_rerun_preserves_previous_successful_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            image_folder = root / "images"
+            image_folder.mkdir()
+            Image.new("RGB", (20, 10), "white").save(image_folder / "card.png")
+            create_project(name="Preserve OCR", workspace_root=workspace_root)
+
+            first = ocr_project_images(
+                project="preserve_ocr",
+                folder=image_folder,
+                workspace_root=workspace_root,
+                provider=FakeImageOcrProvider(),
+            )
+            self.assertTrue(first.ok)
+            project_path = workspace_root / "preserve_ocr"
+            individual_path = project_path / "02_source/ocr/individual/card.txt"
+            combined_path = project_path / "02_source/ocr/combined.txt"
+            previous_individual = individual_path.read_bytes()
+            previous_combined = combined_path.read_bytes()
+
+            failed_provider = FakeImageOcrProvider(fail_if_called=True)
+            second = ocr_project_images(
+                project="preserve_ocr",
+                workspace_root=workspace_root,
+                force=True,
+                provider=failed_provider,
+            )
+
+            self.assertFalse(second.ok)
+            self.assertEqual(failed_provider.calls, 1)
+            self.assertEqual(individual_path.read_bytes(), previous_individual)
+            self.assertEqual(combined_path.read_bytes(), previous_combined)
+            self.assertIn(
+                "Deal 1{DMGR}.",
+                (project_path / "02_source/ocr/combined.partial.txt").read_text(
+                    encoding="utf-8"
+                ),
+            )
+            state = json.loads(
+                (project_path / ".glk/state/image_ocr.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(state["status"], "partial")
+            self.assertEqual(state["failures"][0]["file"], "card.png")
+            self.assertEqual(
+                state["failures"][0]["code"],
+                "SOURCE_PROCESSING_FAILED",
+            )
+
+    def test_corrupt_cache_is_reported_without_calling_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            image_folder = root / "images"
+            image_folder.mkdir()
+            Image.new("RGB", (20, 10), "white").save(image_folder / "card.png")
+            create_project(name="Corrupt OCR Cache", workspace_root=workspace_root)
+
+            ocr_project_images(
+                project="corrupt_ocr_cache",
+                folder=image_folder,
+                workspace_root=workspace_root,
+                provider=FakeImageOcrProvider(),
+            )
+            project_path = workspace_root / "corrupt_ocr_cache"
+            individual_path = project_path / "02_source/ocr/individual/card.txt"
+            previous_text = individual_path.read_text(encoding="utf-8")
+            cache_path = project_path / ".glk/cache/ocr/results/card.json"
+            cache_path.write_text("{broken", encoding="utf-8")
+
+            provider = FakeImageOcrProvider()
+            result = ocr_project_images(
+                project="corrupt_ocr_cache",
+                workspace_root=workspace_root,
+                provider=provider,
+            )
+
+            self.assertFalse(result.ok)
+            self.assertEqual(provider.calls, 0)
+            self.assertIn("invalid UTF-8 JSON", result.failures[0].error)
+            self.assertEqual(
+                individual_path.read_text(encoding="utf-8"),
+                previous_text,
+            )
 
     def test_dry_run_does_not_require_provider_or_write_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -179,6 +179,71 @@
       white-space: nowrap;
     }
     .general-issues { margin-bottom: 16px; }
+    .retry-job {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px 18px;
+      align-items: center;
+      margin-bottom: 16px;
+      padding: 14px 16px;
+      border: 1px solid #cdd7e5;
+      border-radius: 12px;
+      background: #f4f7fb;
+    }
+    .retry-job.failed {
+      border-color: #ebaaa6;
+      background: var(--error-bg);
+    }
+    .retry-job.succeeded {
+      border-color: #a8d8bc;
+      background: var(--success-bg);
+    }
+    .retry-job-copy { min-width: 0; }
+    .retry-job-title {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 4px;
+      font-weight: 800;
+    }
+    .retry-job-status {
+      padding: 2px 7px;
+      color: var(--navy);
+      border-radius: 999px;
+      background: #dfe8f5;
+      font-size: 11px;
+    }
+    .retry-job.failed .retry-job-status {
+      color: var(--error);
+      background: #ffd9d6;
+    }
+    .retry-job.succeeded .retry-job-status {
+      color: var(--success);
+      background: #d2f0df;
+    }
+    .retry-job-message { color: var(--muted); font-size: 12px; }
+    .retry-job-error {
+      margin-top: 5px;
+      color: var(--error);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .retry-progress {
+      grid-column: 1 / -1;
+      height: 6px;
+      border-radius: 999px;
+      background: #dde3eb;
+      overflow: hidden;
+    }
+    .retry-progress-bar {
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--navy);
+      transition: width .25s ease;
+    }
+    .retry-job.failed .retry-progress-bar { background: var(--error); }
+    .retry-job.succeeded .retry-progress-bar { background: var(--success); }
     .review-card {
       scroll-margin-top: 96px;
       margin-bottom: 16px;
@@ -213,6 +278,7 @@
     }
     .badge.error { color: var(--error); background: var(--error-bg); }
     .badge.warning { color: var(--warning); background: var(--warning-bg); }
+    .badge.info { color: var(--success); background: var(--success-bg); }
     .badge.changed { color: var(--accent-dark); background: #fff0e9; }
     .columns { display: grid; grid-template-columns: 1fr 1fr; }
     .pane { min-width: 0; padding: 16px; }
@@ -232,6 +298,12 @@
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       font: 14px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .source-text mark {
+      padding: 1px 2px;
+      color: inherit;
+      border-radius: 3px;
+      background: #ffe08a;
     }
     .translation-input {
       display: block;
@@ -258,6 +330,102 @@
     }
     .issue.error { color: #8f1d19; background: var(--error-bg); }
     .issue.warning { color: #765000; background: var(--warning-bg); }
+    .issue.info { color: #12633f; background: var(--success-bg); }
+    .term-context {
+      display: grid;
+      gap: 9px;
+      padding: 12px 16px 14px;
+      border-top: 1px solid var(--line);
+      background: #fbfcfa;
+    }
+    .term-context-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .term-context-title {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .term-context-open {
+      padding: 4px 8px;
+      color: var(--navy);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: white;
+      font-size: 11px;
+      font-weight: 750;
+    }
+    .term-rules {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+    .term-rule {
+      display: inline-grid;
+      grid-template-columns: auto auto auto;
+      gap: 6px;
+      align-items: center;
+      padding: 7px 9px;
+      color: var(--ink);
+      border: 1px solid #dcd8cf;
+      border-radius: 9px;
+      text-align: left;
+      background: white;
+    }
+    .term-rule:hover { border-color: var(--navy); }
+    .term-rule-status {
+      padding: 2px 5px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 850;
+    }
+    .term-rule-status.approved { color: #174f91; background: #e8f1ff; }
+    .term-rule-status.keep { color: #6a4600; background: #fff1c9; }
+    .term-rule-source { font-weight: 800; }
+    .term-rule-target { color: var(--muted); font-size: 12px; }
+    .termbase-dialog {
+      width: min(780px, calc(100vw - 32px));
+      max-height: min(760px, calc(100vh - 40px));
+      overflow: auto;
+    }
+    .termbase-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .termbase-head .button { color: var(--ink); }
+    .termbase-tools {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .termbase-filters { display: flex; gap: 6px; align-items: center; }
+    .termbase-list { display: grid; gap: 8px; }
+    .termbase-row {
+      display: grid;
+      grid-template-columns: minmax(140px, .8fr) minmax(160px, 1fr);
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fdfcf9;
+    }
+    .termbase-row strong { display: block; overflow-wrap: anywhere; }
+    .termbase-row-target { color: var(--navy); font-weight: 750; }
+    .termbase-meta {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
     .empty {
       padding: 54px 20px;
       color: var(--muted);
@@ -290,6 +458,31 @@
       min-height: 60vh;
       color: var(--muted);
     }
+    dialog {
+      width: min(480px, calc(100vw - 32px));
+      padding: 24px;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: 0 24px 80px rgba(31, 41, 55, .24);
+    }
+    dialog::backdrop { background: rgba(24, 32, 51, .62); }
+    dialog h2 { margin: 0 0 10px; font-size: 21px; }
+    dialog p { margin: 0; color: var(--muted); }
+    dialog .button-secondary {
+      color: var(--ink);
+      border-color: var(--line);
+      background: #f8f7f3;
+    }
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 22px;
+    }
+    .hidden { display: none !important; }
     @media (max-width: 900px) {
       .app-header { align-items: flex-start; flex-wrap: wrap; }
       .brand { min-width: 0; flex: 1; }
@@ -302,6 +495,8 @@
       .pane + .pane { border-left: 0; border-top: 1px solid var(--line); }
       .header-actions { width: 100%; }
       .header-actions .button { flex: 1; }
+      .termbase-tools, .termbase-row { grid-template-columns: 1fr; }
+      .termbase-filters { flex-wrap: wrap; }
     }
   </style>
 </head>
@@ -313,6 +508,7 @@
     </div>
     <div class="header-summary" id="header-summary"></div>
     <div class="header-actions">
+      <button class="button button-secondary" id="termbase-button">용어집</button>
       <button class="button button-secondary" id="save-button">저장</button>
       <button class="button button-primary" id="qa-button">저장 후 QA</button>
       <button class="button button-secondary" id="retry-button">오류만 재번역</button>
@@ -340,14 +536,75 @@
         <span class="status-pill" id="review-status">불러오는 중</span>
       </div>
       <div class="general-issues" id="general-issues"></div>
+      <section class="retry-job hidden" id="retry-job" aria-live="polite">
+        <div class="retry-job-copy">
+          <div class="retry-job-title">
+            <span>오류 문장 재번역</span>
+            <span class="retry-job-status" id="retry-job-status"></span>
+          </div>
+          <div class="retry-job-message" id="retry-job-message"></div>
+          <div class="retry-job-error hidden" id="retry-job-error"></div>
+        </div>
+        <div class="retry-job-count" id="retry-job-count"></div>
+        <div class="retry-progress">
+          <div class="retry-progress-bar" id="retry-progress-bar"></div>
+        </div>
+      </section>
       <section id="content"><div class="loading">검수 데이터를 불러오는 중입니다…</div></section>
     </main>
   </div>
+  <dialog id="translationCompleteDialog" aria-labelledby="translationCompleteTitle">
+    <h2 id="translationCompleteTitle">최종 번역 승인이 완료되었습니다</h2>
+    <p>
+      대시보드에서 최종 번역 완료 상태와 생성된 출력 파일을 확인할 수 있습니다.
+    </p>
+    <div class="dialog-actions">
+      <button class="button button-secondary" id="stayAfterFinalize" type="button">
+        이 화면에 머물기
+      </button>
+      <button class="button button-primary" id="returnDashboard" type="button">
+        대시보드로 돌아가기
+      </button>
+    </div>
+  </dialog>
+  <dialog class="termbase-dialog" id="termbaseDialog"
+    aria-labelledby="termbaseDialogTitle">
+    <div class="termbase-head">
+      <div>
+        <h2 id="termbaseDialogTitle">확정 용어집</h2>
+        <p>번역에 적용되는 확정 번역과 원문 유지 용어를 검색합니다.</p>
+      </div>
+      <button class="button button-secondary" id="termbaseDialogClose"
+        type="button">닫기</button>
+    </div>
+    <div class="termbase-tools">
+      <input class="search" id="termbase-search" type="search"
+        placeholder="원문 용어·번역어·표기 변형 검색">
+      <div class="termbase-filters" id="termbase-filters">
+        <button class="filter active" data-term-filter="all" type="button">전체</button>
+        <button class="filter" data-term-filter="approved" type="button">확정 번역</button>
+        <button class="filter" data-term-filter="keep" type="button">원문 유지</button>
+      </div>
+    </div>
+    <div class="termbase-list" id="termbase-list"></div>
+  </dialog>
   <div class="toast" id="toast"></div>
   <script>
     "use strict";
     const AUTH_TOKEN = __GLK_TOKEN_JSON__;
-    const state = { document: null, filter: "all", search: "", dirty: false, busy: false };
+    const RETURN_URL = __GLK_RETURN_URL_JSON__;
+    const state = {
+      document: null,
+      filter: "all",
+      search: "",
+      termFilter: "all",
+      termSearch: "",
+      dirty: false,
+      busy: false,
+      retryJob: null,
+      watchedRetryJobId: null,
+      retryPollTimer: null
+    };
     const $ = (selector) => document.querySelector(selector);
 
     async function api(path, options = {}) {
@@ -383,7 +640,12 @@
       if (!filterMatch) return false;
       const query = state.search.trim().toLocaleLowerCase();
       if (!query) return true;
-      return [block.id, block.source, block.translation, block.source_file]
+      const terms = (block.relevant_terms || []).flatMap((term) => [
+        term.source_term,
+        term.translation,
+        ...(term.variants || [])
+      ]);
+      return [block.id, block.source, block.translation, block.source_file, ...terms]
         .join("\n").toLocaleLowerCase().includes(query);
     }
 
@@ -392,6 +654,167 @@
       if (className) node.className = className;
       if (text !== undefined) node.textContent = text;
       return node;
+    }
+
+    const termStatusLabel = (status) =>
+      status === "keep" ? "원문 유지" : "확정 번역";
+
+    function termTargetLabel(term) {
+      return term.status === "keep"
+        ? "영문 그대로"
+        : `→ ${term.translation || "(번역어 없음)"}`;
+    }
+
+    const isWordCharacter = (value) =>
+      Boolean(value) && /[\p{L}\p{N}_]/u.test(value);
+
+    function termRanges(text, variants) {
+      const ranges = [];
+      const occupied = [];
+      [...new Set(variants || [])]
+        .filter(Boolean)
+        .sort((left, right) => right.length - left.length)
+        .forEach((variant) => {
+          const source = text.toLocaleLowerCase();
+          const needle = variant.toLocaleLowerCase();
+          let offset = 0;
+          while (offset <= source.length - needle.length) {
+            const start = source.indexOf(needle, offset);
+            if (start < 0) break;
+            const end = start + needle.length;
+            const startsWithWord = isWordCharacter(variant[0]);
+            const endsWithWord = isWordCharacter(variant[variant.length - 1]);
+            const boundaryOk =
+              (!startsWithWord || !isWordCharacter(text[start - 1])) &&
+              (!endsWithWord || !isWordCharacter(text[end]));
+            const overlaps = occupied.some(
+              ([usedStart, usedEnd]) => start < usedEnd && end > usedStart
+            );
+            if (boundaryOk && !overlaps) {
+              ranges.push([start, end]);
+              occupied.push([start, end]);
+            }
+            offset = start + Math.max(needle.length, 1);
+          }
+        });
+      return ranges.sort((left, right) => left[0] - right[0]);
+    }
+
+    function highlightSourceTerm(node, text, term) {
+      const ranges = termRanges(text, term.variants || [term.source_term]);
+      node.replaceChildren();
+      if (!ranges.length) {
+        node.textContent = text;
+        return;
+      }
+      let cursor = 0;
+      ranges.forEach(([start, end]) => {
+        if (cursor < start) node.append(document.createTextNode(text.slice(cursor, start)));
+        node.append(make("mark", "", text.slice(start, end)));
+        cursor = end;
+      });
+      if (cursor < text.length) node.append(document.createTextNode(text.slice(cursor)));
+    }
+
+    function selectTranslationTerm(textarea, term) {
+      const candidates = term.status === "keep"
+        ? (term.variants || [])
+        : [term.translation];
+      const text = textarea.value.toLocaleLowerCase();
+      const match = candidates
+        .filter(Boolean)
+        .map((candidate) => ({
+          candidate,
+          index: text.indexOf(candidate.toLocaleLowerCase())
+        }))
+        .find((item) => item.index >= 0);
+      textarea.focus();
+      if (match) {
+        textarea.setSelectionRange(
+          match.index,
+          match.index + match.candidate.length
+        );
+      } else {
+        toast("번역문에서 해당 용어 표기를 찾지 못했습니다.", true);
+      }
+    }
+
+    function termRuleButton(term, onClick) {
+      const button = make("button", "term-rule");
+      button.type = "button";
+      const status = make(
+        "span",
+        `term-rule-status ${term.status}`,
+        termStatusLabel(term.status)
+      );
+      button.append(
+        status,
+        make("span", "term-rule-source", term.source_term),
+        make("span", "term-rule-target", termTargetLabel(term))
+      );
+      button.title = (term.variants || []).join(" · ");
+      button.addEventListener("click", onClick);
+      return button;
+    }
+
+    function renderTermbase() {
+      if (!state.document) return;
+      const query = state.termSearch.trim().toLocaleLowerCase();
+      const terms = (state.document.termbase || []).filter((term) => {
+        if (state.termFilter !== "all" && term.status !== state.termFilter) {
+          return false;
+        }
+        if (!query) return true;
+        return [
+          term.source_term,
+          term.translation,
+          term.category,
+          term.note,
+          ...(term.variants || [])
+        ].join("\n").toLocaleLowerCase().includes(query);
+      });
+      const list = $("#termbase-list");
+      list.replaceChildren();
+      if (!terms.length) {
+        list.append(make("div", "empty", "조건에 맞는 확정 용어가 없습니다."));
+        return;
+      }
+      terms.forEach((term) => {
+        const row = make("article", "termbase-row");
+        const source = make("div");
+        source.append(
+          make(
+            "span",
+            `term-rule-status ${term.status}`,
+            termStatusLabel(term.status)
+          ),
+          make("strong", "", term.source_term)
+        );
+        const variants = (term.variants || []).join(" · ");
+        if (variants) {
+          source.append(make("div", "termbase-meta", `표기 변형: ${variants}`));
+        }
+        const target = make("div");
+        target.append(
+          make(
+            "div",
+            "termbase-row-target",
+            term.status === "keep"
+              ? "원문 표기를 그대로 유지"
+              : term.translation || "(번역어 없음)"
+          )
+        );
+        const metadata = [term.category, term.note].filter(Boolean).join(" · ");
+        if (metadata) target.append(make("div", "termbase-meta", metadata));
+        row.append(source, target);
+        list.append(row);
+      });
+    }
+
+    function openTermbase() {
+      renderTermbase();
+      $("#termbaseDialog").showModal();
+      $("#termbase-search").focus();
     }
 
     function metric(value, label) {
@@ -421,12 +844,50 @@
       approved_term_missing: "확정 용어",
       keep_term_changed: "원문 유지 용어",
       unchanged_translation: "미번역 의심",
-      target_script_missing: "한글 없음"
+      target_script_missing: "한글 없음",
+      keep_rule_applied: "원문 유지 적용"
     };
     const issueLabel = (issue) => issueLabels[issue.code] || "확인 필요";
 
+    const retryJobActive = () =>
+      Boolean(
+        state.retryJob &&
+        ["queued", "running"].includes(state.retryJob.status)
+      );
+
+    function renderRetryJob() {
+      const panel = $("#retry-job");
+      const job = state.retryJob;
+      panel.classList.toggle("hidden", !job);
+      if (!job) return;
+      panel.className = `retry-job ${job.status}`;
+      const statusLabels = {
+        queued: "대기 중",
+        running: "진행 중",
+        succeeded: "완료",
+        failed: "실패 · 재시도 가능"
+      };
+      $("#retry-job-status").textContent = statusLabels[job.status] || job.status;
+      $("#retry-job-message").textContent = job.progress_message;
+      const error = $("#retry-job-error");
+      error.textContent = job.error || "";
+      error.classList.toggle("hidden", !job.error);
+      const current = job.progress_current;
+      const total = job.progress_total;
+      $("#retry-job-count").textContent =
+        Number.isInteger(current) && Number.isInteger(total)
+          ? `${current} / ${total}`
+          : retryJobActive() ? "처리 중" : "";
+      const percent =
+        Number.isInteger(current) && Number.isInteger(total) && total > 0
+          ? Math.min(100, Math.max(0, current / total * 100))
+          : retryJobActive() ? 12 : job.status === "succeeded" ? 100 : 0;
+      $("#retry-progress-bar").style.width = `${percent}%`;
+    }
+
     function refreshSummary() {
       const doc = state.document;
+      const interactionBusy = state.busy || retryJobActive();
       const changed = doc.blocks.filter((block) => block.changed).length;
       doc.summary.changed = changed;
       const summary = $("#header-summary");
@@ -438,10 +899,20 @@
       );
       $("#review-status").textContent =
         `${doc.review_status}${state.dirty ? " · 저장 안 됨" : ""}`;
-      $("#finalize-button").disabled = state.busy || state.dirty || doc.summary.errors > 0;
-      $("#save-button").disabled = state.busy || !state.dirty;
-      $("#qa-button").disabled = state.busy;
-      $("#retry-button").disabled = state.busy || doc.summary.errors === 0;
+      $("#finalize-button").disabled =
+        interactionBusy || state.dirty || doc.summary.errors > 0;
+      $("#save-button").disabled = interactionBusy || !state.dirty;
+      $("#qa-button").disabled = interactionBusy;
+      $("#retry-button").disabled =
+        interactionBusy || doc.summary.errors === 0;
+      $("#retry-button").textContent =
+        retryJobActive() ? "재번역 진행 중…" :
+        state.retryJob?.status === "failed" ? "오류 재번역 다시 시도" :
+        "오류만 재번역";
+      document.querySelectorAll(".translation-input").forEach((node) => {
+        node.disabled = interactionBusy;
+      });
+      renderRetryJob();
     }
 
     function blockDot(block) {
@@ -519,9 +990,10 @@
 
         const columns = make("div", "columns");
         const sourcePane = make("section", "pane");
+        const sourceText = make("pre", "source-text", block.source);
         sourcePane.append(
           make("div", "pane-label", "Original · 읽기 전용"),
-          make("pre", "source-text", block.source)
+          sourceText
         );
         const translationPane = make("section", "pane");
         const paneLabel = make("div", "pane-label");
@@ -532,6 +1004,7 @@
         const textarea = make("textarea", "translation-input");
         textarea.value = block.translation;
         textarea.dataset.blockId = block.id;
+        textarea.disabled = state.busy || retryJobActive();
         textarea.addEventListener("input", () => {
           block.translation = textarea.value;
           block.changed = block.translation.trim() !== block.draft_translation;
@@ -555,6 +1028,37 @@
         translationPane.append(paneLabel, textarea);
         columns.append(sourcePane, translationPane);
         card.append(header, columns);
+
+        if ((block.relevant_terms || []).length) {
+          const termContext = make("section", "term-context");
+          const termHead = make("div", "term-context-head");
+          termHead.append(
+            make(
+              "span",
+              "term-context-title",
+              `이 블록의 적용 용어 ${block.relevant_terms.length}개`
+            )
+          );
+          const openButton = make(
+            "button",
+            "term-context-open",
+            "전체 용어집"
+          );
+          openButton.type = "button";
+          openButton.addEventListener("click", openTermbase);
+          termHead.append(openButton);
+          const rules = make("div", "term-rules");
+          block.relevant_terms.forEach((term) => {
+            rules.append(
+              termRuleButton(term, () => {
+                highlightSourceTerm(sourceText, block.source, term);
+                selectTranslationTerm(textarea, term);
+              })
+            );
+          });
+          termContext.append(termHead, rules);
+          card.append(termContext);
+        }
 
         if (block.issues.length) {
           const issues = make("div", "issues");
@@ -596,17 +1100,80 @@
           const count = payload.result.error_count;
           toast(count ? `QA 오류 ${count}개를 확인하세요.` : "QA를 통과했습니다.", count > 0);
         }
-        if (action === "retry") {
-          const count = payload.result.retried_blocks;
-          const remaining = payload.result.remaining_error_count;
-          toast(
-            `${count}개 오류 문장을 재번역했습니다. 남은 오류 ${remaining}개.`,
-            remaining > 0
-          );
-        }
         if (action === "finalize") {
-          toast(payload.result.finalized ? "최종 번역을 승인했습니다." : "QA 오류를 먼저 수정하세요.", !payload.result.finalized);
+          const finalized = payload.result.finalized;
+          toast(finalized ? "최종 번역을 승인했습니다." : "QA 오류를 먼저 수정하세요.", !finalized);
+          if (finalized) $("#translationCompleteDialog").showModal();
         }
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        state.busy = false;
+        refreshSummary();
+      }
+    }
+
+    function scheduleRetryPoll() {
+      clearTimeout(state.retryPollTimer);
+      if (!retryJobActive()) return;
+      state.retryPollTimer = setTimeout(pollRetryJob, 700);
+    }
+
+    async function reloadReviewAfterRetry(job) {
+      const document = await api("/api/review");
+      state.document = document;
+      state.dirty = false;
+      render();
+      if (job.status === "succeeded") {
+        const result = job.result || {};
+        const count = result.retried_blocks || 0;
+        const remaining = result.remaining_error_count || 0;
+        toast(
+          `${count}개 오류 문장을 재번역했습니다. 남은 오류 ${remaining}개.`,
+          remaining > 0
+        );
+      } else {
+        toast(job.error || "오류 문장 재번역에 실패했습니다.", true);
+      }
+    }
+
+    async function pollRetryJob() {
+      try {
+        const payload = await api("/api/retry-job");
+        const previousActive = retryJobActive();
+        state.retryJob = payload.job;
+        refreshSummary();
+        if (
+          previousActive &&
+          state.retryJob &&
+          !retryJobActive() &&
+          state.retryJob.job_id === state.watchedRetryJobId
+        ) {
+          state.watchedRetryJobId = null;
+          await reloadReviewAfterRetry(state.retryJob);
+        }
+      } catch (error) {
+        toast(`재번역 상태를 확인하지 못했습니다. ${error.message}`, true);
+      }
+      scheduleRetryPoll();
+    }
+
+    async function startRetry() {
+      if (state.busy || retryJobActive()) return;
+      state.busy = true;
+      refreshSummary();
+      try {
+        const payload = await api(
+          "/api/retry",
+          { method: "POST", body: requestBody() }
+        );
+        state.document = payload.document;
+        state.dirty = false;
+        state.retryJob = payload.job;
+        state.watchedRetryJobId = payload.job.job_id;
+        render();
+        toast("오류 문장 재번역을 시작했습니다.");
+        scheduleRetryPoll();
       } catch (error) {
         toast(error.message, true);
       } finally {
@@ -617,8 +1184,15 @@
 
     $("#save-button").addEventListener("click", () => runAction("save"));
     $("#qa-button").addEventListener("click", () => runAction("qa"));
-    $("#retry-button").addEventListener("click", () => runAction("retry"));
+    $("#retry-button").addEventListener("click", startRetry);
     $("#finalize-button").addEventListener("click", () => runAction("finalize"));
+    $("#stayAfterFinalize").addEventListener("click", () => {
+      $("#translationCompleteDialog").close();
+    });
+    $("#returnDashboard").classList.toggle("hidden", !RETURN_URL);
+    $("#returnDashboard").addEventListener("click", () => {
+      if (RETURN_URL) window.location.assign(RETURN_URL);
+    });
     $("#search").addEventListener("input", (event) => {
       state.search = event.target.value;
       render();
@@ -632,6 +1206,23 @@
       });
       render();
     });
+    $("#termbase-button").addEventListener("click", openTermbase);
+    $("#termbaseDialogClose").addEventListener("click", () => {
+      $("#termbaseDialog").close();
+    });
+    $("#termbase-search").addEventListener("input", (event) => {
+      state.termSearch = event.target.value;
+      renderTermbase();
+    });
+    $("#termbase-filters").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-term-filter]");
+      if (!button) return;
+      state.termFilter = button.dataset.termFilter;
+      document.querySelectorAll("[data-term-filter]").forEach((node) => {
+        node.classList.toggle("active", node === button);
+      });
+      renderTermbase();
+    });
     window.addEventListener("keydown", (event) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "s") {
         event.preventDefault();
@@ -642,10 +1233,15 @@
       if (state.dirty) event.preventDefault();
     });
 
-    api("/api/review")
-      .then((document) => {
+    Promise.all([api("/api/review"), api("/api/retry-job")])
+      .then(([document, retryPayload]) => {
         state.document = document;
+        state.retryJob = retryPayload.job;
+        if (retryJobActive()) {
+          state.watchedRetryJobId = state.retryJob.job_id;
+        }
         render();
+        scheduleRetryPoll();
       })
       .catch((error) => {
         $("#content").replaceChildren(make("div", "empty", error.message));

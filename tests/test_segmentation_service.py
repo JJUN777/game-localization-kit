@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from glk.application.project_service import create_project, update_project_source
 from glk.application.segmentation_service import (
@@ -116,6 +117,35 @@ def read_blocks(path: Path) -> list[SourceBlock]:
 
 
 class SegmentationServiceTests(unittest.TestCase):
+    def test_rebuilds_v2_cache_once_before_reusing_v3_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            project_path = create_pdf_source(workspace_root)
+            with patch(
+                "glk.application.segmentation_service.SEGMENTATION_VERSION",
+                "source-block-v2",
+            ):
+                previous = segment_project_source(
+                    project="pdf_source", workspace_root=workspace_root
+                )
+            self.assertFalse(previous.cached)
+
+            rebuilt = segment_project_source(
+                project="pdf_source", workspace_root=workspace_root
+            )
+            cached = segment_project_source(
+                project="pdf_source", workspace_root=workspace_root
+            )
+
+            self.assertFalse(rebuilt.cached)
+            self.assertTrue(cached.cached)
+            state = json.loads(
+                (project_path / ".glk/state/segmentation.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(state["version"], "source-block-v3")
+
     def test_normalizes_pdf_blocks_and_reuses_cache(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
@@ -183,6 +213,51 @@ class SegmentationServiceTests(unittest.TestCase):
             self.assertEqual(blocks[0].status, "raw")
             self.assertEqual(blocks[1].status, "flagged")
             self.assertIsNone(blocks[1].page)
+
+    def test_flags_pdf_line_wrap_hyphen_join_with_fragment_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            project_path = create_pdf_source(workspace_root)
+            fragment_path = (
+                project_path / ".glk/cache/pdf/fragments/page_001.json"
+            )
+            fragment_data = json.loads(fragment_path.read_text(encoding="utf-8"))
+            fragment_data["fragments"][1:2] = [
+                {
+                    "id": "P001-F002",
+                    "bbox": [10, 50, 90, 65],
+                    "text": "A multi-",
+                },
+                {
+                    "id": "P001-F004",
+                    "bbox": [10, 66, 90, 80],
+                    "text": "player rule.",
+                },
+            ]
+            write_json(fragment_path, fragment_data)
+            layout_path = project_path / ".glk/cache/pdf/layouts/page_001.json"
+            layout = json.loads(layout_path.read_text(encoding="utf-8"))
+            layout["reconstructed_blocks"][1].update(
+                {
+                    "fragment_ids": ["P001-F002", "P001-F004"],
+                    "text": "A multiplayer rule.",
+                }
+            )
+            write_json(layout_path, layout)
+
+            result = segment_project_source(
+                project="pdf_source", workspace_root=workspace_root
+            )
+
+            self.assertEqual(result.flagged_blocks, 1)
+            blocks = read_blocks(project_path / ".glk/segments/source.jsonl")
+            self.assertEqual(blocks[1].status, "flagged")
+            self.assertEqual(
+                blocks[1].warnings,
+                (
+                    "줄바꿈 하이픈 결합 확인: multi- + player → multiplayer",
+                ),
+            )
 
     def test_rejects_partial_source_acquisition(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

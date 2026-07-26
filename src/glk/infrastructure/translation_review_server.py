@@ -3,55 +3,43 @@
 from __future__ import annotations
 
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from importlib import resources
 import json
 from pathlib import Path
-import secrets
-from socketserver import TCPServer
-import threading
 from typing import Any
 from urllib.parse import urlsplit
 import webbrowser
 
 from glk.application.translation_review_service import (
+    TranslationReviewBlockMismatchError,
+    TranslationReviewConflictError,
     TranslationReviewError,
     finalize_project_translation_review,
     get_project_translation_review_document,
     run_project_translation_qa,
     save_project_translation_review,
 )
-from glk.application.translation_retry_service import retry_failed_translations
+from glk.application.translation_retry_job_service import (
+    TranslationRetryJobConflict,
+    TranslationRetryJobError,
+    TranslationRetryJobManager,
+    TranslationRetryJobRunner,
+)
 from glk.application.translation_types import TranslationError
-from glk.error_response import make_http_error_response
-from glk.infrastructure.gemini_layout import GeminiConfigurationError
+from glk.infrastructure.gemini_common import GeminiConfigurationError
+from glk.infrastructure.local_http import (
+    LocalHttpRequestHandler,
+    LocalHttpServer,
+    validate_local_port,
+    validate_local_return_url,
+)
 
 
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
-_SECURITY_HEADERS = {
-    "Cache-Control": "no-store",
-    "Content-Security-Policy": (
-        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-        "connect-src 'self'; img-src 'self' data:; base-uri 'none'; "
-        "form-action 'none'; frame-ancestors 'none'"
-    ),
-    "Referrer-Policy": "no-referrer",
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-}
 
 
-class TranslationReviewHttpServer(ThreadingHTTPServer):
-    daemon_threads = True
-
-    def server_bind(self) -> None:
-        # HTTPServer performs a reverse-DNS lookup here, which can block on
-        # offline machines. The review server is localhost-only and needs no
-        # public hostname.
-        TCPServer.server_bind(self)
-        self.server_name = "localhost"
-        self.server_port = self.server_address[1]
-
+class TranslationReviewHttpServer(LocalHttpServer):
     def __init__(
         self,
         server_address: tuple[str, int],
@@ -59,70 +47,36 @@ class TranslationReviewHttpServer(ThreadingHTTPServer):
         *,
         project: str | Path,
         workspace_root: str | Path,
+        settings_root: str | Path | None = None,
+        return_url: str | None = None,
+        retry_runner: TranslationRetryJobRunner | None = None,
     ) -> None:
+        self.return_url = validate_local_return_url(
+            return_url,
+            label="Translation review",
+        )
         super().__init__(server_address, handler_class)
         self.project = str(project)
         self.workspace_root = str(workspace_root)
-        self.auth_token = secrets.token_urlsafe(32)
-        self.mutation_lock = threading.Lock()
-
-    @property
-    def origin(self) -> str:
-        host, port = self.server_address[:2]
-        host_text = host.decode("ascii") if isinstance(host, bytes) else host
-        return f"http://{host_text}:{port}"
+        self.retry_jobs = TranslationRetryJobManager(
+            project=project,
+            workspace_root=workspace_root,
+            settings_root=settings_root,
+            runner=retry_runner,
+        )
 
     @property
     def review_url(self) -> str:
-        return self.origin + "/"
+        return self.root_url
+
+    def server_close(self) -> None:
+        self.retry_jobs.close()
+        super().server_close()
 
 
-class _TranslationReviewHandler(BaseHTTPRequestHandler):
+class _TranslationReviewHandler(LocalHttpRequestHandler):
     server: TranslationReviewHttpServer
-
-    def log_message(self, format: str, *args: Any) -> None:
-        return
-
-    def _host_is_local(self) -> bool:
-        host = self.headers.get("Host", "").split(":", 1)[0].casefold()
-        return host in {"127.0.0.1", "localhost"}
-
-    def _api_authorized(self) -> bool:
-        if not self._host_is_local():
-            return False
-        if self.headers.get("X-GLK-Token") != self.server.auth_token:
-            return False
-        origin = self.headers.get("Origin")
-        if origin and origin not in {
-            self.server.origin,
-            self.server.origin.replace("127.0.0.1", "localhost"),
-        }:
-            return False
-        return True
-
-    def _send_bytes(
-        self,
-        status: HTTPStatus,
-        data: bytes,
-        content_type: str,
-    ) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        for name, value in _SECURITY_HEADERS.items():
-            self.send_header(name, value)
-        self.end_headers()
-        self.wfile.write(data)
-
-    def _send_json(self, status: HTTPStatus, value: Any) -> None:
-        data = (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8")
-        self._send_bytes(status, data, "application/json; charset=utf-8")
-
-    def _send_error_json(self, status: HTTPStatus, message: str) -> None:
-        self._send_json(
-            status,
-            make_http_error_response(status, message).to_dict(),
-        )
+    request_error_type = TranslationReviewError
 
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
@@ -130,7 +84,11 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
             self._send_bytes(HTTPStatus.NO_CONTENT, b"", "image/x-icon")
             return
         if not self._host_is_local():
-            self._send_error_json(HTTPStatus.FORBIDDEN, "Only localhost is allowed.")
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Only localhost is allowed.",
+                code="LOCAL_ACCESS_REQUIRED",
+            )
             return
         if path == "/":
             template = (
@@ -141,53 +99,85 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
             html = template.replace(
                 "__GLK_TOKEN_JSON__",
                 json.dumps(self.server.auth_token),
+            ).replace(
+                "__GLK_RETURN_URL_JSON__",
+                json.dumps(self.server.return_url),
             ).encode("utf-8")
             self._send_bytes(HTTPStatus.OK, html, "text/html; charset=utf-8")
             return
         if path == "/api/review":
             if not self._api_authorized():
-                self._send_error_json(HTTPStatus.FORBIDDEN, "Invalid review session.")
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                    code="REVIEW_SESSION_INVALID",
+                )
                 return
             try:
                 document = get_project_translation_review_document(
                     project=self.server.project,
                     workspace_root=self.server.workspace_root,
                 )
-            except (TranslationReviewError, OSError, ValueError) as error:
-                self._send_error_json(HTTPStatus.CONFLICT, str(error))
+            except TranslationReviewConflictError as error:
+                self._send_error_json(
+                    HTTPStatus.CONFLICT,
+                    error,
+                    code=error.code,
+                )
+                return
+            except TranslationReviewError as error:
+                self._send_error_json(
+                    HTTPStatus.BAD_REQUEST,
+                    error,
+                    code="INVALID_REQUEST",
+                )
+                return
+            except (OSError, ValueError) as error:
+                self._send_error_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    error,
+                    code="INTERNAL_ERROR",
+                )
                 return
             self._send_json(HTTPStatus.OK, document)
             return
-        self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
-
-    def _read_request_json(self) -> dict[str, Any]:
-        content_type = self.headers.get("Content-Type", "")
-        if not content_type.casefold().startswith("application/json"):
-            raise TranslationReviewError("Content-Type must be application/json.")
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError as error:
-            raise TranslationReviewError("Invalid Content-Length.") from error
-        if length <= 0 or length > _MAX_REQUEST_BYTES:
-            raise TranslationReviewError("Request body size is invalid.")
-        try:
-            value = json.loads(self.rfile.read(length).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise TranslationReviewError("Request body must be valid UTF-8 JSON.") from error
-        if not isinstance(value, dict):
-            raise TranslationReviewError("Request body must be a JSON object.")
-        return value
+        if path == "/api/retry-job":
+            if not self._api_authorized():
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                    code="REVIEW_SESSION_INVALID",
+                )
+                return
+            self._send_json(
+                HTTPStatus.OK,
+                {"ok": True, "job": self.server.retry_jobs.get_job()},
+            )
+            return
+        self._send_error_json(
+            HTTPStatus.NOT_FOUND,
+            "Not found.",
+            code="RESOURCE_NOT_FOUND",
+        )
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
         if path not in {"/api/save", "/api/qa", "/api/retry", "/api/finalize"}:
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
+            self._send_error_json(
+                HTTPStatus.NOT_FOUND,
+                "Not found.",
+                code="RESOURCE_NOT_FOUND",
+            )
             return
         if not self._api_authorized():
-            self._send_error_json(HTTPStatus.FORBIDDEN, "Invalid review session.")
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Invalid review session.",
+                code="REVIEW_SESSION_INVALID",
+            )
             return
         try:
-            body = self._read_request_json()
+            body = self._read_request_json(max_bytes=_MAX_REQUEST_BYTES)
             review_hash = body.get("review_sha256")
             translations = body.get("translations")
             if not isinstance(review_hash, str):
@@ -195,6 +185,16 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
             if not isinstance(translations, dict):
                 raise TranslationReviewError("translations must be an object.")
             with self.server.mutation_lock:
+                if self.server.retry_jobs.is_active():
+                    message = (
+                        "오류 문장 재번역이 이미 진행 중입니다."
+                        if path == "/api/retry"
+                        else (
+                            "오류 문장 재번역 중에는 검수 내용을 "
+                            "변경할 수 없습니다."
+                        )
+                    )
+                    raise TranslationRetryJobConflict(message)
                 document = save_project_translation_review(
                     project=self.server.project,
                     workspace_root=self.server.workspace_root,
@@ -217,18 +217,13 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
                         ),
                     }
                 elif path == "/api/retry":
-                    retry_result = retry_failed_translations(
-                        project=self.server.project,
-                        workspace_root=self.server.workspace_root,
+                    job = self.server.retry_jobs.start(
                         expected_review_sha256=document["review_sha256"],
                     )
                     response = {
-                        "ok": retry_result.ok,
-                        "result": retry_result.to_dict(),
-                        "document": get_project_translation_review_document(
-                            project=self.server.project,
-                            workspace_root=self.server.workspace_root,
-                        ),
+                        "ok": True,
+                        "job": job,
+                        "document": document,
                     }
                 else:
                     finalize_result = finalize_project_translation_review(
@@ -246,6 +241,8 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
         except (
             TranslationError,
             TranslationReviewError,
+            TranslationRetryJobConflict,
+            TranslationRetryJobError,
             GeminiConfigurationError,
             OSError,
             RuntimeError,
@@ -253,22 +250,36 @@ class _TranslationReviewHandler(BaseHTTPRequestHandler):
         ) as error:
             status = (
                 HTTPStatus.CONFLICT
-                if "changed after this page was loaded" in str(error)
+                if isinstance(error, TranslationRetryJobConflict)
+                or isinstance(error, TranslationReviewConflictError)
                 else HTTPStatus.BAD_REQUEST
             )
-            self._send_error_json(status, str(error))
+            if isinstance(error, TranslationRetryJobError):
+                code = error.code
+            elif isinstance(error, TranslationReviewConflictError):
+                code = error.code
+            elif isinstance(error, TranslationReviewBlockMismatchError):
+                code = error.code
+            else:
+                code = "INVALID_REQUEST"
+            self._send_error_json(status, error, code=code)
             return
-        self._send_json(HTTPStatus.OK, response)
+        self._send_json(
+            HTTPStatus.ACCEPTED if path == "/api/retry" else HTTPStatus.OK,
+            response,
+        )
 
 
 def create_translation_review_server(
     *,
     project: str | Path,
     workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
     port: int = 0,
+    return_url: str | None = None,
+    retry_runner: TranslationRetryJobRunner | None = None,
 ) -> TranslationReviewHttpServer:
-    if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
-        raise TranslationReviewError("port must be between 0 and 65535.")
+    validate_local_port(port, error_type=TranslationReviewError)
     get_project_translation_review_document(
         project=project,
         workspace_root=workspace_root,
@@ -278,6 +289,9 @@ def create_translation_review_server(
         _TranslationReviewHandler,
         project=project,
         workspace_root=workspace_root,
+        settings_root=settings_root,
+        return_url=return_url,
+        retry_runner=retry_runner,
     )
 
 
@@ -285,12 +299,14 @@ def serve_translation_review(
     *,
     project: str | Path,
     workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
     port: int = 0,
     open_browser: bool = True,
 ) -> None:
     server = create_translation_review_server(
         project=project,
         workspace_root=workspace_root,
+        settings_root=settings_root,
         port=port,
     )
     print(f"Translation review: {server.review_url}")

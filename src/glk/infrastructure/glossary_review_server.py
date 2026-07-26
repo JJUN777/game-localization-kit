@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from importlib import resources
 import json
 from pathlib import Path
-import secrets
-from socketserver import TCPServer
-import threading
 from typing import Any
 from urllib.parse import urlsplit
 import webbrowser
 
 from glk.application.glossary_review_service import (
+    GlossaryReviewConflictError,
     GlossaryReviewError,
     get_project_glossary_review_document,
     save_project_glossary_review,
@@ -23,31 +21,22 @@ from glk.application.glossary_service import (
     GlossaryImportError,
     import_project_glossary,
 )
-from glk.error_response import make_error_response, make_http_error_response
+from glk.error_response import (
+    localized_detail_message,
+    make_error_response,
+)
+from glk.infrastructure.local_http import (
+    LocalHttpRequestHandler,
+    LocalHttpServer,
+    validate_local_port,
+    validate_local_return_url,
+)
 
 
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
-_SECURITY_HEADERS = {
-    "Cache-Control": "no-store",
-    "Content-Security-Policy": (
-        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-        "connect-src 'self'; img-src 'self' data:; base-uri 'none'; "
-        "form-action 'none'; frame-ancestors 'none'"
-    ),
-    "Referrer-Policy": "no-referrer",
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-}
 
 
-class GlossaryReviewHttpServer(ThreadingHTTPServer):
-    daemon_threads = True
-
-    def server_bind(self) -> None:
-        TCPServer.server_bind(self)
-        self.server_name = "localhost"
-        self.server_port = self.server_address[1]
-
+class GlossaryReviewHttpServer(LocalHttpServer):
     def __init__(
         self,
         server_address: tuple[str, int],
@@ -55,68 +44,24 @@ class GlossaryReviewHttpServer(ThreadingHTTPServer):
         *,
         project: str | Path,
         workspace_root: str | Path,
+        return_url: str | None = None,
     ) -> None:
+        self.return_url = validate_local_return_url(
+            return_url,
+            label="Glossary review",
+        )
         super().__init__(server_address, handler_class)
         self.project = str(project)
         self.workspace_root = str(workspace_root)
-        self.auth_token = secrets.token_urlsafe(32)
-        self.mutation_lock = threading.Lock()
-
-    @property
-    def origin(self) -> str:
-        host, port = self.server_address[:2]
-        host_text = host.decode("ascii") if isinstance(host, bytes) else host
-        return f"http://{host_text}:{port}"
 
     @property
     def review_url(self) -> str:
-        return self.origin + "/"
+        return self.root_url
 
 
-class _GlossaryReviewHandler(BaseHTTPRequestHandler):
+class _GlossaryReviewHandler(LocalHttpRequestHandler):
     server: GlossaryReviewHttpServer
-
-    def log_message(self, format: str, *args: Any) -> None:
-        return
-
-    def _host_is_local(self) -> bool:
-        host = self.headers.get("Host", "").split(":", 1)[0].casefold()
-        return host in {"127.0.0.1", "localhost"}
-
-    def _api_authorized(self) -> bool:
-        if not self._host_is_local():
-            return False
-        if self.headers.get("X-GLK-Token") != self.server.auth_token:
-            return False
-        origin = self.headers.get("Origin")
-        return not origin or origin in {
-            self.server.origin,
-            self.server.origin.replace("127.0.0.1", "localhost"),
-        }
-
-    def _send_bytes(
-        self, status: HTTPStatus, data: bytes, content_type: str
-    ) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        for name, value in _SECURITY_HEADERS.items():
-            self.send_header(name, value)
-        self.end_headers()
-        self.wfile.write(data)
-
-    def _send_json(self, status: HTTPStatus, value: Any) -> None:
-        self._send_bytes(
-            status,
-            (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8"),
-            "application/json; charset=utf-8",
-        )
-
-    def _send_error_json(self, status: HTTPStatus, message: str) -> None:
-        self._send_json(
-            status,
-            make_http_error_response(status, message).to_dict(),
-        )
+    request_error_type = GlossaryReviewError
 
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
@@ -124,7 +69,11 @@ class _GlossaryReviewHandler(BaseHTTPRequestHandler):
             self._send_bytes(HTTPStatus.NO_CONTENT, b"", "image/x-icon")
             return
         if not self._host_is_local():
-            self._send_error_json(HTTPStatus.FORBIDDEN, "Only localhost is allowed.")
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Only localhost is allowed.",
+                code="LOCAL_ACCESS_REQUIRED",
+            )
             return
         if path == "/":
             template = (
@@ -134,55 +83,71 @@ class _GlossaryReviewHandler(BaseHTTPRequestHandler):
             )
             html = template.replace(
                 "__GLK_TOKEN_JSON__", json.dumps(self.server.auth_token)
+            ).replace(
+                "__GLK_RETURN_URL_JSON__", json.dumps(self.server.return_url)
             ).encode("utf-8")
             self._send_bytes(HTTPStatus.OK, html, "text/html; charset=utf-8")
             return
         if path == "/api/review":
             if not self._api_authorized():
-                self._send_error_json(HTTPStatus.FORBIDDEN, "Invalid review session.")
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                    code="REVIEW_SESSION_INVALID",
+                )
                 return
             try:
                 document = get_project_glossary_review_document(
                     project=self.server.project,
                     workspace_root=self.server.workspace_root,
                 )
-            except (GlossaryReviewError, OSError, ValueError) as error:
-                self._send_error_json(HTTPStatus.CONFLICT, str(error))
+            except GlossaryReviewConflictError as error:
+                self._send_error_json(
+                    HTTPStatus.CONFLICT,
+                    error,
+                    code=error.code,
+                )
+                return
+            except GlossaryReviewError as error:
+                self._send_error_json(
+                    HTTPStatus.BAD_REQUEST,
+                    error,
+                    code=error.code,
+                )
+                return
+            except (OSError, ValueError) as error:
+                self._send_error_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    error,
+                    code="INTERNAL_ERROR",
+                )
                 return
             self._send_json(HTTPStatus.OK, document)
             return
-        self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
-
-    def _read_request_json(self) -> dict[str, Any]:
-        content_type = self.headers.get("Content-Type", "")
-        if not content_type.casefold().startswith("application/json"):
-            raise GlossaryReviewError("Content-Type must be application/json.")
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError as error:
-            raise GlossaryReviewError("Invalid Content-Length.") from error
-        if length <= 0 or length > _MAX_REQUEST_BYTES:
-            raise GlossaryReviewError("Request body size is invalid.")
-        try:
-            value = json.loads(self.rfile.read(length).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise GlossaryReviewError(
-                "Request body must be valid UTF-8 JSON."
-            ) from error
-        if not isinstance(value, dict):
-            raise GlossaryReviewError("Request body must be a JSON object.")
-        return value
+        self._send_error_json(
+            HTTPStatus.NOT_FOUND,
+            "Not found.",
+            code="RESOURCE_NOT_FOUND",
+        )
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
         if path not in {"/api/save", "/api/import"}:
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
+            self._send_error_json(
+                HTTPStatus.NOT_FOUND,
+                "Not found.",
+                code="RESOURCE_NOT_FOUND",
+            )
             return
         if not self._api_authorized():
-            self._send_error_json(HTTPStatus.FORBIDDEN, "Invalid review session.")
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Invalid review session.",
+                code="REVIEW_SESSION_INVALID",
+            )
             return
         try:
-            body = self._read_request_json()
+            body = self._read_request_json(max_bytes=_MAX_REQUEST_BYTES)
             review_hash = body.get("review_sha256")
             rows = body.get("rows")
             if not isinstance(review_hash, str):
@@ -216,6 +181,7 @@ class _GlossaryReviewHandler(BaseHTTPRequestHandler):
                             make_error_response(
                                 "GLOSSARY_IMPORT_FAILED",
                                 error,
+                                message=localized_detail_message(error),
                             ).to_dict()
                         )
                         response["document"] = document
@@ -231,10 +197,15 @@ class _GlossaryReviewHandler(BaseHTTPRequestHandler):
         except (GlossaryReviewError, OSError, ValueError) as error:
             status = (
                 HTTPStatus.CONFLICT
-                if "changed after this page was loaded" in str(error)
+                if isinstance(error, GlossaryReviewConflictError)
                 else HTTPStatus.BAD_REQUEST
             )
-            self._send_error_json(status, str(error))
+            code = (
+                error.code
+                if isinstance(error, GlossaryReviewError)
+                else "INVALID_REQUEST"
+            )
+            self._send_error_json(status, error, code=code)
             return
         self._send_json(HTTPStatus.OK, response)
 
@@ -244,9 +215,9 @@ def create_glossary_review_server(
     project: str | Path,
     workspace_root: str | Path = "workspaces",
     port: int = 0,
+    return_url: str | None = None,
 ) -> GlossaryReviewHttpServer:
-    if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
-        raise GlossaryReviewError("port must be between 0 and 65535.")
+    validate_local_port(port, error_type=GlossaryReviewError)
     get_project_glossary_review_document(
         project=project,
         workspace_root=workspace_root,
@@ -256,6 +227,7 @@ def create_glossary_review_server(
         _GlossaryReviewHandler,
         project=project,
         workspace_root=workspace_root,
+        return_url=return_url,
     )
 
 

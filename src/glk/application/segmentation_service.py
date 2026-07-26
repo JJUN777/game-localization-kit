@@ -10,16 +10,19 @@ from pathlib import Path, PurePosixPath
 import re
 from typing import Any, Iterable
 
+from glk.application._cache import invalid_cache, read_json_object
 from glk.application._hashing import sha256_bytes as _sha256_bytes
+from glk.application._hashing import sha256_file_if_exists as _sha256_file
 from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.application.project_service import load_project
 from glk.application.source_review_service import prepare_project_source_review
 from glk.domain.source_block import SOURCE_BLOCK_SCHEMA_VERSION, SourceBlock
 from glk.domain.workspace import IMAGE_SOURCE_ROOT, WorkspacePaths, is_pdf_source_file
+from glk.extraction.layout import join_fragment_texts_with_warnings
 
 
-SEGMENTATION_VERSION = "source-block-v2"
+SEGMENTATION_VERSION = "source-block-v3"
 _VOLATILE_ACQUISITION_FIELDS = {"updated_at", "cached_pages", "cached_images"}
 
 
@@ -42,14 +45,8 @@ class SegmentationResult:
     cached: bool = False
     dry_run: bool = False
 
-    @property
-    def ok(self) -> bool:
-        return True
-
     def to_dict(self) -> dict[str, Any]:
-        value = asdict(self)
-        value["ok"] = self.ok
-        return value
+        return asdict(self)
 
 
 def _utc_now() -> str:
@@ -141,7 +138,7 @@ def _block_id(
 def _union_pdf_bbox(
     fragment_ids: list[str],
     fragments: dict[str, dict[str, Any]],
-    page_size: list[Any],
+    page_size: Any,
 ) -> tuple[float, float, float, float]:
     if (
         not isinstance(page_size, list)
@@ -179,7 +176,12 @@ def _union_pdf_bbox(
         max(0.0, min(1000.0, raw[2] / width * 1000)),
         max(0.0, min(1000.0, raw[3] / height * 1000)),
     )
-    return tuple(round(value, 2) for value in normalized)
+    return (
+        round(normalized[0], 2),
+        round(normalized[1], 2),
+        round(normalized[2], 2),
+        round(normalized[3], 2),
+    )
 
 
 def _validate_complete_run(metadata: dict[str, Any], path: Path) -> None:
@@ -188,6 +190,19 @@ def _validate_complete_run(metadata: dict[str, Any], path: Path) -> None:
             f"Source acquisition is not complete according to {path}; "
             "resolve failures before segmentation."
         )
+
+
+def _line_wrap_hyphen_warnings(
+    fragment_ids: list[str],
+    fragments: dict[str, dict[str, Any]],
+) -> tuple[str, ...]:
+    _, warnings = join_fragment_texts_with_warnings(
+        [
+            str(fragments.get(fragment_id, {}).get("text") or "")
+            for fragment_id in fragment_ids
+        ]
+    )
+    return warnings
 
 
 def _build_pdf_blocks(
@@ -217,11 +232,13 @@ def _build_pdf_blocks(
         fragment_values = fragment_data.get("fragments")
         if not isinstance(reconstructed, list) or not isinstance(fragment_values, list):
             raise SegmentationError(f"Invalid PDF layout data for page {page}.")
-        fragments = {
-            value.get("id"): value
-            for value in fragment_values
-            if isinstance(value, dict) and isinstance(value.get("id"), str)
-        }
+        fragments: dict[str, dict[str, Any]] = {}
+        for value in fragment_values:
+            if not isinstance(value, dict):
+                continue
+            fragment_id = value.get("id")
+            if isinstance(fragment_id, str):
+                fragments[fragment_id] = value
         for block_order, value in enumerate(reconstructed, start=1):
             if not isinstance(value, dict):
                 raise SegmentationError(f"Invalid reconstructed block on page {page}.")
@@ -237,6 +254,7 @@ def _build_pdf_blocks(
                 raise SegmentationError(f"Invalid fragment references on page {page}.")
             source_order += 1
             raw_text = text.strip()
+            warnings = _line_wrap_hyphen_warnings(fragment_ids, fragments)
             block = SourceBlock(
                 schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
                 id=_block_id(
@@ -257,8 +275,8 @@ def _build_pdf_blocks(
                     fragment_ids, fragments, fragment_data.get("page_size")
                 ),
                 legibility=None,
-                status="raw",
-                warnings=(),
+                status="flagged" if warnings else "raw",
+                warnings=warnings,
                 source_refs=tuple(fragment_ids),
                 source_hash=_source_hash(raw_text),
             )
@@ -285,7 +303,12 @@ def _normalized_image_bbox(value: Any) -> tuple[float, float, float, float]:
         or not all(isinstance(item, (int, float)) for item in value)
     ):
         raise SegmentationError("Image OCR block has an invalid bbox.")
-    return tuple(round(float(item), 2) for item in value)
+    return (
+        round(float(value[0]), 2),
+        round(float(value[1]), 2),
+        round(float(value[2]), 2),
+        round(float(value[3]), 2),
+    )
 
 
 def _build_image_blocks(project_path: Path) -> tuple[list[SourceBlock], list[Path]]:
@@ -373,11 +396,13 @@ def _load_cached_result(
     input_sha256: str,
     source_type: str,
 ) -> SegmentationResult | None:
-    if not state_path.is_file() or not output_path.is_file():
+    state = read_json_object(state_path)
+    if state is None:
+        return None
+    output_hash = _sha256_file(output_path)
+    if output_hash is None:
         return None
     try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        output_hash = _sha256_bytes(output_path.read_bytes())
         if not (
             state.get("status") == "complete"
             and state.get("version") == SEGMENTATION_VERSION
@@ -395,8 +420,8 @@ def _load_cached_result(
             output_file=str(output_path),
             cached=True,
         )
-    except (KeyError, OSError, json.JSONDecodeError, TypeError, ValueError):
-        return None
+    except (KeyError, TypeError, ValueError) as error:
+        raise invalid_cache(state_path, "invalid segmentation state") from error
 
 
 def segment_project_source(

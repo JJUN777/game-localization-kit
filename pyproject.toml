@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "game-localization-kit"
-version = "1.1.0"
+version = "2.0.0"
 description = "Cross-platform CLI toolkit for game localization workflows"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,11 +14,14 @@ dependencies = [
   "PyPDF2>=3.0,<4",
   "PyMuPDF>=1.28,<2",
   "python-dotenv>=1.2,<2",
+  "send2trash>=1.8,<2",
 ]
 
 [project.optional-dependencies]
 dev = [
   "mypy>=1.20,<2",
+  "ruff>=0.16,<1",
+  "types-Send2Trash>=1.8,<3",
 ]
 
 [project.scripts]
@@ -33,17 +36,27 @@ where = ["src"]
 [tool.setuptools.package-data]
 "glk.web" = ["*.html"]
 "glk.templates" = ["*.txt"]
+"glk.data" = ["*.json"]
 
 [tool.mypy]
 python_version = "3.10"
-follow_imports = "skip"
+follow_imports = "normal"
 files = [
   "src/glk/error_response.py",
-  "src/glk/application/review_types.py",
-  "src/glk/application/source_review_service.py",
-  "src/glk/application/glossary_review_service.py",
-  "src/glk/application/translation_review_service.py",
+  "src/glk/application",
+  "src/glk/domain",
+  "src/glk/extraction",
+  "src/glk/infrastructure/gemini_common.py",
+  "src/glk/infrastructure/gemini_layout.py",
+  "src/glk/infrastructure/gemini_ocr.py",
+  "src/glk/infrastructure/gemini_translation.py",
+  "src/glk/infrastructure/dashboard_routes.py",
+  "src/glk/infrastructure/local_http.py",
   "src/glk/infrastructure/source_review_server.py",
   "src/glk/infrastructure/glossary_review_server.py",
   "src/glk/infrastructure/translation_review_server.py",
+  "src/glk/infrastructure/dashboard_server.py",
 ]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

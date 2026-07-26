@@ -9,6 +9,7 @@ from typing import Any
 import pymupdf
 from PIL import Image
 
+from glk.application._progress import ProgressCallbackError
 from glk.application.extraction_service import ExtractionError, extract_project_pdf
 from glk.application.project_service import create_project, load_project
 from glk.extraction.layout import PROMPT_VERSION, merge_paragraph_continuations
@@ -67,6 +68,35 @@ def create_pdf(path: Path, text: str) -> None:
 
 
 class ExtractionServiceTests(unittest.TestCase):
+    def test_progress_callback_failure_is_not_recorded_as_page_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workspace_root = root / "workspaces"
+            pdf_path = root / "rulebook.pdf"
+            create_pdf(pdf_path, "A wrapped rulebook sentence.")
+            project = create_project(
+                name="Callback Failure", workspace_root=workspace_root
+            )
+
+            def fail_progress(_message: str) -> None:
+                raise RuntimeError("observer failed")
+
+            with self.assertRaisesRegex(
+                ProgressCallbackError,
+                "observer failed",
+            ):
+                extract_project_pdf(
+                    project="callback_failure",
+                    file=pdf_path,
+                    workspace_root=workspace_root,
+                    provider=FakeLayoutProvider(),
+                    progress=fail_progress,
+                )
+
+            self.assertFalse(
+                (project.path / ".glk/state/pdf_acquisition.json").exists()
+            )
+
     def test_merges_lowercase_paragraph_continuation(self) -> None:
         blocks = [
             {
@@ -198,6 +228,10 @@ class ExtractionServiceTests(unittest.TestCase):
             self.assertFalse(result.ok)
             self.assertEqual(result.successful_pages, ())
             self.assertIn("fragment validation", result.failures[0].error)
+            self.assertEqual(
+                result.failures[0].code,
+                "GEMINI_RESPONSE_INVALID",
+            )
             self.assertEqual(provider.calls, 3)
             self.assertFalse(
                 (workspace_root / "rulebook/.glk/cache/pdf/layouts/page_001.json").exists()

@@ -101,7 +101,46 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertIsInstance(html, str)
         self.assertIn("용어 후보를 표처럼 검수하세요", html)
         self.assertIn("검증 및 termbase 생성", html)
+        self.assertIn('id="search-field"', html)
+        self.assertIn('<option value="source">원문 용어</option>', html)
+        self.assertIn('<option value="translation">번역어</option>', html)
+        self.assertIn('<option value="context">출현 문맥</option>', html)
+        self.assertIn('<option value="all">전체 항목</option>', html)
+        self.assertIn('searchField: "source"', html)
+        self.assertNotIn('<option value="note">', html)
+        self.assertNotIn("<th>메모</th>", html)
+        self.assertLess(
+            html.index('class="toolbar-row search-row"'),
+            html.index('class="toolbar-row bulk-row"'),
+        )
+        self.assertLess(
+            html.index('id="status-filter"'),
+            html.index('id="category-filter"'),
+        )
+        self.assertLess(
+            html.index('id="category-filter"'),
+            html.index('id="sort-order"'),
+        )
+        self.assertLess(
+            html.index('id="sort-order"'),
+            html.index('id="search-field"'),
+        )
+        self.assertLess(
+            html.index('id="search-field"'),
+            html.index('id="search"'),
+        )
+        self.assertLess(
+            html.index('id="bulk-apply"'),
+            html.index('id="add-button"'),
+        )
+        self.assertIn('id="sort-order"', html)
+        self.assertIn("첫 등장 위치 순", html)
+        self.assertIn("출현 많은 순", html)
+        self.assertIn("출현 적은 순", html)
+        self.assertIn("용어집 생성이 완료되었습니다", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
+        self.assertNotIn("__GLK_RETURN_URL_JSON__", html)
+        self.assertIn("const RETURN_URL = null;", html)
         self.assertEqual(headers["X-Frame-Options"], "DENY")
         self.assertEqual(self.server.server_address[0], "127.0.0.1")
 
@@ -170,7 +209,10 @@ class GlossaryReviewServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 400)
-        self.assertEqual(payload["code"], "INVALID_REQUEST")
+        self.assertEqual(
+            payload["code"],
+            "GLOSSARY_GENERATED_CANDIDATE_DELETE",
+        )
         self.assertIn("삭제할 수 없습니다", payload["message"])
         self.assertIn("cannot be deleted", payload["detail"])
 
@@ -218,6 +260,34 @@ class GlossaryReviewServerTests(unittest.TestCase):
             payload["document"]["review_sha256"],
             document["review_sha256"],
         )
+
+    def test_injects_only_a_local_return_url(self) -> None:
+        return_url = "http://127.0.0.1:8765/"
+        server = create_glossary_review_server(
+            project="glossary_project",
+            workspace_root=self.workspace_root,
+            return_url=return_url,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen(server.review_url, timeout=3) as response:
+                html = response.read().decode("utf-8")
+            self.assertIn(
+                f"const RETURN_URL = {json.dumps(return_url)};",
+                html,
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        with self.assertRaisesRegex(ValueError, "local HTTP URL"):
+            create_glossary_review_server(
+                project="glossary_project",
+                workspace_root=self.workspace_root,
+                return_url="https://attacker.example/",
+            )
 
 
 if __name__ == "__main__":

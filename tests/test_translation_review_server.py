@@ -3,14 +3,27 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import time
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from google.genai import errors as gemini_errors
+
+from glk.application.translation_retry_job_service import _safe_retry_error
+from glk.application.translation_review_service import (
+    TranslationReviewConflictError,
+)
 from glk.application.translation_service import translate_project
 from glk.application.translation_retry_service import TranslationRetryResult
+from glk.application.translation_types import (
+    TranslationError,
+    TranslationValidationError,
+)
+from glk.infrastructure.gemini_common import GeminiConfigurationError
 from glk.infrastructure.translation_review_server import (
     TranslationReviewHttpServer,
     create_translation_review_server,
@@ -100,9 +113,19 @@ class TranslationReviewServerTests(unittest.TestCase):
         self.assertIsInstance(html, str)
         self.assertIn("원문과 번역을 함께 검수하세요", html)
         self.assertIn("오류만 재번역", html)
+        self.assertIn('id="retry-job"', html)
+        self.assertIn('api("/api/retry-job")', html)
+        self.assertIn("오류 재번역 다시 시도", html)
+        self.assertIn("확정 용어집", html)
+        self.assertIn("이 블록의 적용 용어", html)
+        self.assertIn("keep_rule_applied: \"원문 유지 적용\"", html)
+        self.assertIn("highlightSourceTerm", html)
+        self.assertIn("최종 번역 승인이 완료되었습니다", html)
         self.assertIn('number_changed: "숫자 불일치"', html)
         self.assertIn("${issueLabel(issue)} · ${issue.message}", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
+        self.assertNotIn("__GLK_RETURN_URL_JSON__", html)
+        self.assertIn("const RETURN_URL = null;", html)
         self.assertEqual(headers["X-Frame-Options"], "DENY")
         self.assertEqual(self.server.server_address[0], "127.0.0.1")
 
@@ -124,6 +147,14 @@ class TranslationReviewServerTests(unittest.TestCase):
         status, document, _ = self._request("/api/review")
         self.assertEqual(status, 200)
         self.assertEqual(document["summary"]["blocks"], 3)
+        self.assertEqual(len(document["termbase"]), 3)
+        self.assertEqual(
+            [
+                term["source_term"]
+                for term in document["blocks"][1]["relevant_terms"]
+            ],
+            ["Hunter", "Stamina"],
+        )
         original_hash = document["review_sha256"]
         translations = {
             block["id"]: block["translation"]
@@ -212,7 +243,10 @@ class TranslationReviewServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 400)
-        self.assertEqual(payload["code"], "INVALID_REQUEST")
+        self.assertEqual(
+            payload["code"],
+            "TRANSLATION_REVIEW_BLOCK_MISMATCH",
+        )
         self.assertIn("알 수 없는 블록", payload["message"])
         self.assertIn("unknown", payload["detail"])
         self.assertEqual(
@@ -241,9 +275,20 @@ class TranslationReviewServerTests(unittest.TestCase):
             review_file=str(self.project_path / "04_translation/review.txt"),
             revision_file=str(self.project_path / "04_translation/revisions/retry.json"),
         )
+        started = threading.Event()
+        release = threading.Event()
+
+        def run_retry(**kwargs: object) -> TranslationRetryResult:
+            progress = kwargs["progress"]
+            self.assertTrue(callable(progress))
+            progress("오류 블록 1/1 재번역 중: block-2")
+            started.set()
+            self.assertTrue(release.wait(2))
+            return result
+
         with patch(
-            "glk.infrastructure.translation_review_server.retry_failed_translations",
-            return_value=result,
+            "glk.application.translation_retry_job_service.retry_failed_translations",
+            side_effect=run_retry,
         ) as retry:
             status, payload, _ = self._request(
                 "/api/retry",
@@ -253,8 +298,57 @@ class TranslationReviewServerTests(unittest.TestCase):
                     "translations": translations,
                 },
             )
-        self.assertEqual(status, 200)
-        self.assertEqual(payload["result"]["retried_blocks"], 1)
+            self.assertEqual(status, 202)
+            self.assertEqual(payload["job"]["status"], "queued")
+            self.assertTrue(started.wait(1))
+
+            status, running, _ = self._request("/api/retry-job")
+            self.assertEqual(status, 200)
+            self.assertEqual(running["job"]["status"], "running")
+            self.assertEqual(running["job"]["progress_current"], 0)
+            self.assertEqual(running["job"]["progress_total"], 1)
+
+            status, responsive, _ = self._request("/api/review")
+            self.assertEqual(status, 200)
+            self.assertIn("summary", responsive)
+            status, conflict, _ = self._request(
+                "/api/retry",
+                method="POST",
+                payload={
+                    "review_sha256": responsive["review_sha256"],
+                    "translations": {
+                        block["id"]: block["translation"]
+                        for block in responsive["blocks"]
+                    },
+                },
+            )
+            self.assertEqual(status, 409)
+            self.assertIn("이미 진행 중", conflict["detail"])
+            status, save_conflict, _ = self._request(
+                "/api/save",
+                method="POST",
+                payload={
+                    "review_sha256": responsive["review_sha256"],
+                    "translations": {
+                        block["id"]: block["translation"]
+                        for block in responsive["blocks"]
+                    },
+                },
+            )
+            self.assertEqual(status, 409)
+            self.assertIn("변경할 수 없습니다", save_conflict["detail"])
+
+            release.set()
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                _, completed, _ = self._request("/api/retry-job")
+                if completed["job"]["status"] == "succeeded":
+                    break
+                threading.Event().wait(0.01)
+            else:
+                self.fail("translation retry job did not finish")
+
+        self.assertEqual(completed["job"]["result"]["retried_blocks"], 1)
         self.assertEqual(
             retry.call_args.kwargs["expected_review_sha256"],
             payload["document"]["review_sha256"],
@@ -265,6 +359,247 @@ class TranslationReviewServerTests(unittest.TestCase):
                 encoding="utf-8"
             ),
         )
+
+    def test_failed_retry_job_exposes_reason_and_can_be_retried(self) -> None:
+        _, document, _ = self._request("/api/review")
+        translations = {
+            block["id"]: block["translation"]
+            for block in document["blocks"]
+        }
+        result = TranslationRetryResult(
+            project_path=str(self.project_path),
+            model="test-model",
+            requested_blocks=0,
+            retried_blocks=0,
+            block_ids=(),
+            previous_error_count=0,
+            remaining_error_count=0,
+            warning_count=0,
+            review_file=str(self.project_path / "04_translation/review.txt"),
+            revision_file=None,
+        )
+        calls = 0
+
+        def run_retry(**kwargs: object) -> TranslationRetryResult:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError(
+                    "/Users/private/project/review.txt: temporary provider failure"
+                )
+            return result
+
+        with patch(
+            "glk.application.translation_retry_job_service.retry_failed_translations",
+            side_effect=run_retry,
+        ):
+            status, first, _ = self._request(
+                "/api/retry",
+                method="POST",
+                payload={
+                    "review_sha256": document["review_sha256"],
+                    "translations": translations,
+                },
+            )
+            self.assertEqual(status, 202)
+            failed = self._wait_for_retry_job("failed")
+            self.assertEqual(
+                failed["error"],
+                (
+                    "오류 문장 재번역에 실패했습니다. "
+                    "검수 내용은 유지되었습니다. 다시 시도하세요."
+                ),
+            )
+            self.assertNotIn("/Users/private", failed["error"])
+
+            _, latest_document, _ = self._request("/api/review")
+            status, second, _ = self._request(
+                "/api/retry",
+                method="POST",
+                payload={
+                    "review_sha256": latest_document["review_sha256"],
+                    "translations": {
+                        block["id"]: block["translation"]
+                        for block in latest_document["blocks"]
+                    },
+                },
+            )
+            self.assertEqual(status, 202)
+            self.assertNotEqual(
+                first["job"]["job_id"],
+                second["job"]["job_id"],
+            )
+            self._wait_for_retry_job("succeeded")
+
+    def test_retry_job_sanitizes_gemini_api_details(self) -> None:
+        _, document, _ = self._request("/api/review")
+        translations = {
+            block["id"]: block["translation"]
+            for block in document["blocks"]
+        }
+        api_error = gemini_errors.APIError(
+            404,
+            {
+                "error": {
+                    "code": 404,
+                    "status": "NOT_FOUND",
+                    "message": (
+                        "secret SDK detail /Users/private/models/missing"
+                    ),
+                }
+            },
+            SimpleNamespace(headers={}),  # type: ignore[arg-type]
+        )
+
+        with patch(
+            "glk.application.translation_retry_job_service.retry_failed_translations",
+            side_effect=api_error,
+        ):
+            status, _, _ = self._request(
+                "/api/retry",
+                method="POST",
+                payload={
+                    "review_sha256": document["review_sha256"],
+                    "translations": translations,
+                },
+            )
+            self.assertEqual(status, 202)
+            failed = self._wait_for_retry_job("failed")
+
+        self.assertEqual(
+            failed["error"],
+            (
+                "선택한 Gemini 모델을 사용할 수 없습니다. "
+                "AI 설정에서 모델을 확인하세요."
+            ),
+        )
+        self.assertNotIn("secret SDK detail", failed["error"])
+        self.assertNotIn("/Users/private", failed["error"])
+
+    def test_retry_error_keeps_conflict_and_validation_guidance(self) -> None:
+        conflict = _safe_retry_error(
+            TranslationReviewConflictError(
+                "sensitive changed review detail /Users/private"
+            )
+        )
+        validation = _safe_retry_error(
+            TranslationValidationError(
+                "sensitive validation detail /Users/private"
+            )
+        )
+
+        self.assertIn("최신 내용을 불러온 뒤", conflict)
+        self.assertIn("직접 수정하거나 다시 시도", validation)
+        self.assertNotIn("/Users/private", conflict)
+        self.assertNotIn("/Users/private", validation)
+        self.assertEqual(
+            TranslationReviewConflictError.code,
+            "REVIEW_CONFLICT",
+        )
+        self.assertEqual(
+            TranslationValidationError.code,
+            "TRANSLATION_VALIDATION_FAILED",
+        )
+
+    def test_retry_error_classifies_provider_failures_without_raw_detail(
+        self,
+    ) -> None:
+        expected_markers = {
+            400: "API 키 또는 요청 설정",
+            403: "호출 권한",
+            404: "모델",
+            429: "사용량 한도",
+            500: "일시적으로 응답하지 않습니다",
+        }
+        for code, marker in expected_markers.items():
+            with self.subTest(code=code):
+                api_error = gemini_errors.APIError(
+                    code,
+                    {
+                        "error": {
+                            "code": code,
+                            "status": "TEST_FAILURE",
+                            "message": (
+                                "secret SDK detail /Users/private/api-key"
+                            ),
+                        }
+                    },
+                    SimpleNamespace(headers={}),  # type: ignore[arg-type]
+                )
+                wrapped = TranslationError(
+                    "Selective retry failed. Cause: secret SDK detail"
+                )
+                wrapped.__cause__ = api_error
+
+                message = _safe_retry_error(wrapped)
+
+                self.assertIn(marker, message)
+                self.assertNotIn("secret SDK detail", message)
+                self.assertNotIn("/Users/private", message)
+
+        configuration = _safe_retry_error(
+            GeminiConfigurationError("GEMINI_API_KEY=/Users/private/key")
+        )
+        network = _safe_retry_error(
+            TimeoutError("socket timeout /Users/private")
+        )
+        self.assertIn("API 키가 설정되지 않았습니다", configuration)
+        self.assertIn("네트워크 연결", network)
+        self.assertNotIn("/Users/private", configuration)
+        self.assertNotIn("/Users/private", network)
+
+    def _wait_for_retry_job(self, status: str) -> dict[str, object]:
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            _, payload, _ = self._request("/api/retry-job")
+            job = payload["job"]
+            if job["status"] == status:
+                return job
+            threading.Event().wait(0.01)
+        self.fail(f"translation retry job did not reach {status}")
+
+    def test_injects_only_a_local_return_url(self) -> None:
+        return_url = "http://127.0.0.1:8765/"
+        server = create_translation_review_server(
+            project="translation_project",
+            workspace_root=self.workspace_root,
+            return_url=return_url,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen(server.review_url, timeout=3) as response:
+                html = response.read().decode("utf-8")
+            self.assertIn(
+                f"const RETURN_URL = {json.dumps(return_url)};",
+                html,
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        with self.assertRaisesRegex(ValueError, "local HTTP URL"):
+            create_translation_review_server(
+                project="translation_project",
+                workspace_root=self.workspace_root,
+                return_url="https://attacker.example/",
+            )
+
+    def test_passes_settings_root_to_retry_job_manager(self) -> None:
+        settings_root = Path(self.temporary_directory.name) / "settings"
+        server = create_translation_review_server(
+            project="translation_project",
+            workspace_root=self.workspace_root,
+            settings_root=settings_root,
+        )
+        try:
+            self.assertEqual(
+                server.retry_jobs.settings_root,
+                settings_root.resolve(),
+            )
+        finally:
+            server.server_close()
 
 
 if __name__ == "__main__":

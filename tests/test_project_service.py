@@ -13,10 +13,12 @@ from glk.application.project_service import (
     PROJECT_INPUT_DIRECTORIES,
     SOURCE_QA_VERSION,
     ProjectExistsError,
+    _project_stage,
     create_project,
     inspect_project,
     list_projects,
     load_project,
+    load_workspace_project_id,
 )
 from glk.domain.project import ProjectManifest, ProjectValidationError, normalize_project_id
 
@@ -24,7 +26,16 @@ from glk.domain.project import ProjectManifest, ProjectValidationError, normaliz
 class ProjectManifestTests(unittest.TestCase):
     def test_normalize_project_id_is_portable(self) -> None:
         self.assertEqual(normalize_project_id("The Elder Scrolls: Rulebook"), "the_elder_scrolls_rulebook")
-        self.assertEqual(normalize_project_id("한글 룰북"), "한글_룰북")
+        with self.assertRaises(ProjectValidationError):
+            normalize_project_id("한글 룰북")
+
+    def test_project_id_accepts_only_portable_ascii_characters(self) -> None:
+        manifest = ProjectManifest.create(name="한글 룰북", project_id="korean_rulebook_2")
+        self.assertEqual(manifest.project_id, "korean_rulebook_2")
+        for project_id in ("한글_룰북", "game-name", "Game_Name", "_game", "game__name"):
+            with self.subTest(project_id=project_id):
+                with self.assertRaises(ProjectValidationError):
+                    ProjectManifest.create(name="Test", project_id=project_id)
 
     def test_rejects_reserved_windows_name(self) -> None:
         with self.assertRaises(ProjectValidationError):
@@ -49,6 +60,44 @@ class ProjectManifestTests(unittest.TestCase):
 
 
 class ProjectServiceTests(unittest.TestCase):
+    def test_list_projects_reports_corrupt_pipeline_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace_root = Path(temporary) / "workspaces"
+            location = create_project(
+                name="Corrupt Pipeline State",
+                workspace_root=workspace_root,
+            )
+            (location.path / ".glk/state/source_qa.json").write_text(
+                "{broken",
+                encoding="utf-8",
+            )
+
+            result = list_projects(workspace_root)
+
+            self.assertEqual(result.projects, ())
+            self.assertEqual(len(result.warnings), 1)
+            self.assertEqual(
+                result.warnings[0].directory,
+                "corrupt_pipeline_state",
+            )
+            self.assertIn("invalid UTF-8 JSON", result.warnings[0].message)
+
+    def test_partial_translation_stage_precedes_stale_review(self) -> None:
+        pipeline = {
+            "final_translation_approved": False,
+            "translation_review": "stale",
+            "translation_status": "partial",
+            "termbase_status": "current",
+            "glossary_status": "current",
+            "final_source_approved": True,
+            "review_source_ready": True,
+            "source_acquired": True,
+        }
+
+        self.assertEqual(_project_stage(pipeline), "translation_partial")
+        pipeline["translation_review"] = "qa_failed"
+        self.assertEqual(_project_stage(pipeline), "translation_partial")
+
     def test_create_and_load_project(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory) / "workspaces"
@@ -58,11 +107,11 @@ class ProjectServiceTests(unittest.TestCase):
             prompt_path = location.path / DEFAULT_OCR_PROMPT
             self.assertTrue(prompt_path.is_file())
             prompt = prompt_path.read_text(encoding="utf-8")
-            self.assertIn("다음 아이콘은 텍스트가 아니지만", prompt)
-            self.assertIn("{DEF}", prompt)
-            self.assertIn("{HP}", prompt)
-            self.assertIn("{eWater}", prompt)
-            self.assertIn("{tWater}", prompt)
+            self.assertIn("# 프로젝트 공통 OCR 추가 지침", prompt)
+            self.assertIn("TOKEN_NAME", prompt)
+            self.assertIn("[ICON: concise visible description]", prompt)
+            self.assertIn("가상 예시이며 실제 OCR 규칙이 아닙니다", prompt)
+            self.assertNotRegex(prompt, r"\{[A-Za-z][A-Za-z0-9_]*\}")
             for relative_path in PROJECT_INPUT_DIRECTORIES + PROJECT_DIRECTORIES:
                 self.assertTrue((location.path / relative_path).is_dir())
 
@@ -110,6 +159,34 @@ class ProjectServiceTests(unittest.TestCase):
             with self.assertRaises(ProjectExistsError):
                 create_project(name="Demo Game", workspace_root=root)
             self.assertEqual((location.path / "project.json").read_bytes(), manifest_before)
+
+    def test_load_workspace_project_id_rejects_paths_and_noncanonical_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory) / "workspaces"
+            location = create_project(name="Safe Project", workspace_root=root)
+
+            loaded = load_workspace_project_id("safe_project", root)
+            self.assertEqual(loaded.path, location.path)
+
+            for project_id in (
+                "../safe_project",
+                "safe_project/child",
+                "Safe_Project",
+                "safe__project",
+            ):
+                with self.subTest(project_id=project_id):
+                    with self.assertRaises(ProjectValidationError):
+                        load_workspace_project_id(project_id, root)
+
+            manifest_path = location.path / "project.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["project_id"] = "different_project"
+            manifest_path.write_text(
+                json.dumps(manifest),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ProjectValidationError):
+                load_workspace_project_id("safe_project", root)
 
     def test_dry_run_does_not_touch_filesystem(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

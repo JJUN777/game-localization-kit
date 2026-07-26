@@ -4,23 +4,32 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-import json
 from pathlib import Path
-import re
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from PIL import Image, ImageOps
 
-from glk.application._hashing import sha256_bytes as _sha256_bytes
+from glk.application._cache import invalid_cache, read_json_object
 from glk.application._hashing import sha256_file as _sha256_file
+from glk.application._hashing import sha256_text as _sha256_text
 from glk.application._io import copy_file_atomic as _copy_file_atomic
-from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application._io import write_json_atomic as _write_json_atomic
 from glk.application._io import write_text_atomic as _write_text_atomic
+from glk.application._progress import (
+    ProgressCallback,
+    ProgressCallbackError,
+    guard_progress_callback,
+)
 from glk.application.project_service import (
     ProjectLocation,
     load_project,
-    update_project_source,
+)
+from glk.application.source_registration_service import (
+    SUPPORTED_IMAGE_EXTENSIONS,
+    SourceRegistrationError,
+    discover_source_images,
+    register_image_sources,
+    validate_image_output_collisions,
 )
 from glk.domain.workspace import IMAGE_SOURCE_ROOT, WorkspacePaths
 from glk.extraction.image_ocr import (
@@ -30,10 +39,10 @@ from glk.extraction.image_ocr import (
     validate_ocr_result,
 )
 from glk.infrastructure.gemini_ocr import GeminiImageOcrProvider
+from glk.infrastructure.gemini_common import gemini_failure_code
 
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
-ProgressCallback = Callable[[str], None]
+IMAGE_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS
 
 
 class ImageOcrError(ValueError):
@@ -51,6 +60,31 @@ class ImageOcrProvider(Protocol):
 class ImageOcrFailure:
     file: str
     error: str
+    code: str = "SOURCE_PROCESSING_FAILED"
+
+
+@dataclass(frozen=True, slots=True)
+class _RegisteredOcrInput:
+    location: ProjectLocation
+    folder: Path
+    images: tuple[Path, ...]
+    prompt: Path | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ImageOcrOutput:
+    source_name: str
+    text_name: str
+    text: str
+    cached: bool
+    needs_review: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _ImageOcrBatch:
+    successful: tuple[_ImageOcrOutput, ...]
+    combined_items: tuple[tuple[str, str], ...]
+    failures: tuple[ImageOcrFailure, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,39 +136,15 @@ def _resolve_optional_file(path: str | Path) -> Path:
     return candidate
 
 
-def _natural_key(path: Path, root: Path) -> list[tuple[int, int | str]]:
-    relative = path.relative_to(root).as_posix().casefold()
-    return [
-        (0, int(part)) if part.isdigit() else (1, part)
-        for part in re.split(r"(\d+)", relative)
-        if part
-    ]
-
-
 def discover_images(folder: Path) -> list[Path]:
-    return sorted(
-        (
-            path
-            for path in folder.rglob("*")
-            if path.is_file()
-            and not any(part.startswith(".") for part in path.relative_to(folder).parts)
-            and path.suffix.casefold() in IMAGE_EXTENSIONS
-        ),
-        key=lambda path: _natural_key(path, folder),
-    )
+    return discover_source_images(folder)
 
 
 def _validate_output_collisions(images: list[Path], root: Path) -> None:
-    outputs: dict[Path, Path] = {}
-    for image_path in images:
-        output = image_path.relative_to(root).with_suffix(".txt")
-        previous = outputs.get(output)
-        if previous is not None:
-            raise ImageOcrError(
-                f"Output filename collision: {previous.name} and {image_path.name} "
-                f"both map to {output.as_posix()}"
-            )
-        outputs[output] = image_path
+    try:
+        validate_image_output_collisions(images, root)
+    except SourceRegistrationError as error:
+        raise ImageOcrError(str(error)) from error
 
 
 def _load_image(path: Path) -> Image.Image:
@@ -156,10 +166,10 @@ def _load_cached_result(
     image_prompt_sha256: str,
     provider: ImageOcrProvider,
 ) -> dict[str, Any] | None:
-    if not path.is_file():
+    value = read_json_object(path)
+    if value is None:
         return None
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
         matches = (
             value.get("image_sha256") == image_sha256
             and value.get("common_prompt_sha256") == common_prompt_sha256
@@ -170,8 +180,8 @@ def _load_cached_result(
         if not matches:
             return None
         return validate_ocr_result(value["ocr"])
-    except (KeyError, OSError, json.JSONDecodeError, TypeError, ValueError):
-        return None
+    except (KeyError, TypeError, ValueError) as error:
+        raise invalid_cache(path, "invalid OCR result") from error
 
 
 def _registered_source_folder(location: ProjectLocation) -> Path:
@@ -185,45 +195,267 @@ def _registered_source_folder(location: ProjectLocation) -> Path:
     return WorkspacePaths(location.path).input_images_dir
 
 
-def _register_images(
+def _resolve_ocr_request(
+    *,
+    location: ProjectLocation,
+    folder: str | Path | None,
+    prompt_file: str | Path | None,
+) -> tuple[Path, list[Path], Path | None]:
+    source_folder = (
+        _registered_source_folder(location)
+        if folder is None
+        else _resolve_folder(folder)
+    )
+    images = discover_images(source_folder)
+    if not images:
+        raise ImageOcrError(f"No supported images found in {source_folder}")
+    _validate_output_collisions(images, source_folder)
+
+    requested_prompt = _resolve_optional_file(prompt_file) if prompt_file else None
+    if requested_prompt is None:
+        folder_prompt = source_folder / "ocr_prompt.txt"
+        requested_prompt = folder_prompt if folder_prompt.is_file() else None
+    if requested_prompt is None:
+        saved_prompt = WorkspacePaths(location.path).input_ocr_prompt
+        requested_prompt = saved_prompt if saved_prompt.is_file() else None
+    return source_folder, images, requested_prompt
+
+
+def _prepare_registered_ocr_input(
+    *,
     location: ProjectLocation,
     source_folder: Path,
     images: list[Path],
-    *,
+    requested_prompt: Path | None,
+    register_source: bool,
     force: bool,
-) -> tuple[ProjectLocation, Path, list[Path]]:
-    if location.manifest.source_file not in {None, IMAGE_SOURCE_ROOT} and not force:
-        raise ImageOcrError(
-            f"Project source is already registered as {location.manifest.source_file}. "
-            "Use --force to replace the project source type."
-        )
-    destination_root = WorkspacePaths(location.path).input_images_dir
-    registered: list[Path] = []
-    for source_image in images:
-        relative = source_image.relative_to(source_folder)
-        destination = destination_root / relative
-        if source_image.resolve() != destination.resolve():
-            if destination.is_file():
-                same = _sha256_file(source_image) == _sha256_file(destination)
-                if not same and not force:
-                    raise ImageOcrError(
-                        f"A different source image is already registered: {relative}. "
-                        "Use --force to replace it."
-                    )
-                if not same:
-                    _copy_file_atomic(source_image, destination)
-            else:
-                _copy_file_atomic(source_image, destination)
-        registered.append(destination)
+) -> _RegisteredOcrInput:
+    if register_source:
+        try:
+            registered = register_image_sources(
+                location,
+                source_folder,
+                images,
+                force=force,
+            )
+        except SourceRegistrationError as error:
+            raise ImageOcrError(str(error)) from error
+        location = registered.location
+        registered_folder = registered.root
+        registered_images = registered.files
+    else:
+        registered_folder = source_folder
+        registered_images = tuple(images)
 
-        sidecar = source_image.with_name(source_image.name + ".prompt.txt")
-        if sidecar.is_file():
-            destination_sidecar = destination.with_name(destination.name + ".prompt.txt")
-            if sidecar.resolve() != destination_sidecar.resolve():
-                _copy_file_atomic(sidecar, destination_sidecar)
-    if location.manifest.source_file != IMAGE_SOURCE_ROOT:
-        location = update_project_source(location, IMAGE_SOURCE_ROOT)
-    return location, destination_root, registered
+    prompt_destination = WorkspacePaths(location.path).input_ocr_prompt
+    registered_prompt: Path | None = None
+    if requested_prompt is not None:
+        registered_prompt = prompt_destination
+        if requested_prompt.resolve() != registered_prompt.resolve():
+            _copy_file_atomic(requested_prompt, registered_prompt)
+    elif prompt_destination.is_file():
+        registered_prompt = prompt_destination
+    return _RegisteredOcrInput(
+        location,
+        registered_folder,
+        registered_images,
+        registered_prompt,
+    )
+
+
+def _ocr_image(
+    *,
+    image_path: Path,
+    registered: _RegisteredOcrInput,
+    paths: WorkspacePaths,
+    provider: ImageOcrProvider,
+    common_instructions: str,
+    common_prompt_hash: str,
+    force: bool,
+    notify: ProgressCallback,
+    progress_label: str,
+) -> _ImageOcrOutput:
+    relative = image_path.relative_to(registered.folder)
+    relative_name = relative.as_posix()
+    text_relative = relative.with_suffix(".txt")
+    result_path = paths.ocr_results / relative.with_suffix(".json")
+    individual_path = paths.ocr_individual / text_relative
+    image_prompt_path = image_path.with_name(image_path.name + ".prompt.txt")
+    image_instructions = _read_text(image_prompt_path)
+    image_hash = _sha256_file(image_path)
+    image_prompt_hash = _sha256_text(image_instructions)
+
+    ocr = None if force else _load_cached_result(
+        result_path,
+        image_sha256=image_hash,
+        common_prompt_sha256=common_prompt_hash,
+        image_prompt_sha256=image_prompt_hash,
+        provider=provider,
+    )
+    cached = ocr is not None
+    if cached:
+        notify(f"{progress_label}: reused validated OCR cache")
+    else:
+        prompt = build_ocr_prompt(common_instructions, image_instructions)
+        ocr = validate_ocr_result(
+            provider.transcribe(prompt, _load_image(image_path))
+        )
+        _write_json_atomic(
+            result_path,
+            {
+                "schema_version": 1,
+                "source_image": f"{IMAGE_SOURCE_ROOT}/{relative_name}",
+                "image_sha256": image_hash,
+                "common_prompt_file": (
+                    paths.relative(paths.input_ocr_prompt)
+                    if registered.prompt
+                    else None
+                ),
+                "common_prompt_sha256": common_prompt_hash,
+                "image_prompt_file": (
+                    f"{IMAGE_SOURCE_ROOT}/{relative_name}.prompt.txt"
+                    if image_prompt_path.is_file()
+                    else None
+                ),
+                "image_prompt_sha256": image_prompt_hash,
+                "model": provider.model_name,
+                "prompt_version": provider.prompt_version,
+                "ocr": ocr,
+                "updated_at": _utc_now(),
+            },
+        )
+    assert ocr is not None
+    text = build_individual_text(ocr["blocks"])
+    _write_text_atomic(individual_path, text)
+    return _ImageOcrOutput(
+        relative_name,
+        text_relative.as_posix(),
+        text,
+        cached,
+        ocr["status"] == "needs_review",
+    )
+
+
+def _preserve_previous_ocr_text(
+    path: Path,
+    failure_message: str,
+) -> tuple[str, str]:
+    try:
+        return path.read_text(encoding="utf-8"), failure_message
+    except FileNotFoundError:
+        return "", failure_message
+    except OSError as error:
+        return (
+            "",
+            failure_message
+            + f"; could not preserve existing OCR text: {error}",
+        )
+
+
+def _ocr_registered_images(
+    *,
+    registered: _RegisteredOcrInput,
+    paths: WorkspacePaths,
+    provider: ImageOcrProvider,
+    common_instructions: str,
+    common_prompt_hash: str,
+    force: bool,
+    notify: ProgressCallback,
+) -> _ImageOcrBatch:
+    successful: list[_ImageOcrOutput] = []
+    combined_items: list[tuple[str, str]] = []
+    failures: list[ImageOcrFailure] = []
+    total = len(registered.images)
+    for index, image_path in enumerate(registered.images, start=1):
+        relative = image_path.relative_to(registered.folder)
+        source_name = relative.as_posix()
+        text_name = relative.with_suffix(".txt").as_posix()
+        progress_label = f"Image {index}/{total}: {source_name}"
+        notify(progress_label)
+        try:
+            output = _ocr_image(
+                image_path=image_path,
+                registered=registered,
+                paths=paths,
+                provider=provider,
+                common_instructions=common_instructions,
+                common_prompt_hash=common_prompt_hash,
+                force=force,
+                notify=notify,
+                progress_label=progress_label,
+            )
+            successful.append(output)
+            combined_items.append((output.text_name, output.text))
+        except ProgressCallbackError:
+            raise
+        except Exception as error:
+            previous_text, failure_message = _preserve_previous_ocr_text(
+                paths.ocr_individual / relative.with_suffix(".txt"),
+                str(error),
+            )
+            failures.append(
+                ImageOcrFailure(
+                    source_name,
+                    failure_message,
+                    gemini_failure_code(error),
+                )
+            )
+            combined_items.append((text_name, previous_text))
+            notify(f"{progress_label}: failed: {error}")
+    return _ImageOcrBatch(
+        tuple(successful),
+        tuple(combined_items),
+        tuple(failures),
+    )
+
+
+def _write_ocr_result(
+    *,
+    registered: _RegisteredOcrInput,
+    paths: WorkspacePaths,
+    provider: ImageOcrProvider,
+    batch: _ImageOcrBatch,
+) -> Path:
+    combined_path = (
+        paths.ocr_combined_partial
+        if batch.failures
+        else paths.ocr_combined
+    )
+    _write_text_atomic(
+        combined_path,
+        build_combined_text(list(batch.combined_items)),
+    )
+    _write_json_atomic(
+        paths.image_ocr_state,
+        {
+            "schema_version": 1,
+            "status": "partial" if batch.failures else "complete",
+            "source_folder": IMAGE_SOURCE_ROOT,
+            "prompt_file": (
+                paths.relative(paths.input_ocr_prompt)
+                if registered.prompt
+                else None
+            ),
+            "model": provider.model_name,
+            "prompt_version": provider.prompt_version,
+            "total_images": len(registered.images),
+            "successful_images": [
+                item.source_name for item in batch.successful
+            ],
+            "cached_images": [
+                item.source_name for item in batch.successful if item.cached
+            ],
+            "needs_review": [
+                item.source_name
+                for item in batch.successful
+                if item.needs_review
+            ],
+            "failures": [asdict(failure) for failure in batch.failures],
+            "output_file": str(combined_path.relative_to(registered.location.path)),
+            "updated_at": _utc_now(),
+        },
+    )
+    return combined_path
 
 
 def ocr_project_images(
@@ -232,33 +464,22 @@ def ocr_project_images(
     folder: str | Path | None = None,
     prompt_file: str | Path | None = None,
     workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
     model_name: str | None = None,
     force: bool = False,
     dry_run: bool = False,
     provider: ImageOcrProvider | None = None,
     progress: ProgressCallback | None = None,
 ) -> ImageOcrRunResult:
-    notify = progress or (lambda _: None)
+    notify = guard_progress_callback(progress)
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
-    if folder is None:
-        source_folder = _registered_source_folder(location)
-    else:
-        source_folder = _resolve_folder(folder)
-    images = discover_images(source_folder)
-    if not images:
-        raise ImageOcrError(f"No supported images found in {source_folder}")
-    _validate_output_collisions(images, source_folder)
+    source_folder, images, requested_prompt = _resolve_ocr_request(
+        location=location,
+        folder=folder,
+        prompt_file=prompt_file,
+    )
     selected = tuple(path.relative_to(source_folder).as_posix() for path in images)
-
-    requested_prompt = _resolve_optional_file(prompt_file) if prompt_file else None
-    if requested_prompt is None:
-        folder_prompt = source_folder / "ocr_prompt.txt"
-        requested_prompt = folder_prompt if folder_prompt.is_file() else None
-    if requested_prompt is None:
-        registered_prompt = paths.input_ocr_prompt
-        requested_prompt = registered_prompt if registered_prompt.is_file() else None
-
     if dry_run:
         return ImageOcrRunResult(
             project_path=str(location.path),
@@ -275,128 +496,54 @@ def ocr_project_images(
             dry_run=True,
         )
 
-    if folder is not None:
-        location, registered_folder, registered_images = _register_images(
-            location, source_folder, images, force=force
-        )
-    else:
-        registered_folder = source_folder
-        registered_images = images
-
-    registered_prompt: Path | None = None
-    if requested_prompt is not None:
-        registered_prompt = paths.input_ocr_prompt
-        if requested_prompt.resolve() != registered_prompt.resolve():
-            _copy_file_atomic(requested_prompt, registered_prompt)
-    elif paths.input_ocr_prompt.is_file():
-        registered_prompt = paths.input_ocr_prompt
-
-    common_instructions = _read_text(registered_prompt)
-    common_prompt_hash = _sha256_bytes(common_instructions.encode("utf-8"))
-    active_provider = provider or GeminiImageOcrProvider.from_environment(model_name)
-    individual_dir = paths.ocr_individual
-    results_dir = paths.ocr_results
-    combined_items: list[tuple[str, str]] = []
-    successful: list[str] = []
-    cached_images: list[str] = []
-    needs_review: list[str] = []
-    failures: list[ImageOcrFailure] = []
-
-    for index, image_path in enumerate(registered_images, start=1):
-        relative = image_path.relative_to(registered_folder)
-        relative_name = relative.as_posix()
-        text_relative = relative.with_suffix(".txt")
-        result_path = results_dir / relative.with_suffix(".json")
-        individual_path = individual_dir / text_relative
-        image_prompt_path = image_path.with_name(image_path.name + ".prompt.txt")
-        image_instructions = _read_text(image_prompt_path)
-        image_hash = _sha256_file(image_path)
-        image_prompt_hash = _sha256_bytes(image_instructions.encode("utf-8"))
-        notify(f"Image {index}/{len(registered_images)}: {relative_name}")
-        try:
-            ocr = None if force else _load_cached_result(
-                result_path,
-                image_sha256=image_hash,
-                common_prompt_sha256=common_prompt_hash,
-                image_prompt_sha256=image_prompt_hash,
-                provider=active_provider,
-            )
-            if ocr is not None:
-                cached_images.append(relative_name)
-                notify(f"Image {index}/{len(registered_images)}: reused validated OCR cache")
-            else:
-                prompt = build_ocr_prompt(common_instructions, image_instructions)
-                ocr = validate_ocr_result(
-                    active_provider.transcribe(prompt, _load_image(image_path))
-                )
-                _write_json_atomic(
-                    result_path,
-                    {
-                        "schema_version": 1,
-                        "source_image": f"{IMAGE_SOURCE_ROOT}/{relative.as_posix()}",
-                        "image_sha256": image_hash,
-                        "common_prompt_file": (
-                            paths.relative(paths.input_ocr_prompt)
-                            if registered_prompt
-                            else None
-                        ),
-                        "common_prompt_sha256": common_prompt_hash,
-                        "image_prompt_file": (
-                            f"{IMAGE_SOURCE_ROOT}/{relative_name}.prompt.txt"
-                            if image_prompt_path.is_file()
-                            else None
-                        ),
-                        "image_prompt_sha256": image_prompt_hash,
-                        "model": active_provider.model_name,
-                        "prompt_version": active_provider.prompt_version,
-                        "ocr": ocr,
-                        "updated_at": _utc_now(),
-                    },
-                )
-            text = build_individual_text(ocr["blocks"])
-            _write_text_atomic(individual_path, text)
-            combined_items.append((text_relative.as_posix(), text))
-            successful.append(relative_name)
-            if ocr["status"] == "needs_review":
-                needs_review.append(relative_name)
-        except Exception as error:
-            failures.append(ImageOcrFailure(relative_name, str(error)))
-            _write_text_atomic(individual_path, "")
-            combined_items.append((text_relative.as_posix(), ""))
-            notify(f"Image {index}/{len(registered_images)}: failed: {error}")
-
-    combined_path = (
-        paths.ocr_combined_partial if failures else paths.ocr_combined
+    registered = _prepare_registered_ocr_input(
+        location=location,
+        source_folder=source_folder,
+        images=images,
+        requested_prompt=requested_prompt,
+        register_source=folder is not None,
+        force=force,
     )
-    _write_text_atomic(combined_path, build_combined_text(combined_items))
-    run_status = {
-        "schema_version": 1,
-        "status": "partial" if failures else "complete",
-        "source_folder": IMAGE_SOURCE_ROOT,
-        "prompt_file": (
-            paths.relative(paths.input_ocr_prompt) if registered_prompt else None
-        ),
-        "model": active_provider.model_name,
-        "prompt_version": active_provider.prompt_version,
-        "total_images": len(registered_images),
-        "successful_images": successful,
-        "cached_images": cached_images,
-        "needs_review": needs_review,
-        "failures": [asdict(failure) for failure in failures],
-        "output_file": str(combined_path.relative_to(location.path)),
-        "updated_at": _utc_now(),
-    }
-    _write_json_atomic(paths.image_ocr_state, run_status)
+    paths = WorkspacePaths(registered.location.path)
+    common_instructions = _read_text(registered.prompt)
+    common_prompt_hash = _sha256_text(common_instructions)
+    active_provider = provider or GeminiImageOcrProvider.from_environment(
+        model_name,
+        settings_root=settings_root,
+    )
+    batch = _ocr_registered_images(
+        registered=registered,
+        paths=paths,
+        provider=active_provider,
+        common_instructions=common_instructions,
+        common_prompt_hash=common_prompt_hash,
+        force=force,
+        notify=notify,
+    )
+    combined_path = _write_ocr_result(
+        registered=registered,
+        paths=paths,
+        provider=active_provider,
+        batch=batch,
+    )
     return ImageOcrRunResult(
-        project_path=str(location.path),
-        source_folder=str(registered_folder),
-        prompt_file=str(registered_prompt) if registered_prompt else None,
+        project_path=str(registered.location.path),
+        source_folder=str(registered.folder),
+        prompt_file=str(registered.prompt) if registered.prompt else None,
         model=active_provider.model_name,
         prompt_version=active_provider.prompt_version,
         selected_images=selected,
-        successful_images=tuple(successful),
-        cached_images=tuple(cached_images),
-        needs_review=tuple(needs_review),
-        failures=tuple(failures),
+        successful_images=tuple(
+            item.source_name for item in batch.successful
+        ),
+        cached_images=tuple(
+            item.source_name for item in batch.successful if item.cached
+        ),
+        needs_review=tuple(
+            item.source_name
+            for item in batch.successful
+            if item.needs_review
+        ),
+        failures=batch.failures,
         output_file=str(combined_path),
     )

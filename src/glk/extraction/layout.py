@@ -13,7 +13,7 @@ from PIL import Image
 
 
 PROMPT_VERSION = "layout-fragment-v1"
-POSTPROCESS_VERSION = "column-continuation-v1"
+POSTPROCESS_VERSION = "column-continuation-v2"
 BLOCK_TYPES = (
     "heading",
     "paragraph",
@@ -53,6 +53,8 @@ RESPONSE_SCHEMA = {
 class LayoutValidationError(ValueError):
     """Raised when a layout response loses or invents source fragments."""
 
+    code = "GEMINI_RESPONSE_INVALID"
+
 
 class LayoutProvider(Protocol):
     model_name: str
@@ -65,6 +67,12 @@ class LayoutProvider(Protocol):
 
 def parse_page_selection(value: str | None, page_count: int) -> list[int]:
     """Parse a 1-based page expression such as '1,3-5'."""
+    if (
+        not isinstance(page_count, int)
+        or isinstance(page_count, bool)
+        or page_count < 1
+    ):
+        raise ValueError("Document page count must be a positive integer.")
     if not value:
         return list(range(page_count))
     selected: set[int] = set()
@@ -77,14 +85,20 @@ def parse_page_selection(value: str | None, page_count: int) -> list[int]:
             start, end = int(start_raw), int(end_raw)
             if start > end:
                 raise ValueError(f"Invalid page range: {item}")
+            if start < 1 or end > page_count:
+                raise ValueError(
+                    f"Page range out of range: {item} "
+                    f"(document has {page_count} pages)"
+                )
             selected.update(range(start - 1, end))
         else:
-            selected.add(int(item) - 1)
-    invalid = sorted(page + 1 for page in selected if page < 0 or page >= page_count)
-    if invalid:
-        raise ValueError(
-            f"Page numbers out of range: {invalid} (document has {page_count} pages)"
-        )
+            page = int(item)
+            if page < 1 or page > page_count:
+                raise ValueError(
+                    f"Page number out of range: {page} "
+                    f"(document has {page_count} pages)"
+                )
+            selected.add(page - 1)
     if not selected:
         raise ValueError("Page selection is empty.")
     return sorted(selected)
@@ -208,22 +222,38 @@ def validate_layout(
     return report
 
 
-def join_fragment_texts(texts: list[str]) -> str:
-    """Remove visual line wraps while preserving extracted words."""
-    if not texts:
-        return ""
-    result = texts[0].strip()
-    for raw_text in texts[1:]:
+def join_fragment_texts_with_warnings(
+    texts: list[str],
+) -> tuple[str, tuple[str, ...]]:
+    """Remove visual wraps and report every automatic hyphen join."""
+    result = ""
+    warnings: list[str] = []
+    for raw_text in texts:
         next_text = raw_text.strip()
         if not next_text:
             continue
+        if not result:
+            result = next_text
+            continue
         if result.endswith("-") and next_text[:1].islower():
+            left = result.rsplit(maxsplit=1)[-1]
+            right = next_text.split(maxsplit=1)[0]
+            warnings.append(
+                f"줄바꿈 하이픈 결합 확인: {left} + {right} → "
+                f"{left[:-1]}{right}"
+            )
             result = result[:-1] + next_text
         elif result.endswith(("/", "(", "[", "{", "‘", "“")):
             result += next_text
         else:
             result += " " + next_text
-    return " ".join(result.split())
+    return " ".join(result.split()), tuple(warnings)
+
+
+def join_fragment_texts(texts: list[str]) -> str:
+    """Remove visual line wraps while preserving extracted words."""
+    text, _ = join_fragment_texts_with_warnings(texts)
+    return text
 
 
 def reconstruct_blocks(
@@ -233,12 +263,14 @@ def reconstruct_blocks(
     blocks = []
     for block in layout["blocks"]:
         fragment_ids = block["fragment_ids"]
+        text, warnings = join_fragment_texts_with_warnings(
+            [by_id[fragment_id]["text"] for fragment_id in fragment_ids]
+        )
         blocks.append(
             {
                 **block,
-                "text": join_fragment_texts(
-                    [by_id[fragment_id]["text"] for fragment_id in fragment_ids]
-                ),
+                "text": text,
+                "warnings": list(warnings),
             }
         )
     return blocks
@@ -265,11 +297,20 @@ def merge_paragraph_continuations(
         if not should_merge:
             merged.append({**block})
             continue
+        assert previous is not None
         previous["fragment_ids"] = [
             *previous["fragment_ids"],
             *block["fragment_ids"],
         ]
-        previous["text"] = join_fragment_texts([previous["text"], block["text"]])
+        text, warnings = join_fragment_texts_with_warnings(
+            [previous["text"], block["text"]]
+        )
+        previous["text"] = text
+        previous["warnings"] = [
+            *previous.get("warnings", []),
+            *block.get("warnings", []),
+            *warnings,
+        ]
         previous["postprocess"] = "column-boundary continuation merged"
     return merged
 

@@ -54,7 +54,9 @@
     }
     .box.selected { border-color: var(--warn); background: rgba(247,200,115,.22); z-index: 3; }
     .box.excluded { border-color: #7d8794; background: rgba(90,98,110,.16); opacity: .55; }
+    .box.warning { box-shadow: 0 0 0 2px var(--warn); }
     .box.issue { box-shadow: 0 0 0 2px var(--danger); }
+    .box.warning.issue { box-shadow: 0 0 0 2px var(--danger), 0 0 0 4px var(--warn); }
     .draw-box { position: absolute; border: 2px dashed var(--blue); background: rgba(105,167,255,.18); pointer-events: none; }
     section.editor { padding: 14px; background: var(--panel); }
     .summary { color: var(--muted); margin-bottom: 10px; }
@@ -68,7 +70,13 @@
     .card-id { color: var(--muted); font: 11px ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .tag { border-radius: 12px; padding: 2px 7px; font-size: 11px; background: #26303b; white-space: nowrap; }
     .tag.manual { color: var(--blue); }
+    .tag.warning { color: var(--warn); }
     .tag.issue { color: var(--danger); }
+    .source-warning {
+      margin-top: 8px; padding: 8px 10px; border: 1px solid #705d34;
+      border-radius: 7px; color: var(--warn); background: #282317;
+      white-space: pre-wrap;
+    }
     textarea {
       width: 100%; min-height: 100px; resize: vertical; border: 1px solid var(--line);
       background: #101319; color: var(--text); border-radius: 7px; padding: 9px;
@@ -80,6 +88,18 @@
       border-radius: 9px; background: #26303b; border: 1px solid var(--line); z-index: 30;
     }
     .notice.error { border-color: var(--danger); color: #ffd4d8; }
+    dialog {
+      width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line);
+      border-radius: 14px; background: var(--panel); color: var(--text);
+      padding: 24px; box-shadow: 0 24px 80px rgba(0,0,0,.55);
+    }
+    dialog::backdrop { background: rgba(5,8,12,.76); }
+    dialog h2 { margin: 0 0 10px; font-size: 21px; }
+    dialog p { margin: 0; color: var(--muted); }
+    .dialog-actions {
+      display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px;
+      flex-wrap: wrap;
+    }
     .hidden { display: none !important; }
     label.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
     @media (max-width: 1050px) {
@@ -119,9 +139,22 @@
       <div id="cards"></div>
     </section>
   </div>
+  <dialog id="approvalCompleteDialog" aria-labelledby="approvalCompleteTitle">
+    <h2 id="approvalCompleteTitle">원문 승인이 완료되었습니다</h2>
+    <p>
+      다음 단계에서 승인된 원문을 기반으로 용어 후보를 생성할 수 있습니다.
+    </p>
+    <div class="dialog-actions">
+      <button id="stayAfterApproval" type="button">이 화면에 머물기</button>
+      <button id="returnDashboard" class="primary" type="button">
+        대시보드로 돌아가기
+      </button>
+    </div>
+  </dialog>
   <div id="notice" class="notice hidden"></div>
   <script>
     const TOKEN = __GLK_TOKEN_JSON__;
+    const RETURN_URL = __GLK_RETURN_URL_JSON__;
     let documentState = null;
     let currentGroup = null;
     let selectedId = null;
@@ -183,7 +216,7 @@
         if (!block.bbox) continue;
         const [x0,y0,x1,y1] = block.bbox;
         const box = document.createElement("div");
-        box.className = `box${selectedId === block.id ? " selected" : ""}${block.excluded ? " excluded" : ""}${block.issues.length ? " issue" : ""}`;
+        box.className = `box${selectedId === block.id ? " selected" : ""}${block.excluded ? " excluded" : ""}${block.warnings.length ? " warning" : ""}${block.issues.length ? " issue" : ""}`;
         box.style.left = `${x0/10}%`; box.style.top = `${y0/10}%`;
         box.style.width = `${(x1-x0)/10}%`; box.style.height = `${(y1-y0)/10}%`;
         box.title = block.text.slice(0, 100);
@@ -220,6 +253,7 @@
         head.innerHTML = `
           <span class="card-id" title="${block.id}">${block.id}</span>
           ${block.manual ? '<span class="tag manual">수동 추가</span>' : ""}
+          ${block.warnings.length ? `<span class="tag warning">추출 경고 ${block.warnings.length}</span>` : ""}
           ${block.issues.length ? `<span class="tag issue">QA ${block.issues.length}</span>` : ""}
           <span class="grow"></span>`;
         const up = document.createElement("button"); up.className = "mini"; up.textContent = "↑";
@@ -243,6 +277,12 @@
         area.oninput = () => { block.text = area.value; };
         card.onclick = () => selectBlock(block.id);
         card.append(head, area);
+        if (block.warnings.length) {
+          const warning = document.createElement("div");
+          warning.className = "source-warning";
+          warning.textContent = block.warnings.join("\n");
+          card.appendChild(warning);
+        }
         if (block.issues.length) {
           const issue = document.createElement("div");
           issue.className = "status";
@@ -271,10 +311,11 @@
         excluded: documentState.blocks.filter((b) => b.excluded).length,
         manual: documentState.blocks.filter((b) => b.manual).length,
         changed: documentState.blocks.filter((b) => b.manual || b.text !== b.raw_text).length,
+        warnings: documentState.blocks.reduce((total, b) => total + b.warnings.length, 0),
         issues: documentState.blocks.reduce((total, b) => total + b.issues.length, 0)
       };
       $("project").textContent = `${documentState.project_name} · ${documentState.review_status}`;
-      $("summary").textContent = `전체 ${s.blocks} · 제외 ${s.excluded} · 수동 ${s.manual} · 수정 ${s.changed} · QA ${s.issues}`;
+      $("summary").textContent = `전체 ${s.blocks} · 제외 ${s.excluded} · 수동 ${s.manual} · 수정 ${s.changed} · 추출 경고 ${s.warnings} · QA ${s.issues}`;
     }
 
     function render() {
@@ -317,7 +358,8 @@
       const block = {
         id: `new-${++newCounter}`, group_id: group.id, source_type: group.source_type,
         source_file: group.source_file, page: group.page, block_type: "paragraph",
-        text: "", raw_text: "", bbox, manual: true, excluded: false, changed: true, issues: []
+        text: "", raw_text: "", bbox, manual: true, excluded: false, changed: true,
+        warnings: [], issues: []
       };
       const groupItems = groupBlocks();
       const anchor = selectedId ? documentState.blocks.findIndex((b) => b.id === selectedId) : -1;
@@ -342,13 +384,20 @@
         const result = await api(path, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload())});
         documentState = result.document;
         currentGroup = documentState.groups.some((g) => g.id === currentGroup) ? currentGroup : documentState.groups[0]?.id;
-        selectedId = null; render(); notice(label);
-      } catch (error) { notice(error.message, true); }
+        selectedId = null; render(); notice(label); return result;
+      } catch (error) { notice(error.message, true); return null; }
     }
     $("save").onclick = () => mutate("/api/save", "저장했습니다.");
     $("validate").onclick = () => mutate("/api/validate", "검증을 통과했습니다.");
-    $("finalize").onclick = () => {
-      if (confirm("현재 원문을 최종 승인할까요?")) mutate("/api/finalize", "최종 원문을 승인했습니다.");
+    $("finalize").onclick = async () => {
+      if (!confirm("현재 원문을 최종 승인할까요?")) return;
+      const result = await mutate("/api/finalize", "최종 원문을 승인했습니다.");
+      if (result) $("approvalCompleteDialog").showModal();
+    };
+    $("stayAfterApproval").onclick = () => $("approvalCompleteDialog").close();
+    $("returnDashboard").classList.toggle("hidden", !RETURN_URL);
+    $("returnDashboard").onclick = () => {
+      if (RETURN_URL) window.location.assign(RETURN_URL);
     };
     $("openPdf").onclick = () => window.open(`${documentState.original_pdf_url}?token=${encodeURIComponent(TOKEN)}`, "_blank", "noopener");
     $("zoom").oninput = () => renderSource();

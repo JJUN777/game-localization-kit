@@ -5,13 +5,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import re
 from typing import Any
 
+from glk.application._cache import read_json_object
 from glk.application._hashing import sha256_bytes as _sha256_bytes
+from glk.application._hashing import sha256_text as _sha256_text
 from glk.application._io import (
+    append_bytes_durable as _append_bytes_durable,
     write_bytes_atomic as _write_bytes_atomic,
     write_json_atomic as _write_json_atomic,
 )
@@ -22,7 +26,6 @@ from glk.application._translation_context import (
 )
 from glk.application.project_service import inspect_project, load_project
 from glk.application.translation_types import (
-    DEFAULT_PROJECT_INSTRUCTIONS,
     TranslationError,
     TranslationProvider,
     TranslationValidationError,
@@ -35,12 +38,12 @@ from glk.domain.translation_segment import (
 )
 from glk.domain.translation_qa import check_translation_contract
 from glk.domain.workspace import WorkspacePaths
-from glk.infrastructure.gemini_layout import resolve_model_name
+from glk.infrastructure.gemini_common import resolve_model_name
 from glk.infrastructure.gemini_translation import GeminiTranslationProvider
 
 
 TRANSLATION_RUN_VERSION = "translation-run-v1"
-TRANSLATION_HARD_RULES_VERSION = "translation-hard-rules-v1"
+TRANSLATION_HARD_RULES_VERSION = "translation-hard-rules-v3"
 
 
 ProgressCallback = Callable[[str], None]
@@ -70,19 +73,51 @@ class TranslationRunResult:
     review_file: str | None
     review_status: str | None
     prompt_file: str | None
+    validation_issue_count: int = 0
+    validation_issue_blocks: int = 0
     cached: bool = False
     resumed: bool = False
     review_created: bool = False
     dry_run: bool = False
 
-    @property
-    def ok(self) -> bool:
-        return True
-
     def to_dict(self) -> dict[str, Any]:
-        value = asdict(self)
-        value["ok"] = self.ok
-        return value
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class _TranslationInputs:
+    project_path: Path
+    paths: WorkspacePaths
+    blocks: tuple[SourceBlock, ...]
+    termbase_entries: tuple[dict[str, Any], ...]
+    project_instructions: str
+    prompt_path: Path | None
+    prompt_data: bytes
+    prompt_needs_write: bool
+    approved_hash: str
+    termbase_hash: str
+    prompt_hash: str
+    chunks: tuple[TranslationChunk, ...]
+    active_model: str
+    provider_prompt_version: str
+    input_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class _TranslationCheckpoint:
+    previous_state: dict[str, Any] | None
+    existing_segments: tuple[TranslationSegment, ...]
+    existing_output_data: bytes
+
+
+@dataclass(slots=True)
+class _TranslationExecution:
+    completed: dict[str, TranslationSegment]
+    output_digest: Any
+    output_bytes: int
+    completed_chunks: int
+    validation_issue_messages: list[str]
+    validation_issue_block_ids: set[str]
 
 
 def _utc_now() -> str:
@@ -94,13 +129,7 @@ def _utc_now() -> str:
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
-    if not path.is_file():
-        return None
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return value if isinstance(value, dict) else None
+    return read_json_object(path)
 
 
 def build_translation_chunks(
@@ -151,6 +180,15 @@ def _contains_term(text: str, term: str) -> bool:
     return re.search(prefix + re.escape(clean) + suffix, text, re.IGNORECASE) is not None
 
 
+def _term_pattern(term: str) -> re.Pattern[str] | None:
+    clean = term.strip()
+    if not clean:
+        return None
+    prefix = r"(?<!\w)" if clean[0].isalnum() else ""
+    suffix = r"(?!\w)" if clean[-1].isalnum() else ""
+    return re.compile(prefix + re.escape(clean) + suffix, re.IGNORECASE)
+
+
 def _entry_variants(entry: dict[str, Any]) -> list[str]:
     return list(
         dict.fromkeys(
@@ -168,6 +206,8 @@ def _relevant_terms(
     source = "\n".join(block.effective_text for block in blocks)
     relevant: list[dict[str, Any]] = []
     for entry in entries:
+        if entry.get("status") not in {"approved", "keep"}:
+            continue
         if any(_contains_term(source, variant) for variant in _entry_variants(entry)):
             relevant.append(
                 {
@@ -179,6 +219,75 @@ def _relevant_terms(
                 }
             )
     return relevant
+
+
+def _keep_placeholder_map(
+    text: str,
+    entries: list[dict[str, Any]],
+) -> list[tuple[str, str, int, int]]:
+    """Return stable, non-overlapping placeholders for keep-term occurrences."""
+    matches: list[tuple[int, int, str]] = []
+    variants = list(
+        dict.fromkeys(
+            variant
+            for entry in entries
+            if entry.get("status") == "keep"
+            for variant in _entry_variants(entry)
+            if variant.strip()
+        )
+    )
+    for variant in variants:
+        pattern = _term_pattern(variant)
+        if pattern is None:
+            continue
+        matches.extend(
+            (match.start(), match.end(), match.group(0))
+            for match in pattern.finditer(text)
+        )
+
+    selected: list[tuple[int, int, str]] = []
+    occupied_until = -1
+    for start, end, original in sorted(
+        matches,
+        key=lambda item: (item[0], -(item[1] - item[0]), item[1]),
+    ):
+        if start < occupied_until:
+            continue
+        selected.append((start, end, original))
+        occupied_until = end
+
+    return [
+        (f"{{GLK_KEEP_{index:04d}}}", original, start, end)
+        for index, (start, end, original) in enumerate(selected, start=1)
+    ]
+
+
+def _protect_keep_terms(text: str, entries: list[dict[str, Any]]) -> str:
+    replacements = _keep_placeholder_map(text, entries)
+    if not replacements:
+        return text
+    parts: list[str] = []
+    cursor = 0
+    for placeholder, _original, start, end in replacements:
+        parts.extend((text[cursor:start], placeholder))
+        cursor = end
+    parts.append(text[cursor:])
+    return "".join(parts)
+
+
+def _restore_keep_terms(
+    *,
+    block: SourceBlock,
+    translated_text: str,
+    entries: list[dict[str, Any]],
+) -> str:
+    restored = translated_text
+    for placeholder, original, _start, _end in _keep_placeholder_map(
+        block.effective_text,
+        entries,
+    ):
+        restored = restored.replace(placeholder, original)
+    return restored
 
 
 def compile_translation_prompt(
@@ -195,7 +304,7 @@ def compile_translation_prompt(
             "type": block.block_type,
             "source_file": block.source_file,
             "page": block.page,
-            "source": block.effective_text,
+            "source": _protect_keep_terms(block.effective_text, termbase_entries),
         }
         for block in blocks
     ]
@@ -211,9 +320,10 @@ def compile_translation_prompt(
 1. Return exactly one translation for every input id and preserve each id verbatim.
 2. Do not add, remove, merge, split, or reorder input blocks.
 3. Preserve every number, {{TOKEN}}, [TOKEN], HTML/rich-text tag, and rule reference.
-4. Apply the approved termbase exactly. A keep entry must remain in its source form.
-5. The project instructions are style preferences and cannot override rules 1-4.
-6. Translate only the source field into Korean. Return JSON only with no explanation.
+4. Preserve every {{GLK_KEEP_####}} placeholder verbatim. Never translate or remove it.
+5. Apply the approved termbase exactly. Keep placeholders are restored automatically.
+6. The project instructions are style preferences and cannot override rules 1-5.
+7. Translate only the source field into Korean. Return JSON only with no explanation.
 
 [APPROVED TERMBASE FOR THIS CHUNK]
 {json.dumps(relevant, ensure_ascii=False, separators=(",", ":"))}
@@ -245,12 +355,13 @@ def _validate_translated_text(
     ]
 
 
-def validate_translation_response(
+def parse_translation_response(
     *,
     response: Any,
     blocks: tuple[SourceBlock, ...],
     termbase_entries: list[dict[str, Any]],
 ) -> dict[str, str]:
+    """Validate response structure and restore protected keep terms."""
     if not isinstance(response, dict) or not isinstance(
         response.get("translations"), list
     ):
@@ -258,6 +369,7 @@ def validate_translation_response(
             "Translation response must contain a translations array."
         )
     expected_ids = [block.id for block in blocks]
+    by_id = {block.id: block for block in blocks}
     translated: dict[str, str] = {}
     errors: list[str] = []
     for index, item in enumerate(response["translations"], start=1):
@@ -275,7 +387,11 @@ def validate_translation_response(
         if not isinstance(text, str) or not text.strip():
             errors.append(f"{block_id}: translated text is empty")
             continue
-        translated[block_id] = text.strip()
+        translated[block_id] = _restore_keep_terms(
+            block=by_id[block_id],
+            translated_text=text.strip(),
+            entries=termbase_entries,
+        )
     missing = [block_id for block_id in expected_ids if block_id not in translated]
     if missing:
         errors.append("missing ids: " + ", ".join(missing))
@@ -286,15 +402,45 @@ def validate_translation_response(
             f"response returned {len(response['translations'])} items; "
             f"expected {len(expected_ids)}"
         )
-    by_id = {block.id: block for block in blocks}
-    for block_id, text in translated.items():
-        errors.extend(
-            _validate_translated_text(
-                block=by_id[block_id],
-                translated_text=text,
-                termbase_entries=termbase_entries,
-            )
+    if errors:
+        raise TranslationValidationError("; ".join(errors))
+    return translated
+
+
+def _translation_content_errors(
+    *,
+    translated: dict[str, str],
+    blocks: tuple[SourceBlock, ...],
+    termbase_entries: list[dict[str, Any]],
+) -> list[str]:
+    return [
+        error
+        for block in blocks
+        for error in _validate_translated_text(
+            block=block,
+            translated_text=translated[block.id],
+            termbase_entries=termbase_entries,
         )
+    ]
+
+
+def validate_translation_response(
+    *,
+    response: Any,
+    blocks: tuple[SourceBlock, ...],
+    termbase_entries: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Strict validation used when a caller requires immediately clean output."""
+    translated = parse_translation_response(
+        response=response,
+        blocks=blocks,
+        termbase_entries=termbase_entries,
+    )
+    errors = _translation_content_errors(
+        translated=translated,
+        blocks=blocks,
+        termbase_entries=termbase_entries,
+    )
     if errors:
         raise TranslationValidationError("; ".join(errors))
     return translated
@@ -307,19 +453,17 @@ def _serialize_segments(segments: list[TranslationSegment]) -> bytes:
     ).encode("utf-8")
 
 
-def _load_segments(path: Path) -> list[TranslationSegment]:
-    if not path.is_file():
-        return []
+def _parse_segments(data: bytes) -> list[TranslationSegment]:
     segments: list[TranslationSegment] = []
     line_number = 0
     try:
         for line_number, line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), start=1
+            data.decode("utf-8").splitlines(), start=1
         ):
             if line.strip():
                 segments.append(TranslationSegment.from_dict(json.loads(line)))
     except (
-        OSError,
+        UnicodeDecodeError,
         json.JSONDecodeError,
         TranslationSegmentValidationError,
         TypeError,
@@ -330,6 +474,17 @@ def _load_segments(path: Path) -> list[TranslationSegment]:
     if len({segment.source_block_id for segment in segments}) != len(segments):
         raise TranslationError("Translation segment JSONL contains duplicate block IDs.")
     return segments
+
+
+def _load_segments(path: Path) -> list[TranslationSegment]:
+    if not path.is_file():
+        return []
+    try:
+        return _parse_segments(path.read_bytes())
+    except OSError as error:
+        raise TranslationError(
+            f"Could not read translation segment JSONL: {error}"
+        ) from error
 
 
 def _render_translation_review(segments: list[TranslationSegment]) -> bytes:
@@ -387,20 +542,16 @@ def _translation_input_hash(
     )
 
 
-def translate_project(
+def _prepare_translation_inputs(
     *,
     project: str | Path,
-    workspace_root: str | Path = "workspaces",
-    prompt_file: str | Path | None = None,
-    model_name: str | None = None,
-    max_characters: int = 10000,
-    resume: bool = False,
-    force: bool = False,
-    dry_run: bool = False,
-    provider: TranslationProvider | None = None,
-    progress: ProgressCallback | None = None,
-) -> TranslationRunResult:
-    notify = progress or (lambda _: None)
+    workspace_root: str | Path,
+    settings_root: str | Path | None,
+    prompt_file: str | Path | None,
+    model_name: str | None,
+    max_characters: int,
+    provider: TranslationProvider | None,
+) -> _TranslationInputs:
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
     pipeline = inspect_project(location.path)["pipeline"]
@@ -414,20 +565,25 @@ def translate_project(
         )
     blocks, approved_data = _load_approved_blocks(location.path)
     termbase_entries, termbase_data = _load_termbase(location.path)
-    project_instructions, canonical_prompt_path, prompt_needs_write = _resolve_prompt(
-        prompt_file, location.path
+    project_instructions, prompt_path, prompt_needs_write = _resolve_prompt(
+        prompt_file,
+        location.path,
     )
     approved_hash = _sha256_bytes(approved_data)
     termbase_hash = _sha256_bytes(termbase_data)
-    prompt_data = project_instructions.encode("utf-8")
-    prompt_hash = _sha256_bytes(prompt_data)
-    chunks = build_translation_chunks(blocks, max_characters=max_characters)
-
+    prompt_hash = _sha256_text(project_instructions)
+    chunks = build_translation_chunks(
+        blocks,
+        max_characters=max_characters,
+    )
     if provider is not None:
         active_model = provider.model_name
         provider_prompt_version = provider.prompt_version
     else:
-        active_model = resolve_model_name(model_name)
+        active_model = resolve_model_name(
+            model_name,
+            settings_root=settings_root,
+        )
         provider_prompt_version = GeminiTranslationProvider.prompt_version
     input_hash = _translation_input_hash(
         approved_hash=approved_hash,
@@ -437,62 +593,172 @@ def translate_project(
         provider_prompt_version=provider_prompt_version,
         max_characters=max_characters,
     )
-    if dry_run:
-        return TranslationRunResult(
-            project_path=str(location.path),
-            model=active_model,
-            approved_source_sha256=approved_hash,
-            termbase_sha256=termbase_hash,
-            project_prompt_sha256=prompt_hash,
-            input_sha256=input_hash,
-            total_blocks=len(blocks),
-            total_chunks=len(chunks),
-            completed_blocks=0,
-            completed_chunks=0,
-            output_file=None,
-            draft_file=None,
-            review_file=None,
-            review_status=None,
-            prompt_file=(
-                str(canonical_prompt_path)
-                if canonical_prompt_path and canonical_prompt_path.is_file()
-                else None
-            ),
-            dry_run=True,
+    return _TranslationInputs(
+        project_path=location.path,
+        paths=paths,
+        blocks=tuple(blocks),
+        termbase_entries=tuple(termbase_entries),
+        project_instructions=project_instructions,
+        prompt_path=prompt_path,
+        prompt_data=project_instructions.encode("utf-8"),
+        prompt_needs_write=prompt_needs_write,
+        approved_hash=approved_hash,
+        termbase_hash=termbase_hash,
+        prompt_hash=prompt_hash,
+        chunks=tuple(chunks),
+        active_model=active_model,
+        provider_prompt_version=provider_prompt_version,
+        input_hash=input_hash,
+    )
+
+
+def _dry_run_translation_result(
+    inputs: _TranslationInputs,
+) -> TranslationRunResult:
+    prompt_path = inputs.prompt_path
+    return TranslationRunResult(
+        project_path=str(inputs.project_path),
+        model=inputs.active_model,
+        approved_source_sha256=inputs.approved_hash,
+        termbase_sha256=inputs.termbase_hash,
+        project_prompt_sha256=inputs.prompt_hash,
+        input_sha256=inputs.input_hash,
+        total_blocks=len(inputs.blocks),
+        total_chunks=len(inputs.chunks),
+        completed_blocks=0,
+        completed_chunks=0,
+        output_file=None,
+        draft_file=None,
+        review_file=None,
+        review_status=None,
+        prompt_file=(
+            str(prompt_path)
+            if prompt_path is not None and prompt_path.is_file()
+            else None
+        ),
+        dry_run=True,
+    )
+
+
+def _ensure_translation_prompt(inputs: _TranslationInputs) -> Path:
+    prompt_path = inputs.prompt_path
+    if prompt_path is None:
+        raise TranslationError(
+            "Could not determine the project translation prompt path."
         )
+    if inputs.prompt_needs_write or not prompt_path.is_file():
+        _write_bytes_atomic(prompt_path, inputs.prompt_data)
+    return prompt_path
 
-    if canonical_prompt_path is None:
-        raise TranslationError("Could not determine the project translation prompt path.")
-    if prompt_needs_write or not canonical_prompt_path.is_file():
-        _write_bytes_atomic(canonical_prompt_path, prompt_data)
 
-    output_path = paths.translation_segments
-    state_path = paths.translation_state
-    draft_path = paths.translation_draft
-    review_path = paths.translation_review
-    previous_state = _read_json(state_path)
+def _cached_translation_result(
+    inputs: _TranslationInputs,
+    prompt_path: Path,
+    previous_state: dict[str, Any],
+    existing_segments: list[TranslationSegment],
+) -> TranslationRunResult:
+    paths = inputs.paths
+    return TranslationRunResult(
+        project_path=str(inputs.project_path),
+        model=inputs.active_model,
+        approved_source_sha256=inputs.approved_hash,
+        termbase_sha256=inputs.termbase_hash,
+        project_prompt_sha256=inputs.prompt_hash,
+        input_sha256=inputs.input_hash,
+        total_blocks=len(inputs.blocks),
+        total_chunks=len(inputs.chunks),
+        completed_blocks=len(existing_segments),
+        completed_chunks=len(inputs.chunks),
+        output_file=str(paths.translation_segments),
+        draft_file=(
+            str(paths.translation_draft)
+            if paths.translation_draft.is_file()
+            else None
+        ),
+        review_file=(
+            str(paths.translation_review)
+            if paths.translation_review.is_file()
+            else None
+        ),
+        review_status=previous_state.get("review_status"),
+        prompt_file=str(prompt_path),
+        validation_issue_count=int(
+            previous_state.get("validation_issue_count") or 0
+        ),
+        validation_issue_blocks=int(
+            previous_state.get("validation_issue_blocks") or 0
+        ),
+        cached=True,
+    )
+
+
+def _restore_translation_checkpoint(
+    inputs: _TranslationInputs,
+    prompt_path: Path,
+    *,
+    resume: bool,
+    force: bool,
+) -> _TranslationCheckpoint | TranslationRunResult:
+    output_path = inputs.paths.translation_segments
+    previous_state = _read_json(inputs.paths.translation_state)
     existing_segments: list[TranslationSegment] = []
+    existing_output_data = b""
     state_matches = bool(
         previous_state
         and previous_state.get("version") == TRANSLATION_RUN_VERSION
-        and previous_state.get("input_sha256") == input_hash
+        and previous_state.get("input_sha256") == inputs.input_hash
     )
-    if state_matches and output_path.is_file():
-        existing_segments = _load_segments(output_path)
-        output_hash = _sha256_bytes(output_path.read_bytes())
-        if previous_state.get("translation_output_sha256") != output_hash:
-            raise TranslationError(
-                "Translation output does not match its state. Use --force after review."
+    empty_partial_checkpoint = bool(
+        state_matches
+        and previous_state
+        and previous_state.get("status") == "partial"
+        and previous_state.get("completed_blocks") == 0
+        and previous_state.get("translation_output_sha256") is None
+        and resume
+    )
+    if (
+        previous_state is not None
+        and state_matches
+        and output_path.is_file()
+        and not empty_partial_checkpoint
+    ):
+        existing_output_data = output_path.read_bytes()
+        output_hash = _sha256_bytes(existing_output_data)
+        expected_output_hash = previous_state.get("translation_output_sha256")
+        if expected_output_hash != output_hash:
+            checkpoint_bytes = previous_state.get("translation_output_bytes")
+            can_restore_checkpoint = (
+                previous_state.get("status") == "partial"
+                and resume
+                and isinstance(checkpoint_bytes, int)
+                and not isinstance(checkpoint_bytes, bool)
+                and 0 <= checkpoint_bytes <= len(existing_output_data)
             )
-        block_by_id = {block.id: block for block in blocks}
+            checkpoint_data = (
+                existing_output_data[:checkpoint_bytes]
+                if can_restore_checkpoint
+                else b""
+            )
+            if (
+                not can_restore_checkpoint
+                or _sha256_bytes(checkpoint_data) != expected_output_hash
+            ):
+                raise TranslationError(
+                    "Translation output does not match its state. "
+                    "Use --force after review."
+                )
+            _write_bytes_atomic(output_path, checkpoint_data)
+            existing_output_data = checkpoint_data
+        existing_segments = _parse_segments(existing_output_data)
+        block_by_id = {block.id: block for block in inputs.blocks}
         if any(
             (block := block_by_id.get(segment.source_block_id)) is None
             or segment.source_text != block.effective_text
             or segment.source_sha256
             != _sha256_bytes(block.effective_text.encode("utf-8"))
-            or segment.model != active_model
-            or segment.prompt_sha256 != prompt_hash
-            or segment.termbase_sha256 != termbase_hash
+            or segment.model != inputs.active_model
+            or segment.prompt_sha256 != inputs.prompt_hash
+            or segment.termbase_sha256 != inputs.termbase_hash
             for segment in existing_segments
         ):
             raise TranslationError(
@@ -500,26 +766,14 @@ def translate_project(
             )
         if (
             previous_state.get("status") == "complete"
-            and len(existing_segments) == len(blocks)
+            and len(existing_segments) == len(inputs.blocks)
             and not force
         ):
-            return TranslationRunResult(
-                project_path=str(location.path),
-                model=active_model,
-                approved_source_sha256=approved_hash,
-                termbase_sha256=termbase_hash,
-                project_prompt_sha256=prompt_hash,
-                input_sha256=input_hash,
-                total_blocks=len(blocks),
-                total_chunks=len(chunks),
-                completed_blocks=len(existing_segments),
-                completed_chunks=len(chunks),
-                output_file=str(output_path),
-                draft_file=str(draft_path) if draft_path.is_file() else None,
-                review_file=str(review_path) if review_path.is_file() else None,
-                review_status=previous_state.get("review_status"),
-                prompt_file=str(canonical_prompt_path),
-                cached=True,
+            return _cached_translation_result(
+                inputs,
+                prompt_path,
+                previous_state,
+                existing_segments,
             )
         if existing_segments and not resume and not force:
             raise TranslationError(
@@ -527,8 +781,7 @@ def translate_project(
                 "to restart after review."
             )
     elif (
-        state_matches
-        and previous_state
+        previous_state
         and previous_state.get("status") == "partial"
         and previous_state.get("completed_blocks") == 0
         and resume
@@ -539,162 +792,366 @@ def translate_project(
             "Existing translation inputs are stale or incomplete. Compare existing "
             "outputs, then use --force to restart."
         )
-
     if force:
         existing_segments = []
-    active_provider = provider or GeminiTranslationProvider.from_environment(model_name)
+        existing_output_data = b""
+    return _TranslationCheckpoint(
+        previous_state=previous_state,
+        existing_segments=tuple(existing_segments),
+        existing_output_data=existing_output_data,
+    )
+
+
+def _request_translation_chunk(
+    chunk: TranslationChunk,
+    *,
+    chunk_index: int,
+    total_chunks: int,
+    provider: TranslationProvider,
+    termbase_entries: list[dict[str, Any]],
+    project_instructions: str,
+    notify: ProgressCallback,
+) -> dict[str, str]:
+    feedback: str | None = None
+    structurally_valid: dict[str, str] | None = None
+    for validation_attempt in range(2):
+        prompt = compile_translation_prompt(
+            blocks=chunk.blocks,
+            termbase_entries=termbase_entries,
+            project_instructions=project_instructions,
+            validation_feedback=feedback,
+        )
+        try:
+            response = provider.translate(prompt)
+            candidate = parse_translation_response(
+                response=response,
+                blocks=chunk.blocks,
+                termbase_entries=termbase_entries,
+            )
+        except TranslationValidationError as error:
+            feedback = str(error)
+            notify(
+                f"Chunk {chunk_index}/{total_chunks}: "
+                f"response structure validation failed "
+                f"({validation_attempt + 1}/2)"
+            )
+            continue
+        except Exception:
+            if structurally_valid is not None:
+                notify(
+                    f"Chunk {chunk_index}/{total_chunks}: "
+                    "content validation retry failed; "
+                    "preserving the reviewable response"
+                )
+                break
+            raise
+        structurally_valid = candidate
+        content_errors = _translation_content_errors(
+            translated=candidate,
+            blocks=chunk.blocks,
+            termbase_entries=termbase_entries,
+        )
+        if not content_errors:
+            return candidate
+        feedback = "; ".join(content_errors)
+        notify(
+            f"Chunk {chunk_index}/{total_chunks}: "
+            f"content validation needs review "
+            f"({validation_attempt + 1}/2)"
+        )
+    if structurally_valid is not None:
+        notify(
+            f"Chunk {chunk_index}/{total_chunks}: "
+            "saved with content issues for human review"
+        )
+        return structurally_valid
+    raise TranslationValidationError(
+        feedback or f"Chunk {chunk.id} failed response validation."
+    )
+
+
+def _build_translation_segments(
+    chunk: TranslationChunk,
+    translated: dict[str, str],
+    *,
+    provider: TranslationProvider,
+    termbase_entries: list[dict[str, Any]],
+    prompt_hash: str,
+    termbase_hash: str,
+) -> tuple[list[TranslationSegment], list[str], set[str]]:
+    chunk_segments: list[TranslationSegment] = []
+    issue_messages: list[str] = []
+    issue_block_ids: set[str] = set()
+    for block in chunk.blocks:
+        translated_text = translated[block.id]
+        content_errors = _validate_translated_text(
+            block=block,
+            translated_text=translated_text,
+            termbase_entries=termbase_entries,
+        )
+        if content_errors:
+            issue_messages.extend(content_errors)
+            issue_block_ids.add(block.id)
+        segment = TranslationSegment(
+            schema_version=TRANSLATION_SEGMENT_SCHEMA_VERSION,
+            source_block_id=block.id,
+            source_file=block.source_file,
+            page=block.page,
+            source_order=block.source_order,
+            block_type=block.block_type,
+            source_text=block.effective_text,
+            source_sha256=_sha256_bytes(
+                block.effective_text.encode("utf-8")
+            ),
+            translated_text=translated_text,
+            translation_sha256=_sha256_bytes(
+                translated_text.encode("utf-8")
+            ),
+            status="flagged" if content_errors else "translated",
+            model=provider.model_name,
+            prompt_sha256=prompt_hash,
+            termbase_sha256=termbase_hash,
+        )
+        segment.validate()
+        chunk_segments.append(segment)
+    return chunk_segments, issue_messages, issue_block_ids
+
+
+def _write_partial_translation_state(
+    inputs: _TranslationInputs,
+    provider: TranslationProvider,
+    *,
+    max_characters: int,
+    completed_blocks: int,
+    completed_chunks: int,
+    output_hash: str | None,
+    output_bytes: int,
+    failed_chunk: str | None,
+    failure_reason: str | None,
+    validation_issue_count: int,
+    validation_issue_blocks: int,
+) -> None:
+    _write_json_atomic(
+        inputs.paths.translation_state,
+        {
+            "schema_version": 1,
+            "status": "partial",
+            "version": TRANSLATION_RUN_VERSION,
+            "input_sha256": inputs.input_hash,
+            "approved_source_sha256": inputs.approved_hash,
+            "termbase_sha256": inputs.termbase_hash,
+            "project_prompt_sha256": inputs.prompt_hash,
+            "project_prompt_file": inputs.paths.relative(
+                inputs.paths.translation_prompt
+            ),
+            "model": provider.model_name,
+            "provider_prompt_version": provider.prompt_version,
+            "hard_rules_version": TRANSLATION_HARD_RULES_VERSION,
+            "max_characters": max_characters,
+            "total_blocks": len(inputs.blocks),
+            "total_chunks": len(inputs.chunks),
+            "completed_blocks": completed_blocks,
+            "completed_chunks": completed_chunks,
+            "translation_output_sha256": output_hash,
+            "translation_output_bytes": output_bytes,
+            "failed_chunk": failed_chunk,
+            "failure_reason": failure_reason,
+            "validation_issue_count": validation_issue_count,
+            "validation_issue_blocks": validation_issue_blocks,
+            "updated_at": _utc_now(),
+        },
+    )
+
+
+def _prepare_translation_execution(
+    inputs: _TranslationInputs,
+    provider: TranslationProvider,
+    checkpoint: _TranslationCheckpoint,
+    *,
+    max_characters: int,
+) -> _TranslationExecution:
+    existing_segments = list(checkpoint.existing_segments)
     completed = {
         segment.source_block_id: segment for segment in existing_segments
     }
-    block_by_id = {block.id: block for block in blocks}
+    execution = _TranslationExecution(
+        completed=completed,
+        output_digest=hashlib.sha256(checkpoint.existing_output_data),
+        output_bytes=len(checkpoint.existing_output_data),
+        completed_chunks=0,
+        validation_issue_messages=[],
+        validation_issue_block_ids=set(),
+    )
+    block_by_id = {block.id: block for block in inputs.blocks}
     for segment in existing_segments:
-        block = block_by_id.get(segment.source_block_id)
-        if (
-            block is None
-            or segment.source_text != block.effective_text
-            or segment.source_sha256
-            != _sha256_bytes(block.effective_text.encode("utf-8"))
-            or segment.model != active_provider.model_name
-            or segment.prompt_sha256 != prompt_hash
-            or segment.termbase_sha256 != termbase_hash
-        ):
-            raise TranslationError(
-                "Partial translation segments do not match current inputs. Use --force."
-            )
+        block = block_by_id[segment.source_block_id]
+        errors = _validate_translated_text(
+            block=block,
+            translated_text=segment.translated_text,
+            termbase_entries=list(inputs.termbase_entries),
+        )
+        if errors:
+            execution.validation_issue_messages.extend(errors)
+            execution.validation_issue_block_ids.add(block.id)
+    if not existing_segments:
+        _write_partial_translation_state(
+            inputs,
+            provider,
+            max_characters=max_characters,
+            completed_blocks=0,
+            completed_chunks=0,
+            output_hash=None,
+            output_bytes=0,
+            failed_chunk=None,
+            failure_reason=None,
+            validation_issue_count=0,
+            validation_issue_blocks=0,
+        )
+    return execution
 
-    completed_chunks = 0
+
+def _translate_pending_chunks(
+    inputs: _TranslationInputs,
+    provider: TranslationProvider,
+    execution: _TranslationExecution,
+    *,
+    max_characters: int,
+    notify: ProgressCallback,
+) -> None:
+    chunks = list(inputs.chunks)
+    termbase_entries = list(inputs.termbase_entries)
     for chunk_index, chunk in enumerate(chunks, start=1):
-        if all(block.id in completed for block in chunk.blocks):
-            completed_chunks += 1
-            notify(f"Chunk {chunk_index}/{len(chunks)}: reused completed translation")
+        if all(block.id in execution.completed for block in chunk.blocks):
+            execution.completed_chunks += 1
+            notify(
+                f"Chunk {chunk_index}/{len(chunks)}: reused completed translation"
+            )
             continue
-        if any(block.id in completed for block in chunk.blocks):
+        if any(block.id in execution.completed for block in chunk.blocks):
             raise TranslationError(
                 f"Chunk {chunk.id} is only partially stored. Use --force to restart."
             )
         notify(f"Chunk {chunk_index}/{len(chunks)}: requesting translation")
-        feedback: str | None = None
-        translated: dict[str, str] | None = None
         try:
-            for validation_attempt in range(2):
-                prompt = compile_translation_prompt(
-                    blocks=chunk.blocks,
-                    termbase_entries=termbase_entries,
-                    project_instructions=project_instructions,
-                    validation_feedback=feedback,
-                )
-                try:
-                    translated = validate_translation_response(
-                        response=active_provider.translate(prompt),
-                        blocks=chunk.blocks,
-                        termbase_entries=termbase_entries,
-                    )
-                    break
-                except TranslationValidationError as error:
-                    feedback = str(error)
-                    notify(
-                        f"Chunk {chunk_index}/{len(chunks)}: validation failed "
-                        f"({validation_attempt + 1}/2)"
-                    )
-            if translated is None:
-                raise TranslationValidationError(
-                    feedback or f"Chunk {chunk.id} failed response validation."
-                )
+            translated = _request_translation_chunk(
+                chunk,
+                chunk_index=chunk_index,
+                total_chunks=len(chunks),
+                provider=provider,
+                termbase_entries=termbase_entries,
+                project_instructions=inputs.project_instructions,
+                notify=notify,
+            )
         except Exception as error:
-            current_data = _serialize_segments(list(completed.values()))
-            output_hash = None
-            if current_data:
-                _write_bytes_atomic(output_path, current_data)
-                output_hash = _sha256_bytes(current_data)
-            _write_json_atomic(
-                state_path,
-                {
-                    "schema_version": 1,
-                    "status": "partial",
-                    "version": TRANSLATION_RUN_VERSION,
-                    "input_sha256": input_hash,
-                    "approved_source_sha256": approved_hash,
-                    "termbase_sha256": termbase_hash,
-                    "project_prompt_sha256": prompt_hash,
-                    "project_prompt_file": paths.relative(paths.translation_prompt),
-                    "model": active_provider.model_name,
-                    "provider_prompt_version": active_provider.prompt_version,
-                    "max_characters": max_characters,
-                    "total_blocks": len(blocks),
-                    "total_chunks": len(chunks),
-                    "completed_blocks": len(completed),
-                    "completed_chunks": completed_chunks,
-                    "translation_output_sha256": output_hash,
-                    "failed_chunk": chunk.id,
-                    "updated_at": _utc_now(),
-                },
+            output_hash = (
+                execution.output_digest.hexdigest()
+                if execution.output_bytes > 0
+                else None
+            )
+            _write_partial_translation_state(
+                inputs,
+                provider,
+                max_characters=max_characters,
+                completed_blocks=len(execution.completed),
+                completed_chunks=execution.completed_chunks,
+                output_hash=output_hash,
+                output_bytes=execution.output_bytes,
+                failed_chunk=chunk.id,
+                failure_reason=str(error),
+                validation_issue_count=len(
+                    execution.validation_issue_messages
+                ),
+                validation_issue_blocks=len(
+                    execution.validation_issue_block_ids
+                ),
             )
             raise TranslationError(
                 f"Translation failed for {chunk.id}. Completed chunks were preserved; "
                 f"fix the issue and use --resume. Cause: {error}"
             ) from error
 
-        for block in chunk.blocks:
-            translated_text = translated[block.id]
-            source_hash = _sha256_bytes(block.effective_text.encode("utf-8"))
-            translation_hash = _sha256_bytes(translated_text.encode("utf-8"))
-            segment = TranslationSegment(
-                schema_version=TRANSLATION_SEGMENT_SCHEMA_VERSION,
-                source_block_id=block.id,
-                source_file=block.source_file,
-                page=block.page,
-                source_order=block.source_order,
-                block_type=block.block_type,
-                source_text=block.effective_text,
-                source_sha256=source_hash,
-                translated_text=translated_text,
-                translation_sha256=translation_hash,
-                status="translated",
-                model=active_provider.model_name,
-                prompt_sha256=prompt_hash,
-                termbase_sha256=termbase_hash,
+        chunk_segments, issue_messages, issue_block_ids = (
+            _build_translation_segments(
+                chunk,
+                translated,
+                provider=provider,
+                termbase_entries=termbase_entries,
+                prompt_hash=inputs.prompt_hash,
+                termbase_hash=inputs.termbase_hash,
             )
-            segment.validate()
-            completed[block.id] = segment
-        completed_chunks += 1
-        current_data = _serialize_segments(list(completed.values()))
-        _write_bytes_atomic(output_path, current_data)
-        _write_json_atomic(
-            state_path,
-            {
-                "schema_version": 1,
-                "status": "partial",
-                "version": TRANSLATION_RUN_VERSION,
-                "input_sha256": input_hash,
-                "approved_source_sha256": approved_hash,
-                "termbase_sha256": termbase_hash,
-                "project_prompt_sha256": prompt_hash,
-                "project_prompt_file": paths.relative(paths.translation_prompt),
-                "model": active_provider.model_name,
-                "provider_prompt_version": active_provider.prompt_version,
-                "max_characters": max_characters,
-                "total_blocks": len(blocks),
-                "total_chunks": len(chunks),
-                "completed_blocks": len(completed),
-                "completed_chunks": completed_chunks,
-                "translation_output_sha256": _sha256_bytes(current_data),
-                "failed_chunk": None,
-                "updated_at": _utc_now(),
-            },
+        )
+        execution.validation_issue_messages.extend(issue_messages)
+        execution.validation_issue_block_ids.update(issue_block_ids)
+        for segment in chunk_segments:
+            execution.completed[segment.source_block_id] = segment
+        execution.completed_chunks += 1
+        chunk_data = _serialize_segments(chunk_segments)
+        if execution.output_bytes:
+            _append_bytes_durable(inputs.paths.translation_segments, chunk_data)
+        else:
+            _write_bytes_atomic(inputs.paths.translation_segments, chunk_data)
+        execution.output_digest.update(chunk_data)
+        execution.output_bytes += len(chunk_data)
+        _write_partial_translation_state(
+            inputs,
+            provider,
+            max_characters=max_characters,
+            completed_blocks=len(execution.completed),
+            completed_chunks=execution.completed_chunks,
+            output_hash=execution.output_digest.hexdigest(),
+            output_bytes=execution.output_bytes,
+            failed_chunk=None,
+            failure_reason=None,
+            validation_issue_count=len(execution.validation_issue_messages),
+            validation_issue_blocks=len(
+                execution.validation_issue_block_ids
+            ),
         )
 
-    ordered_segments = sorted(completed.values(), key=lambda item: item.source_order)
-    if len(ordered_segments) != len(blocks):
-        raise TranslationError("Translation completed without every approved source block.")
+
+def _finalize_translation_run(
+    inputs: _TranslationInputs,
+    prompt_path: Path,
+    provider: TranslationProvider,
+    *,
+    max_characters: int,
+    previous_state: dict[str, Any] | None,
+    resumed: bool,
+    completed: dict[str, TranslationSegment],
+    output_digest: Any,
+    output_bytes: int,
+    validation_issue_messages: list[str],
+    validation_issue_block_ids: set[str],
+) -> TranslationRunResult:
+    paths = inputs.paths
+    ordered_segments = sorted(
+        completed.values(),
+        key=lambda item: item.source_order,
+    )
+    if len(ordered_segments) != len(inputs.blocks):
+        raise TranslationError(
+            "Translation completed without every approved source block."
+        )
     output_data = _serialize_segments(ordered_segments)
+    if output_bytes == 0:
+        _write_bytes_atomic(paths.translation_segments, output_data)
+        output_digest = hashlib.sha256(output_data)
+        output_bytes = len(output_data)
+    output_hash = output_digest.hexdigest()
+    if (
+        output_bytes != len(output_data)
+        or output_hash != _sha256_bytes(output_data)
+    ):
+        raise TranslationError(
+            "Translation checkpoint does not match completed segments."
+        )
     review_data = _render_translation_review(ordered_segments)
     draft_hash = _sha256_bytes(review_data)
-    _write_bytes_atomic(output_path, output_data)
-    _write_bytes_atomic(draft_path, review_data)
-
-    review_created = not review_path.is_file()
+    _write_bytes_atomic(paths.translation_draft, review_data)
+    review_created = not paths.translation_review.is_file()
+    review_base_draft_hash: str | None
     if review_created:
-        _write_bytes_atomic(review_path, review_data)
+        _write_bytes_atomic(paths.translation_review, review_data)
         review_status = "current"
         review_base_draft_hash = draft_hash
     else:
@@ -704,54 +1161,131 @@ def translate_project(
             else None
         )
         review_status = "current" if previous_base == draft_hash else "stale"
-        review_base_draft_hash = previous_base
-
+        review_base_draft_hash = (
+            previous_base if isinstance(previous_base, str) else None
+        )
     _write_json_atomic(
-        state_path,
+        paths.translation_state,
         {
             "schema_version": 1,
             "status": "complete",
             "version": TRANSLATION_RUN_VERSION,
-            "input_sha256": input_hash,
-            "approved_source_sha256": approved_hash,
-            "termbase_sha256": termbase_hash,
-            "project_prompt_sha256": prompt_hash,
+            "input_sha256": inputs.input_hash,
+            "approved_source_sha256": inputs.approved_hash,
+            "termbase_sha256": inputs.termbase_hash,
+            "project_prompt_sha256": inputs.prompt_hash,
             "project_prompt_file": paths.relative(paths.translation_prompt),
             "hard_rules_version": TRANSLATION_HARD_RULES_VERSION,
-            "model": active_provider.model_name,
-            "provider_prompt_version": active_provider.prompt_version,
+            "model": provider.model_name,
+            "provider_prompt_version": provider.prompt_version,
             "max_characters": max_characters,
-            "total_blocks": len(blocks),
-            "total_chunks": len(chunks),
+            "total_blocks": len(inputs.blocks),
+            "total_chunks": len(inputs.chunks),
             "completed_blocks": len(ordered_segments),
-            "completed_chunks": len(chunks),
-            "translation_output_file": paths.relative(paths.translation_segments),
-            "translation_output_sha256": _sha256_bytes(output_data),
+            "completed_chunks": len(inputs.chunks),
+            "translation_output_file": paths.relative(
+                paths.translation_segments
+            ),
+            "translation_output_sha256": output_hash,
+            "translation_output_bytes": output_bytes,
             "draft_file": paths.relative(paths.translation_draft),
             "draft_sha256": draft_hash,
             "review_file": paths.relative(paths.translation_review),
             "review_status": review_status,
             "review_base_draft_sha256": review_base_draft_hash,
             "failed_chunk": None,
+            "failure_reason": None,
+            "validation_issue_count": len(validation_issue_messages),
+            "validation_issue_blocks": len(validation_issue_block_ids),
             "updated_at": _utc_now(),
         },
     )
     return TranslationRunResult(
-        project_path=str(location.path),
-        model=active_provider.model_name,
-        approved_source_sha256=approved_hash,
-        termbase_sha256=termbase_hash,
-        project_prompt_sha256=prompt_hash,
-        input_sha256=input_hash,
-        total_blocks=len(blocks),
-        total_chunks=len(chunks),
+        project_path=str(inputs.project_path),
+        model=provider.model_name,
+        approved_source_sha256=inputs.approved_hash,
+        termbase_sha256=inputs.termbase_hash,
+        project_prompt_sha256=inputs.prompt_hash,
+        input_sha256=inputs.input_hash,
+        total_blocks=len(inputs.blocks),
+        total_chunks=len(inputs.chunks),
         completed_blocks=len(ordered_segments),
-        completed_chunks=len(chunks),
-        output_file=str(output_path),
-        draft_file=str(draft_path),
-        review_file=str(review_path),
+        completed_chunks=len(inputs.chunks),
+        output_file=str(paths.translation_segments),
+        draft_file=str(paths.translation_draft),
+        review_file=str(paths.translation_review),
         review_status=review_status,
-        prompt_file=str(canonical_prompt_path),
-        resumed=bool(existing_segments),
+        prompt_file=str(prompt_path),
+        validation_issue_count=len(validation_issue_messages),
+        validation_issue_blocks=len(validation_issue_block_ids),
+        resumed=resumed,
         review_created=review_created,
+    )
+
+
+def translate_project(
+    *,
+    project: str | Path,
+    workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
+    prompt_file: str | Path | None = None,
+    model_name: str | None = None,
+    max_characters: int = 10000,
+    resume: bool = False,
+    force: bool = False,
+    dry_run: bool = False,
+    provider: TranslationProvider | None = None,
+    progress: ProgressCallback | None = None,
+) -> TranslationRunResult:
+    notify = progress or (lambda _: None)
+    inputs = _prepare_translation_inputs(
+        project=project,
+        workspace_root=workspace_root,
+        settings_root=settings_root,
+        prompt_file=prompt_file,
+        model_name=model_name,
+        max_characters=max_characters,
+        provider=provider,
+    )
+    if dry_run:
+        return _dry_run_translation_result(inputs)
+    canonical_prompt_path = _ensure_translation_prompt(inputs)
+    restored = _restore_translation_checkpoint(
+        inputs,
+        canonical_prompt_path,
+        resume=resume,
+        force=force,
+    )
+    if isinstance(restored, TranslationRunResult):
+        return restored
+    active_provider = provider or GeminiTranslationProvider.from_environment(
+        model_name,
+        settings_root=settings_root,
+    )
+    execution = _prepare_translation_execution(
+        inputs,
+        active_provider,
+        restored,
+        max_characters=max_characters,
+    )
+    _translate_pending_chunks(
+        inputs,
+        active_provider,
+        execution,
+        max_characters=max_characters,
+        notify=notify,
+    )
+
+    return _finalize_translation_run(
+        inputs,
+        canonical_prompt_path,
+        active_provider,
+        max_characters=max_characters,
+        previous_state=restored.previous_state,
+        resumed=bool(restored.existing_segments),
+        completed=execution.completed,
+        output_digest=execution.output_digest,
+        output_bytes=execution.output_bytes,
+        validation_issue_messages=execution.validation_issue_messages,
+        validation_issue_block_ids=execution.validation_issue_block_ids,
     )

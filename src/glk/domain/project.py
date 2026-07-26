@@ -20,6 +20,7 @@ _WINDOWS_RESERVED_NAMES = {
     *(f"LPT{number}" for number in range(1, 10)),
 }
 _LANGUAGE_PATTERN = re.compile(r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
+_PROJECT_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
 
 
 class ProjectError(ValueError):
@@ -30,19 +31,28 @@ class ProjectValidationError(ProjectError):
     """Raised when a project manifest or identifier is invalid."""
 
 
+class ProjectIdValidationError(ProjectValidationError):
+    """Raised when a project identifier is not portable or valid."""
+
+    code = "PROJECT_ID_INVALID"
+
+
 def normalize_project_id(value: str) -> str:
     """Convert a human-readable name into a portable workspace directory name."""
     normalized = unicodedata.normalize("NFKC", value).casefold().strip()
-    normalized = re.sub(r"[^\w]+", "_", normalized, flags=re.UNICODE).strip("_")
+    normalized = re.sub(r"[^a-z0-9]+", "_", normalized).strip("_")
     normalized = re.sub(r"_+", "_", normalized)
     if not normalized:
-        raise ProjectValidationError(
-            "Project ID is empty after normalization; provide --project-id explicitly."
+        raise ProjectIdValidationError(
+            "Project ID is empty after normalization; provide an ID using lowercase "
+            "English letters, numbers, and underscores."
         )
     if len(normalized) > 80:
-        raise ProjectValidationError("Project ID must be 80 characters or fewer.")
+        raise ProjectIdValidationError("Project ID must be 80 characters or fewer.")
     if normalized.upper() in _WINDOWS_RESERVED_NAMES:
-        raise ProjectValidationError(f"Project ID is reserved on Windows: {normalized}")
+        raise ProjectIdValidationError(
+            f"Project ID is reserved on Windows: {normalized}"
+        )
     return normalized
 
 
@@ -95,7 +105,16 @@ class ProjectManifest:
             raise ProjectValidationError("Project name cannot be empty.")
         if len(clean_name) > 200:
             raise ProjectValidationError("Project name must be 200 characters or fewer.")
-        normalized_id = normalize_project_id(project_id or clean_name)
+        if project_id is None:
+            normalized_id = normalize_project_id(clean_name)
+        else:
+            normalized_id = unicodedata.normalize("NFKC", project_id).strip()
+            if not _PROJECT_ID_PATTERN.fullmatch(normalized_id):
+                raise ProjectIdValidationError(
+                    "Project ID must use lowercase English letters, numbers, and "
+                    "single underscores only."
+                )
+            normalized_id = normalize_project_id(normalized_id)
         manifest = cls(
             schema_version=PROJECT_SCHEMA_VERSION,
             project_id=normalized_id,
@@ -153,7 +172,7 @@ class ProjectManifest:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
-    def with_source_file(self, source_file: str) -> ProjectManifest:
+    def with_source_file(self, source_file: str | None) -> ProjectManifest:
         updated = replace(self, source_file=source_file)
         updated.validate()
         return updated

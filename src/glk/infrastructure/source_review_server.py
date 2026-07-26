@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from importlib import resources
 import json
 import mimetypes
 from pathlib import Path
-import secrets
-from socketserver import TCPServer
-import threading
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
@@ -18,37 +15,27 @@ import webbrowser
 from glk.application.project_service import load_project
 from glk.application.review_types import SourceReviewDocument
 from glk.application.source_review_service import (
+    SourceReviewConflictError,
     SourceReviewError,
     finalize_project_source_review,
     get_project_source_review_document,
     save_project_source_review,
 )
 from glk.domain.workspace import WorkspacePaths, is_pdf_source_file
-from glk.error_response import make_http_error_response
+from glk.infrastructure.local_http import (
+    LocalHttpRequestHandler,
+    LocalHttpServer,
+    local_security_headers,
+    validate_local_port,
+    validate_local_return_url,
+)
 
 
 _MAX_REQUEST_BYTES = 16 * 1024 * 1024
-_SECURITY_HEADERS = {
-    "Cache-Control": "no-store",
-    "Content-Security-Policy": (
-        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-        "connect-src 'self'; img-src 'self' blob: data:; base-uri 'none'; "
-        "form-action 'none'; frame-ancestors 'none'"
-    ),
-    "Referrer-Policy": "no-referrer",
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-}
+_SOURCE_SECURITY_HEADERS = local_security_headers(allow_blob_images=True)
 
 
-class SourceReviewHttpServer(ThreadingHTTPServer):
-    daemon_threads = True
-
-    def server_bind(self) -> None:
-        TCPServer.server_bind(self)
-        self.server_name = "localhost"
-        self.server_port = self.server_address[1]
-
+class SourceReviewHttpServer(LocalHttpServer):
     def __init__(
         self,
         server_address: tuple[str, int],
@@ -56,85 +43,41 @@ class SourceReviewHttpServer(ThreadingHTTPServer):
         *,
         project: str | Path,
         workspace_root: str | Path,
+        return_url: str | None = None,
     ) -> None:
+        self.return_url = validate_local_return_url(
+            return_url,
+            label="Source review",
+        )
         super().__init__(server_address, handler_class)
         self.project = str(project)
         self.workspace_root = str(workspace_root)
-        self.auth_token = secrets.token_urlsafe(32)
-        self.mutation_lock = threading.Lock()
-
-    @property
-    def origin(self) -> str:
-        host, port = self.server_address[:2]
-        host_text = host.decode("ascii") if isinstance(host, bytes) else host
-        return f"http://{host_text}:{port}"
 
     @property
     def review_url(self) -> str:
-        return self.origin + "/"
+        return self.root_url
 
 
-class _SourceReviewHandler(BaseHTTPRequestHandler):
+class _SourceReviewHandler(LocalHttpRequestHandler):
     server: SourceReviewHttpServer
-
-    def log_message(self, format: str, *args: Any) -> None:
-        return
-
-    def _host_is_local(self) -> bool:
-        host = self.headers.get("Host", "").split(":", 1)[0].casefold()
-        return host in {"127.0.0.1", "localhost"}
-
-    def _origin_allowed(self) -> bool:
-        origin = self.headers.get("Origin")
-        return not origin or origin in {
-            self.server.origin,
-            self.server.origin.replace("127.0.0.1", "localhost"),
-        }
-
-    def _api_authorized(self) -> bool:
-        return (
-            self._host_is_local()
-            and self._origin_allowed()
-            and self.headers.get("X-GLK-Token") == self.server.auth_token
-        )
+    request_error_type = SourceReviewError
+    security_headers = _SOURCE_SECURITY_HEADERS
 
     def _asset_authorized(self, query: dict[str, list[str]]) -> bool:
+        supplied_token = query.get("token", [""])[0]
         return (
             self._host_is_local()
             and self._origin_allowed()
-            and query.get("token", [""])[0] == self.server.auth_token
-        )
-
-    def _headers(self, content_type: str, length: int) -> None:
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(length))
-        for name, value in _SECURITY_HEADERS.items():
-            self.send_header(name, value)
-
-    def _send_bytes(
-        self, status: HTTPStatus, data: bytes, content_type: str
-    ) -> None:
-        self.send_response(status)
-        self._headers(content_type, len(data))
-        self.end_headers()
-        self.wfile.write(data)
-
-    def _send_json(self, status: HTTPStatus, value: Any) -> None:
-        self._send_bytes(
-            status,
-            (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8"),
-            "application/json; charset=utf-8",
-        )
-
-    def _send_error_json(self, status: HTTPStatus, message: str) -> None:
-        self._send_json(
-            status,
-            make_http_error_response(status, message).to_dict(),
+            and self._token_matches(supplied_token)
         )
 
     def _send_file(self, path: Path, content_type: str | None = None) -> None:
         if not path.is_file():
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Source asset not found.")
+            self._send_error_json(
+                HTTPStatus.NOT_FOUND,
+                "Source asset not found.",
+                code="RESOURCE_NOT_FOUND",
+            )
             return
         file_size = path.stat().st_size
         start = 0
@@ -150,17 +93,24 @@ class _SourceReviewHandler(BaseHTTPRequestHandler):
                     raise ValueError
                 status = HTTPStatus.PARTIAL_CONTENT
             except ValueError:
-                self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
-                self.send_header("Content-Range", f"bytes */{file_size}")
-                self.end_headers()
+                self._send_bytes(
+                    HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
+                    b"",
+                    "application/octet-stream",
+                    extra_headers={"Content-Range": f"bytes */{file_size}"},
+                )
                 return
         length = end - start + 1
         guessed = content_type or mimetypes.guess_type(path.name)[0]
         self.send_response(status)
-        self._headers(guessed or "application/octet-stream", length)
-        self.send_header("Accept-Ranges", "bytes")
+        extra_headers = {"Accept-Ranges": "bytes"}
         if status == HTTPStatus.PARTIAL_CONTENT:
-            self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
+            extra_headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        self._send_standard_headers(
+            guessed or "application/octet-stream",
+            length,
+            extra_headers=extra_headers,
+        )
         self.end_headers()
         with path.open("rb") as file:
             file.seek(start)
@@ -208,7 +158,11 @@ class _SourceReviewHandler(BaseHTTPRequestHandler):
             self._send_bytes(HTTPStatus.NO_CONTENT, b"", "image/x-icon")
             return
         if not self._host_is_local():
-            self._send_error_json(HTTPStatus.FORBIDDEN, "Only localhost is allowed.")
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Only localhost is allowed.",
+                code="LOCAL_ACCESS_REQUIRED",
+            )
             return
         if path == "/":
             template = (
@@ -218,30 +172,64 @@ class _SourceReviewHandler(BaseHTTPRequestHandler):
             )
             html = template.replace(
                 "__GLK_TOKEN_JSON__", json.dumps(self.server.auth_token)
+            ).replace(
+                "__GLK_RETURN_URL_JSON__", json.dumps(self.server.return_url)
             ).encode("utf-8")
             self._send_bytes(HTTPStatus.OK, html, "text/html; charset=utf-8")
             return
         if path == "/api/review":
             if not self._api_authorized():
-                self._send_error_json(HTTPStatus.FORBIDDEN, "Invalid review session.")
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                    code="REVIEW_SESSION_INVALID",
+                )
                 return
             try:
                 self._send_json(HTTPStatus.OK, self._document())
-            except (SourceReviewError, OSError, ValueError) as error:
-                self._send_error_json(HTTPStatus.CONFLICT, str(error))
+            except SourceReviewConflictError as error:
+                self._send_error_json(
+                    HTTPStatus.CONFLICT,
+                    error,
+                    code=error.code,
+                )
+            except SourceReviewError as error:
+                self._send_error_json(
+                    HTTPStatus.BAD_REQUEST,
+                    error,
+                    code=error.code,
+                )
+            except (OSError, ValueError) as error:
+                self._send_error_json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    error,
+                    code="INTERNAL_ERROR",
+                )
             return
         if path == "/api/source-image":
             if not self._asset_authorized(query):
-                self._send_error_json(HTTPStatus.FORBIDDEN, "Invalid review session.")
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                    code="REVIEW_SESSION_INVALID",
+                )
                 return
             try:
                 self._send_file(self._group_asset(query.get("group", [""])[0]))
             except (SourceReviewError, OSError, ValueError) as error:
-                self._send_error_json(HTTPStatus.NOT_FOUND, str(error))
+                self._send_error_json(
+                    HTTPStatus.NOT_FOUND,
+                    error,
+                    code="RESOURCE_NOT_FOUND",
+                )
             return
         if path == "/api/original-pdf":
             if not self._asset_authorized(query):
-                self._send_error_json(HTTPStatus.FORBIDDEN, "Invalid review session.")
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                    code="REVIEW_SESSION_INVALID",
+                )
                 return
             try:
                 location = load_project(
@@ -254,38 +242,36 @@ class _SourceReviewHandler(BaseHTTPRequestHandler):
                     location.path / str(source_file), "application/pdf"
                 )
             except (SourceReviewError, OSError, ValueError) as error:
-                self._send_error_json(HTTPStatus.NOT_FOUND, str(error))
+                self._send_error_json(
+                    HTTPStatus.NOT_FOUND,
+                    error,
+                    code="RESOURCE_NOT_FOUND",
+                )
             return
-        self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
-
-    def _read_request_json(self) -> dict[str, Any]:
-        content_type = self.headers.get("Content-Type", "")
-        if not content_type.casefold().startswith("application/json"):
-            raise SourceReviewError("Content-Type must be application/json.")
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError as error:
-            raise SourceReviewError("Invalid Content-Length.") from error
-        if length <= 0 or length > _MAX_REQUEST_BYTES:
-            raise SourceReviewError("Request body size is invalid.")
-        try:
-            value = json.loads(self.rfile.read(length).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise SourceReviewError("Request body must be valid UTF-8 JSON.") from error
-        if not isinstance(value, dict):
-            raise SourceReviewError("Request body must be a JSON object.")
-        return value
+        self._send_error_json(
+            HTTPStatus.NOT_FOUND,
+            "Not found.",
+            code="RESOURCE_NOT_FOUND",
+        )
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
         if path not in {"/api/save", "/api/validate", "/api/finalize"}:
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Not found.")
+            self._send_error_json(
+                HTTPStatus.NOT_FOUND,
+                "Not found.",
+                code="RESOURCE_NOT_FOUND",
+            )
             return
         if not self._api_authorized():
-            self._send_error_json(HTTPStatus.FORBIDDEN, "Invalid review session.")
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Invalid review session.",
+                code="REVIEW_SESSION_INVALID",
+            )
             return
         try:
-            body = self._read_request_json()
+            body = self._read_request_json(max_bytes=_MAX_REQUEST_BYTES)
             review_hash = body.get("review_sha256")
             blocks = body.get("blocks")
             allow_token_changes = body.get("allow_token_changes", False)
@@ -320,12 +306,16 @@ class _SourceReviewHandler(BaseHTTPRequestHandler):
         except SourceReviewError as error:
             status = (
                 HTTPStatus.CONFLICT
-                if "changed after" in str(error) or "stale" in str(error)
+                if isinstance(error, SourceReviewConflictError)
                 else HTTPStatus.BAD_REQUEST
             )
-            self._send_error_json(status, str(error))
+            self._send_error_json(status, error, code=error.code)
         except (OSError, ValueError) as error:
-            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
+            self._send_error_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                error,
+                code="INTERNAL_ERROR",
+            )
 
 
 def create_source_review_server(
@@ -333,7 +323,9 @@ def create_source_review_server(
     project: str | Path,
     workspace_root: str | Path = "workspaces",
     port: int = 0,
+    return_url: str | None = None,
 ) -> SourceReviewHttpServer:
+    validate_local_port(port, error_type=SourceReviewError)
     get_project_source_review_document(
         project=project, workspace_root=workspace_root
     )
@@ -342,6 +334,7 @@ def create_source_review_server(
         _SourceReviewHandler,
         project=project,
         workspace_root=workspace_root,
+        return_url=return_url,
     )
 
 

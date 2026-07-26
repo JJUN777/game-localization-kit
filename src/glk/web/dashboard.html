@@ -1,0 +1,3813 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Game Localization Kit Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #18201f;
+      --muted: #66706e;
+      --paper: #f4f1e9;
+      --surface: #fffdf8;
+      --line: #ded9cd;
+      --accent: #cf4b2f;
+      --accent-dark: #a93120;
+      --green: #28735a;
+      --amber: #a96e16;
+      --shadow: 0 20px 60px rgb(43 35 25 / 9%);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 0%, rgb(207 75 47 / 9%), transparent 32rem),
+        radial-gradient(circle at 90% 8%, rgb(40 115 90 / 8%), transparent 28rem),
+        var(--paper);
+      font-family: Inter, Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+
+    .shell {
+      width: min(1280px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 34px 0 72px;
+    }
+
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 28px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 10px;
+      color: var(--accent-dark);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: 0 0 0 5px rgb(40 115 90 / 11%);
+    }
+
+    h1 {
+      margin: 0;
+      font-family: "Avenir Next", Inter, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      font-size: clamp(34px, 5vw, 58px);
+      line-height: .98;
+      letter-spacing: -.055em;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      max-width: 620px;
+      margin: 13px 0 0;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .header-side {
+      display: grid;
+      justify-items: end;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #lastUpdated {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+    }
+
+    .ai-settings-summary {
+      display: grid;
+      gap: 2px;
+      text-align: right;
+    }
+
+    #aiKeySummary {
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    #aiKeySummary.missing { color: var(--accent-dark); }
+
+    #aiModelSummary {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+    }
+
+    .header-button {
+      padding: 11px 16px;
+      border-radius: 999px;
+      font-weight: 750;
+      transition: transform .15s ease, opacity .15s ease,
+        border-color .15s ease;
+    }
+
+    .refresh {
+      border: 1px solid var(--line);
+      color: var(--ink);
+      background: var(--surface);
+    }
+
+    .ai-settings-button {
+      border: 1px solid var(--green);
+      color: #fff;
+      background: var(--green);
+      box-shadow: 0 8px 22px rgb(40 115 90 / 18%);
+    }
+
+    .ai-settings-button:hover {
+      box-shadow: 0 10px 26px rgb(40 115 90 / 26%);
+    }
+
+    .header-button:hover { transform: translateY(-1px); }
+    .header-button:disabled { cursor: wait; opacity: .55; }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .summary-card {
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgb(255 253 248 / 78%);
+      backdrop-filter: blur(8px);
+    }
+
+    .summary-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .summary-value {
+      display: block;
+      margin-top: 6px;
+      font-family: "Avenir Next", Inter, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      font-size: 36px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -.045em;
+      line-height: 1;
+    }
+
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .search {
+      width: min(390px, 100%);
+      padding: 11px 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      outline: 0;
+      color: var(--ink);
+      background: #fff;
+    }
+
+    .search:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgb(207 75 47 / 12%);
+    }
+
+    .filters { display: flex; gap: 7px; }
+
+    .filter {
+      padding: 9px 13px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .filter:hover { color: var(--ink); }
+    .filter.active {
+      border-color: var(--line);
+      color: var(--ink);
+      background: var(--paper);
+    }
+
+    .warning {
+      display: none;
+      margin-top: 16px;
+      padding: 13px 16px;
+      border: 1px solid rgb(169 110 22 / 30%);
+      border-radius: 12px;
+      color: #6e450c;
+      background: #fff6df;
+      font-size: 13px;
+    }
+
+    .project-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .project-card {
+      position: relative;
+      overflow: hidden;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--surface);
+      box-shadow: 0 14px 40px rgb(43 35 25 / 6%);
+    }
+
+    .project-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 4px;
+      background: linear-gradient(90deg, var(--accent), #e6a34b);
+    }
+
+    .create-project-card {
+      min-height: 260px;
+      padding: 24px;
+      border: 1px dashed #c9c2b5;
+      border-radius: 22px;
+      color: var(--muted);
+      background: rgb(255 253 248 / 55%);
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .15s ease, color .15s ease,
+        transform .15s ease;
+    }
+
+    .create-project-card:hover {
+      border-color: var(--accent);
+      color: var(--accent-dark);
+      transform: translateY(-2px);
+    }
+
+    .create-project-card .create-mark {
+      display: grid;
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 14px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      place-items: center;
+      color: var(--accent);
+      background: var(--surface);
+      font: 28px/1 Georgia, serif;
+    }
+
+    .create-project-card strong {
+      display: block;
+      color: var(--ink);
+      font-size: 15px;
+    }
+
+    .create-project-card span:last-child {
+      display: block;
+      margin-top: 7px;
+      font-size: 12px;
+    }
+
+    .project-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .project-name {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: -.02em;
+    }
+
+    .project-id {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .project-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .source-badge {
+      padding: 6px 9px;
+      border-radius: 999px;
+      color: var(--green);
+      background: rgb(40 115 90 / 10%);
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .source-file-row {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 18px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--muted);
+      background: #faf8f2;
+    }
+
+    .source-file-summary {
+      min-width: 0;
+      overflow: hidden;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .source-file-list-button {
+      flex-shrink: 0;
+      padding: 5px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--green);
+      background: #fff;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .source-file-list-button:hover {
+      border-color: var(--green);
+    }
+
+    .delete-project-button {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      place-items: center;
+      color: var(--muted);
+      background: #fff;
+      font-size: 18px;
+      line-height: 1;
+      transition: border-color .15s ease, color .15s ease,
+        background .15s ease;
+    }
+
+    .delete-project-button:hover {
+      border-color: rgb(207 75 47 / 45%);
+      color: var(--accent-dark);
+      background: rgb(207 75 47 / 6%);
+    }
+
+    .delete-project-button:disabled {
+      cursor: not-allowed;
+      opacity: .45;
+    }
+
+    .delete-project-button:disabled:hover {
+      border-color: var(--line);
+      color: var(--muted);
+      background: #fff;
+    }
+
+    .stage-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .stage {
+      color: var(--accent-dark);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .progress-value {
+      color: var(--muted);
+      font-family: "Avenir Next", Inter, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .progress-track {
+      overflow: hidden;
+      height: 7px;
+      margin-top: 9px;
+      border-radius: 999px;
+      background: #e9e5dc;
+    }
+
+    .progress-bar {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), #df963c);
+      transition: width .35s ease;
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 7px;
+      margin: 20px 0;
+    }
+
+    .pipeline-step {
+      min-width: 0;
+      padding: 10px 5px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      color: var(--muted);
+      background: #faf8f2;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 750;
+    }
+
+    .pipeline-step.done {
+      border-color: rgb(40 115 90 / 25%);
+      color: var(--green);
+      background: rgb(40 115 90 / 7%);
+    }
+
+    .pipeline-step.attention {
+      border-color: rgb(169 110 22 / 28%);
+      color: var(--amber);
+      background: rgb(169 110 22 / 8%);
+    }
+
+    .output-files {
+      display: grid;
+      gap: 9px;
+      padding: 13px;
+      border: 1px solid rgb(40 115 90 / 24%);
+      border-radius: 11px;
+      background: rgb(40 115 90 / 7%);
+    }
+
+    .output-files-head,
+    .output-file {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .output-files-head strong {
+      color: var(--green);
+      font-size: 12px;
+    }
+
+    .output-files-head span,
+    .output-file-size {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .output-file-list {
+      display: grid;
+      gap: 6px;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+
+    .output-file {
+      padding: 8px 9px;
+      border: 1px solid rgb(40 115 90 / 18%);
+      border-radius: 9px;
+      background: #fff;
+    }
+
+    .output-file-info {
+      display: grid;
+      min-width: 0;
+      gap: 2px;
+    }
+
+    .output-file-name {
+      overflow: hidden;
+      color: var(--ink);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .output-download-button {
+      flex-shrink: 0;
+      padding: 6px 9px;
+      border: 1px solid var(--green);
+      border-radius: 8px;
+      color: #fff;
+      background: var(--green);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .output-download-button:disabled {
+      cursor: wait;
+      opacity: .55;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      padding-top: 17px;
+      border-top: 1px solid var(--line);
+    }
+
+    .review-button {
+      min-width: 0;
+      padding: 10px 8px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--ink);
+      background: #fff;
+      font-size: 12px;
+      font-weight: 780;
+      transition: border-color .15s ease, transform .15s ease;
+    }
+
+    .review-button:hover:not(:disabled) {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+
+    .review-button:disabled {
+      cursor: not-allowed;
+      color: #a8aaa6;
+      background: #f4f2ed;
+    }
+
+    .source-register-button {
+      grid-column: 1 / -1;
+      padding: 11px 12px;
+      border: 1px solid var(--green);
+      border-radius: 10px;
+      color: #fff;
+      background: var(--green);
+      font-size: 12px;
+      font-weight: 800;
+      transition: transform .15s ease, opacity .15s ease;
+    }
+
+    .source-register-button:hover {
+      transform: translateY(-1px);
+    }
+
+    .source-register-button.replace {
+      border-color: rgb(169 110 22 / 45%);
+      color: var(--amber);
+      background: rgb(169 110 22 / 8%);
+    }
+
+    .ocr-prompt-button,
+    .translation-prompt-button {
+      grid-column: 1 / -1;
+      padding: 10px 12px;
+      border: 1px solid rgb(40 115 90 / 38%);
+      border-radius: 10px;
+      color: var(--green);
+      background: rgb(40 115 90 / 7%);
+      font-size: 12px;
+      font-weight: 800;
+      transition: border-color .15s ease, transform .15s ease;
+    }
+
+    .ocr-prompt-button:hover,
+    .translation-prompt-button:hover:not(:disabled) {
+      border-color: var(--green);
+      transform: translateY(-1px);
+    }
+
+    .translation-prompt-button:disabled {
+      cursor: not-allowed;
+      opacity: .55;
+    }
+
+    .source-job-button,
+    .glossary-job-button,
+    .translation-job-button {
+      grid-column: 1 / -1;
+      padding: 12px;
+      border-radius: 10px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 850;
+      transition: transform .15s ease, opacity .15s ease;
+    }
+
+    .source-job-button {
+      border: 1px solid var(--green);
+      background: var(--green);
+    }
+
+    .glossary-job-button {
+      border: 1px solid var(--green);
+      background: var(--green);
+    }
+
+    .translation-job-button {
+      border: 1px solid var(--ink);
+      background: var(--ink);
+    }
+
+    .source-job-button:hover:not(:disabled),
+    .glossary-job-button:hover:not(:disabled),
+    .translation-job-button:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+
+    .source-job-button:disabled,
+    .glossary-job-button:disabled,
+    .translation-job-button:disabled {
+      cursor: not-allowed;
+      border-color: var(--line);
+      color: #999d99;
+      background: #f2f0ea;
+    }
+
+    #sourceJobSubmit {
+      border-color: var(--green);
+      background: var(--green);
+    }
+
+    #sourceSubmit.source-replace-submit {
+      border-color: var(--amber);
+      background: var(--amber);
+    }
+
+    .job-status {
+      grid-column: 1 / -1;
+      display: grid;
+      gap: 8px;
+      padding: 12px 13px;
+      border: 1px solid rgb(40 115 90 / 24%);
+      border-radius: 11px;
+      color: #225d4a;
+      background: rgb(40 115 90 / 7%);
+    }
+
+    .job-status.failed {
+      border-color: rgb(207 75 47 / 25%);
+      color: #8a3526;
+      background: rgb(207 75 47 / 7%);
+    }
+
+    .job-status-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .job-status-message {
+      margin: 0;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .job-progress {
+      width: 100%;
+      height: 6px;
+      accent-color: var(--green);
+    }
+
+    .job-error {
+      margin: 0;
+      color: var(--accent-dark);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .translation-review-attention {
+      grid-column: 1 / -1;
+      display: grid;
+      gap: 4px;
+      padding: 12px 13px;
+      border: 1px solid rgb(201 123 31 / 32%);
+      border-radius: 11px;
+      color: #7a480f;
+      background: rgb(201 123 31 / 9%);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .translation-review-attention strong {
+      font-size: 12px;
+    }
+
+    .job-summary {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .job-summary div {
+      padding: 12px 13px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: #faf8f2;
+    }
+
+    .job-summary span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .job-summary strong {
+      display: block;
+      margin-top: 5px;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .path {
+      overflow: hidden;
+      margin-top: 14px;
+      color: #919692;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .empty {
+      display: none;
+      margin-top: 18px;
+      padding: 72px 24px;
+      border: 1px dashed #c9c2b5;
+      border-radius: 22px;
+      background: rgb(255 253 248 / 55%);
+      text-align: center;
+    }
+
+    .empty-mark {
+      display: block;
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 16px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      color: var(--accent);
+      background: var(--surface);
+      font: 28px/46px Georgia, serif;
+      cursor: pointer;
+      transition: border-color .15s ease, transform .15s ease;
+    }
+
+    .empty-mark:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+
+    .empty h2 { margin: 0 0 8px; font-size: 18px; }
+    .empty p { margin: 0; color: var(--muted); line-height: 1.6; }
+
+    dialog {
+      width: min(520px, calc(100% - 28px));
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      color: var(--ink);
+      background: var(--surface);
+      box-shadow: 0 28px 90px rgb(30 25 20 / 24%);
+    }
+
+    #sourceDialog,
+    #ocrPromptDialog {
+      width: min(720px, calc(100% - 28px));
+    }
+
+    #sourceDialog,
+    #ocrPromptDialog,
+    #sourceJobDialog {
+      max-height: calc(100vh - 28px);
+    }
+
+    #sourceDialog .modal-form,
+    #ocrPromptDialog .modal-form,
+    #sourceJobDialog .modal-form {
+      max-height: calc(100vh - 28px);
+      overflow-y: auto;
+    }
+
+    dialog::backdrop {
+      background: rgb(24 32 31 / 48%);
+      backdrop-filter: blur(4px);
+    }
+
+    .modal-form { padding: 24px; }
+
+    .modal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+
+    .modal-kicker {
+      margin: 0 0 5px;
+      color: var(--accent-dark);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .modal-head h2 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: -.025em;
+    }
+
+    .modal-close {
+      width: 36px;
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      color: var(--muted);
+      background: #fff;
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .field {
+      display: grid;
+      gap: 7px;
+      margin-top: 17px;
+    }
+
+    .field[hidden] { display: none; }
+
+    .field label {
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .field input,
+    .field select,
+    .field textarea {
+      width: 100%;
+      padding: 12px 13px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      outline: 0;
+      color: var(--ink);
+      background: #fff;
+    }
+
+    .field textarea {
+      min-height: 230px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    #sourceJobOcrPrompt {
+      min-height: 180px;
+      color: #4d524f;
+      background: #f7f5f0;
+    }
+
+    .field input:focus,
+    .field select:focus,
+    .field textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgb(207 75 47 / 12%);
+    }
+
+    .field-label-row,
+    .field-help-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .field-reset {
+      padding: 0;
+      border: 0;
+      color: var(--accent-dark);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 750;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .field-help {
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .field-count {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px;
+    }
+
+    .field-count.limit {
+      color: var(--accent-dark);
+      font-weight: 800;
+    }
+
+    .ai-settings-status {
+      display: grid;
+      gap: 9px;
+      margin: 0;
+      padding: 14px 15px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--soft);
+    }
+
+    .ai-settings-status div {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      font-size: 12px;
+    }
+
+    .ai-settings-status dt { color: var(--muted); }
+    .ai-settings-status dd {
+      display: grid;
+      gap: 3px;
+      margin: 0;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+
+    .settings-primary { font-weight: 800; }
+
+    .settings-secondary {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 500;
+    }
+
+    #aiModelStatus {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .model-description {
+      min-height: 17px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .password-input {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 7px;
+    }
+
+    .password-toggle {
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      color: var(--ink);
+      background: #fff;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .environment-note {
+      display: none;
+      margin: 16px 0 0;
+      padding: 12px 14px;
+      border: 1px solid rgb(207 75 47 / 24%);
+      border-radius: 11px;
+      color: #8a3526;
+      background: rgb(207 75 47 / 7%);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .environment-note.visible { display: block; }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 26px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+
+    .modal-button {
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-weight: 750;
+    }
+
+    .modal-cancel {
+      border: 1px solid var(--line);
+      color: var(--ink);
+      background: #fff;
+    }
+
+    .modal-submit {
+      border: 1px solid var(--ink);
+      color: #fff;
+      background: var(--ink);
+    }
+
+    .modal-submit:disabled,
+    .modal-delete:disabled,
+    .source-submit:disabled {
+      cursor: wait;
+      opacity: .55;
+    }
+
+    .source-note {
+      margin: 0;
+      padding: 13px 15px;
+      border: 1px solid rgb(40 115 90 / 24%);
+      border-radius: 12px;
+      color: #225d4a;
+      background: rgb(40 115 90 / 7%);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .source-type-options {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 18px;
+    }
+
+    .source-type-option {
+      position: relative;
+      cursor: pointer;
+    }
+
+    .source-type-option input {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .source-type-option span {
+      display: block;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      color: var(--muted);
+      background: #fff;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .source-type-option input:checked + span {
+      border-color: var(--green);
+      color: var(--green);
+      background: rgb(40 115 90 / 7%);
+      box-shadow: 0 0 0 2px rgb(40 115 90 / 8%);
+    }
+
+    .source-type-option input:focus-visible + span {
+      outline: 3px solid rgb(40 115 90 / 18%);
+      outline-offset: 2px;
+    }
+
+    .selected-files {
+      max-height: 130px;
+      margin: 0;
+      padding: 0;
+      overflow-y: auto;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      line-height: 1.65;
+      list-style: none;
+    }
+
+    .selected-files li {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .registered-source-files {
+      max-height: min(46vh, 360px);
+      margin: 17px 0 0;
+      padding: 8px 8px 8px 34px;
+      overflow-y: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--ink);
+      background: #faf8f2;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .registered-source-files li {
+      padding: 3px 4px;
+      overflow-wrap: anywhere;
+    }
+
+    .source-files-replace {
+      border: 1px solid var(--green);
+      color: #fff;
+      background: var(--green);
+    }
+
+    .source-files-replace[hidden] {
+      display: none;
+    }
+
+    .source-submit {
+      border: 1px solid var(--green);
+      color: #fff;
+      background: var(--green);
+    }
+
+    .delete-warning {
+      margin: 0;
+      padding: 14px 16px;
+      border: 1px solid rgb(169 110 22 / 30%);
+      border-radius: 12px;
+      color: #6e450c;
+      background: #fff6df;
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .delete-identity {
+      margin-top: 17px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #faf8f2;
+    }
+
+    .delete-identity strong {
+      display: block;
+      font-size: 15px;
+    }
+
+    .delete-identity code {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .modal-delete {
+      border-color: var(--accent-dark);
+      color: #fff;
+      background: var(--accent-dark);
+    }
+
+    .toast {
+      position: fixed;
+      inset: auto 24px 24px auto;
+      margin: 0;
+      z-index: 10;
+      max-width: min(430px, calc(100% - 48px));
+      padding: 14px 17px;
+      border-radius: 12px;
+      color: #fff;
+      background: var(--ink);
+      box-shadow: 0 15px 45px rgb(0 0 0 / 24%);
+      opacity: 0;
+      transform: translateY(12px);
+      pointer-events: none;
+      transition: opacity .2s ease, transform .2s ease;
+    }
+
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.error { background: #8e2b1d; }
+
+    @media (max-width: 820px) {
+      .shell { width: min(100% - 24px, 680px); padding-top: 24px; }
+      header { align-items: flex-start; flex-direction: column; }
+      .header-side { width: 100%; justify-items: start; }
+      .header-actions { width: auto; }
+      .header-button { flex: none; }
+      #lastUpdated { text-align: left; }
+      .ai-settings-summary { text-align: left; }
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+      .toolbar { align-items: stretch; flex-direction: column; }
+      .search { width: 100%; }
+      .filters { overflow-x: auto; }
+      .project-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 460px) {
+      h1 { font-size: 36px; }
+      .summary-card { padding: 15px; }
+      .project-card { padding: 18px; }
+      .actions { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="eyebrow"><span class="live-dot"></span> Local dashboard</div>
+        <h1>Game Localization Kit Dashboard</h1>
+        <p class="subtitle">
+          현재 작업 단계와 검수 준비 상태를 확인하고, 필요한 검수 화면으로 바로 이동합니다.
+        </p>
+      </div>
+      <div class="header-side">
+        <span id="lastUpdated">불러오는 중…</span>
+        <div class="ai-settings-summary" aria-live="polite">
+          <span id="aiKeySummary">API 키 확인 중…</span>
+          <span id="aiModelSummary">모델 확인 중…</span>
+        </div>
+        <div class="header-actions">
+          <button class="header-button ai-settings-button"
+            id="aiSettingsButton"
+            type="button">AI 설정</button>
+          <button class="header-button refresh" id="refreshButton"
+            type="button">새로고침</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="summary-grid" aria-label="프로젝트 요약">
+      <article class="summary-card">
+        <span class="summary-label">전체 프로젝트</span>
+        <strong class="summary-value" id="summaryProjects">—</strong>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">진행 중</span>
+        <strong class="summary-value" id="summaryProgress">—</strong>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">완료</span>
+        <strong class="summary-value" id="summaryCompleted">—</strong>
+      </article>
+      <article class="summary-card">
+        <span class="summary-label">확인 필요</span>
+        <strong class="summary-value" id="summaryAttention">—</strong>
+      </article>
+    </section>
+
+    <section class="toolbar" aria-label="프로젝트 검색 및 필터">
+      <input class="search" id="searchInput" type="search"
+        placeholder="프로젝트 이름 또는 ID 검색" autocomplete="off">
+      <div class="filters" role="group" aria-label="상태 필터">
+        <button class="filter active" type="button" data-filter="all">전체</button>
+        <button class="filter" type="button" data-filter="progress">진행 중</button>
+        <button class="filter" type="button" data-filter="completed">완료</button>
+        <button class="filter" type="button" data-filter="attention">확인 필요</button>
+      </div>
+    </section>
+
+    <aside class="warning" id="warningBanner" role="status"></aside>
+    <section class="project-grid" id="projectGrid" aria-live="polite"></section>
+    <section class="empty" id="emptyState">
+      <button class="empty-mark" id="emptyCreateButton" type="button"
+        aria-label="새 프로젝트 만들기">+</button>
+      <h2 id="emptyTitle">아직 프로젝트가 없습니다</h2>
+      <p id="emptyText">새 프로젝트를 만들고 번역 작업을 시작하세요.</p>
+    </section>
+  </main>
+
+  <dialog id="projectDialog" aria-labelledby="projectDialogTitle">
+    <form class="modal-form" id="projectForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">New workspace</p>
+          <h2 id="projectDialogTitle">새 프로젝트 만들기</h2>
+        </div>
+        <button class="modal-close" id="projectDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <div class="field">
+        <label for="projectName">프로젝트 이름</label>
+        <input id="projectName" name="name" type="text" maxlength="200"
+          placeholder="예: 판타지 게임 룰북" autocomplete="off" required>
+        <p class="field-help">대시보드와 프로젝트 설정에 표시되는 이름입니다.</p>
+      </div>
+
+      <div class="field">
+        <label for="projectId">프로젝트 ID</label>
+        <input id="projectId" name="project_id" type="text" maxlength="80"
+          placeholder="예: fantasy_game_rulebook" autocomplete="off"
+          autocapitalize="none" spellcheck="false"
+          pattern="[a-z0-9]+(?:_[a-z0-9]+)*" required
+          title="영문 소문자, 숫자, 밑줄(_)만 입력하세요.">
+        <p class="field-help">
+          영문 소문자, 숫자, 밑줄(_)만 사용할 수 있습니다. 폴더명과
+          CLI의 <code>--project</code> 값으로 사용됩니다.
+        </p>
+      </div>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel" id="projectDialogCancel"
+          type="button">취소</button>
+        <button class="modal-button modal-submit" id="projectSubmit"
+          type="submit">프로젝트 생성</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="sourceDialog" aria-labelledby="sourceDialogTitle">
+    <form class="modal-form" id="sourceForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker" id="sourceDialogKicker">Register originals</p>
+          <h2 id="sourceDialogTitle">원본 등록</h2>
+        </div>
+        <button class="modal-close" id="sourceDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <p class="source-note" id="sourceDialogNote">
+        선택한 파일은 프로젝트의 <code>01_input</code>에 복사합니다.
+        이 단계에서는 추출·OCR이나 Gemini 호출을 실행하지 않습니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="sourceProjectName"></strong>
+        <code id="sourceProjectId"></code>
+      </div>
+
+      <div class="source-type-options" role="radiogroup"
+        aria-label="원본 형식">
+        <label class="source-type-option">
+          <input type="radio" name="source_type" value="pdf" checked>
+          <span>PDF 한 개</span>
+        </label>
+        <label class="source-type-option">
+          <input type="radio" name="source_type" value="images">
+          <span>이미지 여러 장</span>
+        </label>
+      </div>
+
+      <div class="field">
+        <label for="sourceFiles" id="sourceFilesLabel">PDF 파일</label>
+        <input id="sourceFiles" name="files" type="file"
+          accept=".pdf,application/pdf" required>
+        <p class="field-help" id="sourceFilesHelp">
+          PDF 파일 한 개를 선택하세요. 전체 업로드 한도는 256 MiB입니다.
+        </p>
+        <ul class="selected-files" id="selectedFiles"
+          aria-live="polite"></ul>
+      </div>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel" id="sourceDialogCancel"
+          type="button">취소</button>
+        <button class="modal-button source-submit" id="sourceSubmit"
+          type="submit">원본 등록</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="ocrPromptDialog" aria-labelledby="ocrPromptDialogTitle">
+    <form class="modal-form" id="ocrPromptForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Edit OCR prompt</p>
+          <h2 id="ocrPromptDialogTitle">OCR 프롬프트 수정</h2>
+        </div>
+        <button class="modal-close" id="ocrPromptDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <p class="source-note">
+        이미지 원본은 그대로 유지하고 프로젝트 공통 OCR 프롬프트만
+        저장합니다. OCR 시작 전까지만 수정할 수 있습니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="ocrPromptProjectName"></strong>
+        <code id="ocrPromptProjectId"></code>
+      </div>
+
+      <div class="field">
+        <div class="field-label-row">
+          <label for="ocrPromptEdit">OCR 프롬프트</label>
+          <button class="field-reset" id="ocrPromptEditReset" type="button">
+            편집 전 내용으로 되돌리기
+          </button>
+        </div>
+        <textarea id="ocrPromptEdit" name="ocr_prompt"
+          aria-describedby="ocrPromptEditHelp" spellcheck="false"
+          required></textarea>
+        <div class="field-help-row">
+          <p class="field-help" id="ocrPromptEditHelp">
+            <code>01_input/images/ocr_prompt.txt</code>만 변경됩니다.
+          </p>
+          <span class="field-count" id="ocrPromptEditCount"></span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel" id="ocrPromptDialogCancel"
+          type="button">취소</button>
+        <button class="modal-button modal-submit" id="ocrPromptSubmit"
+          type="submit">프롬프트 저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="translationPromptDialog"
+    aria-labelledby="translationPromptDialogTitle">
+    <form class="modal-form" id="translationPromptForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Edit translation prompt</p>
+          <h2 id="translationPromptDialogTitle">번역 프롬프트 설정</h2>
+        </div>
+        <button class="modal-close" id="translationPromptDialogClose"
+          type="button" aria-label="닫기">×</button>
+      </div>
+
+      <p class="source-note">
+        Gemini를 호출하지 않고 프로젝트 공통 번역 지침만
+        <code>04_translation/prompt.txt</code>에 저장합니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="translationPromptProjectName"></strong>
+        <code id="translationPromptProjectId"></code>
+      </div>
+
+      <p class="source-note" id="translationPromptImpact" hidden></p>
+
+      <div class="field">
+        <div class="field-label-row">
+          <label for="translationPromptEdit">번역 문체·표현 지침</label>
+          <button class="field-reset" id="translationPromptEditReset"
+            type="button">편집 전 내용으로 되돌리기</button>
+        </div>
+        <textarea id="translationPromptEdit" name="translation_prompt"
+          aria-describedby="translationPromptEditHelp" spellcheck="false"
+          required></textarea>
+        <div class="field-help-row">
+          <p class="field-help" id="translationPromptEditHelp">
+            용어집, 숫자, token과 블록 보존 규칙보다 우선할 수 없습니다.
+          </p>
+          <span class="field-count" id="translationPromptEditCount"></span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel"
+          id="translationPromptDialogCancel" type="button">취소</button>
+        <button class="modal-button modal-submit"
+          id="translationPromptSave" type="submit">프롬프트 저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="sourceFilesDialog" aria-labelledby="sourceFilesDialogTitle">
+    <div class="modal-form">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Registered originals</p>
+          <h2 id="sourceFilesDialogTitle">원본 파일 목록</h2>
+        </div>
+        <button class="modal-close" id="sourceFilesDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <div class="delete-identity">
+        <strong id="sourceFilesProjectName"></strong>
+        <code id="sourceFilesProjectId"></code>
+      </div>
+      <ol class="registered-source-files" id="registeredSourceFiles"></ol>
+
+      <div class="modal-actions">
+        <button class="modal-button source-files-replace"
+          id="sourceFilesReplace" type="button">원본 교체</button>
+        <button class="modal-button modal-cancel" id="sourceFilesDialogDone"
+          type="button">닫기</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="aiSettingsDialog" aria-labelledby="aiSettingsDialogTitle">
+    <form class="modal-form" id="aiSettingsForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Gemini configuration</p>
+          <h2 id="aiSettingsDialogTitle">AI 설정</h2>
+        </div>
+        <button class="modal-close" id="aiSettingsDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <dl class="ai-settings-status">
+        <div>
+          <dt>API 키</dt>
+          <dd>
+            <span class="settings-primary" id="aiApiKeyStatus">확인 중…</span>
+            <span class="settings-secondary"
+              id="aiApiKeySource"></span>
+          </dd>
+        </div>
+        <div>
+          <dt>현재 모델</dt>
+          <dd>
+            <span class="settings-primary" id="aiModelStatus">확인 중…</span>
+            <span class="settings-secondary"
+              id="aiModelSource"></span>
+          </dd>
+        </div>
+      </dl>
+
+      <p class="environment-note" id="aiEnvironmentNote">
+        셸 환경변수가 설정되어 있어 이 화면에서 저장한 값보다 우선 적용됩니다.
+        환경변수를 제거하고 대시보드를 다시 실행하면 .env 값이 적용됩니다.
+      </p>
+
+      <div class="field">
+        <label for="aiApiKey">Gemini API 키</label>
+        <div class="password-input">
+          <input id="aiApiKey" type="password" autocomplete="new-password"
+            maxlength="512"
+            placeholder="새 키를 입력하지 않으면 기존 키를 유지합니다">
+          <button class="password-toggle" id="aiApiKeyToggle"
+            type="button">보기</button>
+        </div>
+        <p class="field-help">
+          키 값은 저장 후 다시 표시하지 않으며 현재 GLK 설정 디렉터리의 .env에 보관합니다.
+        </p>
+      </div>
+
+      <div class="field">
+        <label for="aiModelPreset">Gemini 모델</label>
+        <select id="aiModelPreset">
+          <option value="">모델 목록 불러오는 중…</option>
+        </select>
+        <p class="model-description" id="aiModelDescription"></p>
+      </div>
+
+      <div class="field" id="aiCustomModelField" hidden>
+        <label for="aiCustomModel">모델 이름</label>
+        <input id="aiCustomModel" type="text" maxlength="200"
+          placeholder="예: gemini-2.5-flash">
+      </div>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel" id="aiSettingsDialogCancel"
+          type="button">취소</button>
+        <button class="modal-button modal-submit" id="aiSettingsSubmit"
+          type="submit">저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="sourceJobDialog" aria-labelledby="sourceJobDialogTitle">
+    <form class="modal-form" id="sourceJobForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Background source job</p>
+          <h2 id="sourceJobDialogTitle">원문 준비 시작</h2>
+        </div>
+        <button class="modal-close" id="sourceJobDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <p class="source-note">
+        Gemini API를 사용해 원문을 추출한 뒤 검수 블록 생성과 로컬 QA까지
+        백그라운드에서 실행합니다. API 사용량에 따라 비용이 발생할 수 있습니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="sourceJobProjectName"></strong>
+        <code id="sourceJobProjectId"></code>
+      </div>
+      <div class="job-summary">
+        <div>
+          <span>원본 형식</span>
+          <strong id="sourceJobType"></strong>
+        </div>
+        <div>
+          <span>사용 모델</span>
+          <strong id="sourceJobModel"></strong>
+        </div>
+      </div>
+      <div class="field" id="sourceJobOcrPromptField" hidden>
+        <label for="sourceJobOcrPrompt">이번 작업에 적용할 OCR 프롬프트</label>
+        <textarea id="sourceJobOcrPrompt" readonly
+          aria-describedby="sourceJobOcrPromptHelp"
+          spellcheck="false"></textarea>
+        <p class="field-help" id="sourceJobOcrPromptHelp">
+          실행 전 확인용 읽기 전용 내용입니다. 변경하려면 취소한 뒤 프로젝트
+          카드의 <strong>OCR 프롬프트 수정</strong>을 사용하세요.
+        </p>
+      </div>
+      <p class="field-help" style="margin-top:14px">
+        동시에 하나의 원문 준비 작업만 실행합니다. 실행 중에는 원본 교체,
+        OCR 프롬프트 수정과 프로젝트 삭제가 잠깁니다.
+      </p>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel" id="sourceJobDialogCancel"
+          type="button">취소</button>
+        <button class="modal-button modal-submit" id="sourceJobSubmit"
+          type="submit">원문 준비 시작</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="glossaryJobDialog" aria-labelledby="glossaryJobDialogTitle">
+    <form class="modal-form" id="glossaryJobForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Local terminology job</p>
+          <h2 id="glossaryJobDialogTitle">용어 후보 생성</h2>
+        </div>
+        <button class="modal-close" id="glossaryJobDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <p class="source-note">
+        최종 승인된 원문에서 반복되는 이름과 게임 용어 후보를 수집해
+        검수용 TSV를 만듭니다. 이 작업은 Gemini API를 사용하지 않으며
+        비용이 발생하지 않습니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="glossaryJobProjectName"></strong>
+        <code id="glossaryJobProjectId"></code>
+      </div>
+      <p class="field-help" style="margin-top:14px">
+        생성이 끝나면 용어 검수 버튼이 활성화됩니다. 기존 검수 파일이
+        오래된 경우에는 사용자 편집을 보호하기 위해 자동으로 덮어쓰지 않습니다.
+      </p>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel" id="glossaryJobDialogCancel"
+          type="button">취소</button>
+        <button class="modal-button modal-submit" id="glossaryJobSubmit"
+          type="submit">용어 후보 생성 시작</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="translationJobDialog"
+    aria-labelledby="translationJobDialogTitle">
+    <form class="modal-form" id="translationJobForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Background translation job</p>
+          <h2 id="translationJobDialogTitle">초벌 번역 시작</h2>
+        </div>
+        <button class="modal-close" id="translationJobDialogClose"
+          type="button" aria-label="닫기">×</button>
+      </div>
+
+      <p class="source-note">
+        최종 승인 원문과 확정 용어집을 Gemini에 보내 초벌 번역과 검수 파일을
+        만듭니다. 청크마다 API를 호출하므로 입력량과 모델에 따라 비용이
+        발생할 수 있습니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="translationJobProjectName"></strong>
+        <code id="translationJobProjectId"></code>
+      </div>
+      <div class="job-summary">
+        <div>
+          <span>사용 모델</span>
+          <strong id="translationJobModel"></strong>
+        </div>
+        <div>
+          <span>실행 방식</span>
+          <strong id="translationJobMode"></strong>
+        </div>
+      </div>
+      <div class="field" style="margin-top:16px">
+        <label for="translationPrompt">번역 문체·표현 지침</label>
+        <textarea id="translationPrompt" name="translation_prompt"
+          aria-describedby="translationPromptHelp" spellcheck="false"
+          required></textarea>
+        <div class="field-help-row">
+          <p class="field-help" id="translationPromptHelp">
+            카드의 번역 프롬프트 설정에서 저장한 내용을 사용합니다.
+          </p>
+          <span class="field-count" id="translationPromptCount"></span>
+        </div>
+      </div>
+      <p class="field-help" id="translationResumeNote"
+        style="margin-top:14px" hidden>
+        중간 실패 뒤 이어하기에서는 저장된 청크의 입력 hash를 보호하기 위해
+        번역 지침을 변경할 수 없습니다.
+      </p>
+      <p class="source-note" id="translationForceNote"
+        style="margin-top:14px" hidden>
+        기존 번역·검수·최종 출력은 revisions에 보관한 뒤 새 프롬프트로 전체
+        재번역합니다. 성공하면 번역 검수는 새 초벌을 기준으로 초기화됩니다.
+      </p>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel"
+          id="translationJobDialogCancel" type="button">취소</button>
+        <button class="modal-button modal-submit" id="translationJobSubmit"
+          type="submit">초벌 번역 시작</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="deleteDialog" aria-labelledby="deleteDialogTitle">
+    <form class="modal-form" id="deleteForm">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker">Move to trash</p>
+          <h2 id="deleteDialogTitle">프로젝트 삭제</h2>
+        </div>
+        <button class="modal-close" id="deleteDialogClose" type="button"
+          aria-label="닫기">×</button>
+      </div>
+
+      <p class="delete-warning">
+        프로젝트 폴더 전체를 운영체제 휴지통으로 이동합니다. 휴지통을 비우기
+        전에는 Finder 또는 파일 탐색기에서 복구할 수 있습니다.
+      </p>
+      <div class="delete-identity">
+        <strong id="deleteProjectName"></strong>
+        <code id="deleteProjectId"></code>
+      </div>
+
+      <div class="modal-actions">
+        <button class="modal-button modal-cancel" id="deleteDialogCancel"
+          type="button">취소</button>
+        <button class="modal-button modal-delete" id="deleteSubmit"
+          type="submit">휴지통으로 이동</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script>
+    "use strict";
+
+    const AUTH_TOKEN = __GLK_TOKEN_JSON__;
+    const MAX_OCR_PROMPT_BYTES = 64 * 1024;
+    const MAX_TRANSLATION_PROMPT_BYTES = 64 * 1024;
+    const reviewLabels = {
+      source: "원문 검수",
+      glossary: "용어 검수",
+      translation: "번역 검수",
+    };
+    let dashboard = null;
+    let activeFilter = "all";
+    let toastTimer = null;
+    let aiSettings = null;
+    let aiModelCatalog = null;
+    let sourceJobs = new Map();
+    let glossaryJobs = new Map();
+    let translationJobs = new Map();
+    let sourceJobPollTimer = null;
+    let pendingSourceJobProject = null;
+    let pendingGlossaryJobProject = null;
+    let pendingTranslationJobProject = null;
+    let pendingSourceProject = null;
+    let pendingSourceFilesProject = null;
+    let pendingOcrPromptProject = null;
+    let pendingTranslationPromptProject = null;
+    let pendingDeleteProject = null;
+    let pendingTranslationForce = false;
+
+    const byId = (id) => document.getElementById(id);
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    async function api(path, options = {}) {
+      const isFormData = options.body instanceof FormData;
+      const response = await fetch(path, {
+        ...options,
+        headers: {
+          "X-GLK-Token": AUTH_TOKEN,
+          ...(options.body && !isFormData
+            ? {"Content-Type": "application/json"} : {}),
+          ...(options.headers || {}),
+        },
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.message || "요청을 처리하지 못했습니다.");
+      }
+      return payload;
+    }
+
+    function showToast(message, isError = false) {
+      const toast = byId("toast");
+      const openDialogs = document.querySelectorAll("dialog[open]");
+      const toastHost = openDialogs.length
+        ? openDialogs[openDialogs.length - 1]
+        : document.body;
+      toastHost.append(toast);
+      toast.textContent = message;
+      toast.className = `toast show${isError ? " error" : ""}`;
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => {
+        toast.className = "toast";
+        if (toast.parentElement !== document.body) {
+          document.body.append(toast);
+        }
+      }, 3500);
+    }
+
+    function aiSettingSourceLabel(source) {
+      return {
+        environment: "셸 환경변수",
+        env_file: ".env",
+        default: "프로그램 기본값",
+        missing: "미설정",
+      }[source] || source;
+    }
+
+    function aiSettingSourceDescription(source) {
+      return source === "default"
+        ? "프로그램 기본값 사용 중"
+        : `${aiSettingSourceLabel(source)}에서 적용 중`;
+    }
+
+    function renderAiSettings() {
+      if (!aiSettings) return;
+      const keyLabel = aiSettings.api_key_configured
+        ? "API 키 설정 완료"
+        : "API 키 미설정";
+      byId("aiKeySummary").textContent = keyLabel;
+      byId("aiKeySummary").classList.toggle(
+        "missing",
+        !aiSettings.api_key_configured,
+      );
+      byId("aiModelSummary").textContent = aiSettings.model;
+      byId("aiApiKeyStatus").textContent = keyLabel;
+      byId("aiApiKeySource").textContent = aiSettings.api_key_configured
+        ? aiSettingSourceDescription(aiSettings.api_key_source)
+        : "Gemini 작업 전에 키를 입력하세요";
+      byId("aiModelStatus").textContent = aiSettings.model;
+      byId("aiModelSource").textContent =
+        aiSettingSourceDescription(aiSettings.model_source);
+      const overridden = Object.values(
+        aiSettings.environment_override || {},
+      ).some(Boolean);
+      byId("aiEnvironmentNote").classList.toggle("visible", overridden);
+      render();
+    }
+
+    function renderAiModelOptions() {
+      const select = byId("aiModelPreset");
+      select.replaceChildren();
+      for (const model of aiModelCatalog?.models || []) {
+        const option = document.createElement("option");
+        option.value = model.id;
+        option.textContent = model.id;
+        select.append(option);
+      }
+      const custom = document.createElement("option");
+      custom.value = "custom";
+      custom.textContent = "직접 입력";
+      select.append(custom);
+    }
+
+    async function loadAiSettings(silent = false) {
+      try {
+        const result = await api("/api/settings/ai");
+        aiSettings = result.settings;
+        aiModelCatalog = result.model_catalog;
+        renderAiModelOptions();
+        renderAiSettings();
+        return aiSettings;
+      } catch (error) {
+        byId("aiKeySummary").textContent = "AI 설정 확인 실패";
+        byId("aiKeySummary").classList.add("missing");
+        byId("aiModelSummary").textContent = "서버 연결을 확인하세요";
+        if (!silent) showToast(error.message, true);
+        throw error;
+      }
+    }
+
+    function updateAiModelInput() {
+      const custom = byId("aiModelPreset").value === "custom";
+      byId("aiCustomModelField").hidden = !custom;
+      byId("aiCustomModel").required = custom;
+      const selected = aiModelCatalog?.models?.find(
+        (model) => model.id === byId("aiModelPreset").value,
+      );
+      byId("aiModelDescription").textContent = custom
+        ? "목록에 없는 실제 Gemini API 모델 ID를 입력합니다."
+        : selected?.description_ko || "";
+    }
+
+    async function openAiSettingsDialog() {
+      const button = byId("aiSettingsButton");
+      button.disabled = true;
+      try {
+        await loadAiSettings();
+        const presets = (aiModelCatalog?.models || []).map(
+          (model) => model.id,
+        );
+        const isPreset = presets.includes(aiSettings.model);
+        byId("aiModelPreset").value =
+          isPreset ? aiSettings.model : "custom";
+        byId("aiCustomModel").value = isPreset ? "" : aiSettings.model;
+        byId("aiApiKey").value = "";
+        byId("aiApiKey").type = "password";
+        byId("aiApiKeyToggle").textContent = "보기";
+        updateAiModelInput();
+        byId("aiSettingsDialog").showModal();
+        byId("aiApiKey").focus();
+      } catch {
+        // loadAiSettings already displays a localized error.
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function closeAiSettingsDialog() {
+      byId("aiSettingsDialog").close();
+    }
+
+    function selectedAiModel() {
+      return byId("aiModelPreset").value === "custom"
+        ? byId("aiCustomModel").value.trim()
+        : byId("aiModelPreset").value;
+    }
+
+    async function saveAiSettings(event) {
+      event.preventDefault();
+      const model = selectedAiModel();
+      if (!model) {
+        showToast("사용할 Gemini 모델 이름을 입력하세요.", true);
+        byId("aiCustomModel").focus();
+        return;
+      }
+      const submit = byId("aiSettingsSubmit");
+      submit.disabled = true;
+      try {
+        const result = await api("/api/settings/ai", {
+          method: "PUT",
+          body: JSON.stringify({
+            api_key: byId("aiApiKey").value,
+            model,
+          }),
+        });
+        aiSettings = result.settings;
+        renderAiSettings();
+        closeAiSettingsDialog();
+        showToast("AI 설정을 저장했습니다.");
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    function sourceJobFor(projectId) {
+      return sourceJobs.get(projectId) || null;
+    }
+
+    function activeSourceJob() {
+      return [...sourceJobs.values()].find(
+        (job) => ["queued", "running"].includes(job.status),
+      ) || null;
+    }
+
+    function sourceJobIsActive(projectId) {
+      const job = sourceJobFor(projectId);
+      return Boolean(
+        job && ["queued", "running"].includes(job.status),
+      );
+    }
+
+    function glossaryJobFor(projectId) {
+      return glossaryJobs.get(projectId) || null;
+    }
+
+    function activeGlossaryJob() {
+      return [...glossaryJobs.values()].find(
+        (job) => ["queued", "running"].includes(job.status),
+      ) || null;
+    }
+
+    function glossaryJobIsActive(projectId) {
+      const job = glossaryJobFor(projectId);
+      return Boolean(
+        job && ["queued", "running"].includes(job.status),
+      );
+    }
+
+    function translationJobFor(projectId) {
+      return translationJobs.get(projectId) || null;
+    }
+
+    function activeTranslationJob() {
+      return [...translationJobs.values()].find(
+        (job) => ["queued", "running"].includes(job.status),
+      ) || null;
+    }
+
+    function translationJobIsActive(projectId) {
+      const job = translationJobFor(projectId);
+      return Boolean(
+        job && ["queued", "running"].includes(job.status),
+      );
+    }
+
+    function activeBackgroundJob() {
+      return activeSourceJob()
+        || activeGlossaryJob()
+        || activeTranslationJob();
+    }
+
+    function projectJobIsActive(projectId) {
+      return sourceJobIsActive(projectId)
+        || glossaryJobIsActive(projectId)
+        || translationJobIsActive(projectId);
+    }
+
+    function sourceJobStatusLabel(status) {
+      return {
+        queued: "실행 대기",
+        running: "원문 준비 중",
+        succeeded: "원문 준비 완료",
+        partial: "일부 처리 실패",
+        failed: "실행 실패",
+        interrupted: "실행 중단",
+      }[status] || status;
+    }
+
+    function sourceJobStatus(project) {
+      const job = sourceJobFor(project.project_id);
+      if (!job || job.status === "succeeded") return "";
+      const active = ["queued", "running"].includes(job.status);
+      const failed = ["partial", "failed", "interrupted"].includes(
+        job.status,
+      );
+      if (!active && !failed) return "";
+      const progress = (
+        Number.isInteger(job.progress_current)
+        && Number.isInteger(job.progress_total)
+        && job.progress_total > 0
+      )
+        ? `<progress class="job-progress"
+            value="${Math.min(job.progress_current, job.progress_total)}"
+            max="${job.progress_total}"></progress>`
+        : "";
+      const error = job.error
+        ? `<p class="job-error">${escapeHtml(job.error)}</p>`
+        : "";
+      return `<div class="job-status${failed ? " failed" : ""}">
+        <div class="job-status-head">
+          <span>${sourceJobStatusLabel(job.status)}</span>
+          <span>${escapeHtml(job.model)}</span>
+        </div>
+        ${progress}
+        <p class="job-status-message">
+          ${escapeHtml(job.progress_message || "")}
+        </p>
+        ${error}
+      </div>`;
+    }
+
+    function sourceJobButton(project) {
+      if (
+        !["pdf", "images"].includes(project.source_type)
+        || project.reviews.source.enabled
+      ) {
+        return "";
+      }
+      const active = activeBackgroundJob();
+      if (sourceJobIsActive(project.project_id)) return "";
+      if (active) {
+        return `<button class="source-job-button" type="button" disabled
+          title="${escapeHtml(active.project_id)} 백그라운드 작업이 실행 중입니다.">
+          다른 백그라운드 작업 실행 중
+        </button>`;
+      }
+      if (!aiSettings?.api_key_configured) {
+        return `<button class="source-job-button" type="button"
+          data-require-ai-settings>
+          AI 설정 후 원문 준비
+        </button>`;
+      }
+      const previous = sourceJobFor(project.project_id);
+      const retry = (
+        project.pipeline.source_processing_started
+        || ["partial", "failed", "interrupted"].includes(previous?.status)
+      );
+      const action = project.source_type === "pdf"
+        ? "PDF 원문 준비"
+        : "이미지 OCR 및 원문 준비";
+      return `<button class="source-job-button" type="button"
+        data-start-source-job="${escapeHtml(project.project_id)}">
+        ${action}${retry ? " 다시 실행" : " 시작"}
+      </button>`;
+    }
+
+    function glossaryJobStatus(project) {
+      const job = glossaryJobFor(project.project_id);
+      if (!job || job.status === "succeeded") return "";
+      const active = ["queued", "running"].includes(job.status);
+      const failed = ["failed", "interrupted"].includes(job.status);
+      if (!active && !failed) return "";
+      const progress = (
+        Number.isInteger(job.progress_current)
+        && Number.isInteger(job.progress_total)
+        && job.progress_total > 0
+      )
+        ? `<progress class="job-progress"
+            value="${Math.min(job.progress_current, job.progress_total)}"
+            max="${job.progress_total}"></progress>`
+        : "";
+      const error = job.error
+        ? `<p class="job-error">${escapeHtml(job.error)}</p>`
+        : "";
+      const label = {
+        queued: "용어 후보 생성 대기",
+        running: "용어 후보 생성 중",
+        failed: "용어 후보 생성 실패",
+        interrupted: "용어 후보 생성 중단",
+      }[job.status] || job.status;
+      return `<div class="job-status${failed ? " failed" : ""}">
+        <div class="job-status-head">
+          <span>${label}</span>
+          <span>로컬 작업</span>
+        </div>
+        ${progress}
+        <p class="job-status-message">
+          ${escapeHtml(job.progress_message || "")}
+        </p>
+        ${error}
+      </div>`;
+    }
+
+    function glossaryJobButton(project) {
+      if (
+        !project.pipeline.final_source_approved
+        || project.pipeline.glossary_status === "current"
+        || glossaryJobIsActive(project.project_id)
+      ) {
+        return "";
+      }
+      if (project.pipeline.glossary_status === "stale") {
+        return `<button class="glossary-job-button" type="button" disabled
+          title="기존 용어 검수 편집을 보호하기 위해 대시보드에서 덮어쓰지 않습니다.">
+          용어 후보 재생성은 CLI에서 확인
+        </button>`;
+      }
+      const active = activeBackgroundJob();
+      if (active) {
+        return `<button class="glossary-job-button" type="button" disabled
+          title="${escapeHtml(active.project_id)} 백그라운드 작업이 실행 중입니다.">
+          다른 백그라운드 작업 실행 중
+        </button>`;
+      }
+      const previous = glossaryJobFor(project.project_id);
+      const retry = ["failed", "interrupted"].includes(previous?.status);
+      return `<button class="glossary-job-button" type="button"
+        data-start-glossary-job="${escapeHtml(project.project_id)}">
+        용어 후보 생성${retry ? " 다시 시도" : " 시작"}
+      </button>`;
+    }
+
+    function translationJobStatus(project) {
+      const job = translationJobFor(project.project_id);
+      if (
+        !job
+        || job.status === "succeeded"
+        || project.pipeline.translation_status === "current"
+      ) return "";
+      const active = ["queued", "running"].includes(job.status);
+      const failed = ["failed", "interrupted"].includes(job.status);
+      if (!active && !failed) return "";
+      const progress = (
+        Number.isInteger(job.progress_current)
+        && Number.isInteger(job.progress_total)
+        && job.progress_total > 0
+      )
+        ? `<progress class="job-progress"
+            value="${Math.min(job.progress_current, job.progress_total)}"
+            max="${job.progress_total}"></progress>`
+        : "";
+      const error = job.error
+        ? `<p class="job-error">${escapeHtml(job.error)}</p>`
+        : "";
+      const label = {
+        queued: "초벌 번역 대기",
+        running: "초벌 번역 중",
+        failed: "초벌 번역 실패",
+        interrupted: "초벌 번역 중단",
+      }[job.status] || job.status;
+      return `<div class="job-status${failed ? " failed" : ""}">
+        <div class="job-status-head">
+          <span>${label}</span>
+          <span>${escapeHtml(job.model)}</span>
+        </div>
+        ${progress}
+        <p class="job-status-message">
+          ${escapeHtml(job.progress_message || "")}
+        </p>
+        ${error}
+      </div>`;
+    }
+
+    function translationReviewAttention(project) {
+      if (project.stage !== "translation_qa_failed") return "";
+      const count = project.pipeline.translation_qa_issues;
+      const countLabel = Number.isInteger(count)
+        ? `${count}개 오류`
+        : "확인 필요 항목";
+      return `<div class="translation-review-attention" role="status">
+        <strong>초벌 번역 완료 · ${escapeHtml(countLabel)}</strong>
+        <span>번역 결과는 보존했습니다. 번역 검수에서 표시된 블록을 수정한 뒤 다시 검사하세요.</span>
+      </div>`;
+    }
+
+    function translationJobButton(project) {
+      const status = project.pipeline.translation_status;
+      if (
+        project.pipeline.termbase_status !== "current"
+        || status === "current"
+        || translationJobIsActive(project.project_id)
+      ) {
+        return "";
+      }
+      if (!["not_run", "partial", "stale"].includes(status)) return "";
+      const active = activeBackgroundJob();
+      if (active) {
+        return `<button class="translation-job-button" type="button" disabled
+          title="${escapeHtml(active.project_id)} 백그라운드 작업이 실행 중입니다.">
+          다른 백그라운드 작업 실행 중
+        </button>`;
+      }
+      if (!aiSettings?.api_key_configured) {
+        return `<button class="translation-job-button" type="button"
+          data-require-ai-settings>
+          AI 설정 후 초벌 번역
+        </button>`;
+      }
+      const resume = status === "partial";
+      const force = status === "stale";
+      return `<button class="translation-job-button" type="button"
+        data-start-translation-job="${escapeHtml(project.project_id)}">
+        ${force
+          ? "변경된 프롬프트로 전체 재번역"
+          : resume
+          ? "초벌 번역 이어서 실행"
+          : "초벌 번역 시작"}
+      </button>`;
+    }
+
+    function setSourceJobs(jobs) {
+      sourceJobs = new Map(
+        jobs.map((job) => [job.project_id, job]),
+      );
+    }
+
+    function setGlossaryJobs(jobs) {
+      glossaryJobs = new Map(
+        jobs.map((job) => [job.project_id, job]),
+      );
+    }
+
+    function setTranslationJobs(jobs) {
+      translationJobs = new Map(
+        jobs.map((job) => [job.project_id, job]),
+      );
+    }
+
+    function scheduleSourceJobPoll() {
+      window.clearTimeout(sourceJobPollTimer);
+      sourceJobPollTimer = null;
+      if (activeBackgroundJob()) {
+        sourceJobPollTimer = window.setTimeout(pollSourceJobs, 1000);
+      }
+    }
+
+    async function pollSourceJobs() {
+      const previousSource = new Map(sourceJobs);
+      const previousGlossary = new Map(glossaryJobs);
+      const previousTranslation = new Map(translationJobs);
+      try {
+        const result = await api("/api/jobs");
+        setSourceJobs(result.jobs || []);
+        setGlossaryJobs(result.glossary_jobs || []);
+        setTranslationJobs(result.translation_jobs || []);
+        const completedSource = [...sourceJobs.values()].find((job) => {
+          const before = previousSource.get(job.project_id);
+          return (
+            before
+            && ["queued", "running"].includes(before.status)
+            && !["queued", "running"].includes(job.status)
+          );
+        });
+        const completedGlossary = [...glossaryJobs.values()].find((job) => {
+          const before = previousGlossary.get(job.project_id);
+          return (
+            before
+            && ["queued", "running"].includes(before.status)
+            && !["queued", "running"].includes(job.status)
+          );
+        });
+        const completedTranslation = [...translationJobs.values()].find(
+          (job) => {
+            const before = previousTranslation.get(job.project_id);
+            return (
+              before
+              && ["queued", "running"].includes(before.status)
+              && !["queued", "running"].includes(job.status)
+            );
+          },
+        );
+        if (completedSource || completedGlossary || completedTranslation) {
+          dashboard = await api("/api/dashboard");
+        }
+        if (completedSource) {
+          const message = completedSource.status === "succeeded"
+            ? "원문 검수 준비가 완료되었습니다."
+            : (completedSource.error || completedSource.progress_message);
+          showToast(
+            message,
+            completedSource.status !== "succeeded",
+          );
+        }
+        if (completedGlossary) {
+          const count = completedGlossary.result
+            ?.glossary?.candidate_count;
+          const message = completedGlossary.status === "succeeded"
+            ? `용어 후보 ${Number.isInteger(count) ? `${count}개 ` : ""}생성이 완료되었습니다.`
+            : (completedGlossary.error || completedGlossary.progress_message);
+          showToast(
+            message,
+            completedGlossary.status !== "succeeded",
+          );
+        }
+        if (completedTranslation) {
+          const blocks = completedTranslation.result
+            ?.translation?.completed_blocks;
+          const message = completedTranslation.status === "succeeded"
+            ? `초벌 번역 ${Number.isInteger(blocks) ? `${blocks}개 블록 ` : ""}생성이 완료되었습니다.`
+            : (
+              completedTranslation.error
+              || completedTranslation.progress_message
+            );
+          showToast(
+            message,
+            completedTranslation.status !== "succeeded",
+          );
+        }
+        render();
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        scheduleSourceJobPoll();
+      }
+    }
+
+    function openSourceJobDialog(projectId) {
+      if (!aiSettings?.api_key_configured) {
+        showToast("먼저 Gemini API 키를 설정하세요.", true);
+        openAiSettingsDialog();
+        return;
+      }
+      const project = dashboard?.projects.find(
+        (value) => value.project_id === projectId,
+      );
+      if (!project) {
+        showToast("프로젝트 정보를 찾지 못했습니다.", true);
+        return;
+      }
+      pendingSourceJobProject = project;
+      byId("sourceJobProjectName").textContent = project.name;
+      byId("sourceJobProjectId").textContent = project.project_id;
+      byId("sourceJobType").textContent =
+        project.source_type === "pdf" ? "PDF" : "이미지 OCR";
+      byId("sourceJobModel").textContent = aiSettings.model;
+      const showsOcrPrompt = project.source_type === "images";
+      byId("sourceJobOcrPromptField").hidden = !showsOcrPrompt;
+      byId("sourceJobOcrPrompt").value =
+        showsOcrPrompt ? project.ocr_prompt || "" : "";
+      byId("sourceJobSubmit").textContent =
+        project.source_type === "pdf"
+          ? "PDF 원문 준비 시작"
+          : "이미지 OCR 시작";
+      byId("sourceJobDialog").showModal();
+      byId("sourceJobDialogCancel").focus();
+    }
+
+    function closeSourceJobDialog() {
+      byId("sourceJobDialog").close();
+    }
+
+    async function startSourceJob(event) {
+      event.preventDefault();
+      if (!pendingSourceJobProject) return;
+      const submit = byId("sourceJobSubmit");
+      submit.disabled = true;
+      try {
+        const result = await api("/api/jobs/source", {
+          method: "POST",
+          body: JSON.stringify({
+            project_id: pendingSourceJobProject.project_id,
+          }),
+        });
+        sourceJobs.set(result.job.project_id, result.job);
+        closeSourceJobDialog();
+        render();
+        scheduleSourceJobPoll();
+        showToast("원문 준비 작업을 시작했습니다.");
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    function openGlossaryJobDialog(projectId) {
+      const project = dashboard?.projects.find(
+        (value) => value.project_id === projectId,
+      );
+      if (!project) {
+        showToast("프로젝트 정보를 찾지 못했습니다.", true);
+        return;
+      }
+      if (!project.pipeline.final_source_approved) {
+        showToast("먼저 원문을 최종 승인하세요.", true);
+        return;
+      }
+      pendingGlossaryJobProject = project;
+      byId("glossaryJobProjectName").textContent = project.name;
+      byId("glossaryJobProjectId").textContent = project.project_id;
+      byId("glossaryJobDialog").showModal();
+      byId("glossaryJobDialogCancel").focus();
+    }
+
+    function closeGlossaryJobDialog() {
+      byId("glossaryJobDialog").close();
+    }
+
+    async function startGlossaryJob(event) {
+      event.preventDefault();
+      if (!pendingGlossaryJobProject) return;
+      const submit = byId("glossaryJobSubmit");
+      submit.disabled = true;
+      try {
+        const result = await api("/api/jobs/glossary", {
+          method: "POST",
+          body: JSON.stringify({
+            project_id: pendingGlossaryJobProject.project_id,
+          }),
+        });
+        glossaryJobs.set(result.job.project_id, result.job);
+        closeGlossaryJobDialog();
+        render();
+        scheduleSourceJobPoll();
+        showToast("용어 후보 생성 작업을 시작했습니다.");
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    function updateTranslationPromptCount() {
+      const value = byId("translationPrompt").value;
+      const byteCount = new TextEncoder().encode(value).length;
+      const overLimit = byteCount > MAX_TRANSLATION_PROMPT_BYTES;
+      const count = byId("translationPromptCount");
+      count.textContent =
+        `${byteCount.toLocaleString()} / ${MAX_TRANSLATION_PROMPT_BYTES.toLocaleString()} bytes`;
+      count.classList.toggle("limit", overLimit);
+      byId("translationJobSubmit").disabled =
+        overLimit || !value.trim();
+    }
+
+    function openTranslationJobDialog(projectId) {
+      if (!aiSettings?.api_key_configured) {
+        showToast("먼저 Gemini API 키를 설정하세요.", true);
+        openAiSettingsDialog();
+        return;
+      }
+      const project = dashboard?.projects.find(
+        (value) => value.project_id === projectId,
+      );
+      if (!project) {
+        showToast("프로젝트 정보를 찾지 못했습니다.", true);
+        return;
+      }
+      if (project.pipeline.termbase_status !== "current") {
+        showToast("먼저 용어집을 확정하세요.", true);
+        return;
+      }
+      const resume = project.pipeline.translation_status === "partial";
+      const force = project.pipeline.translation_status === "stale";
+      pendingTranslationJobProject = project;
+      pendingTranslationForce = force;
+      byId("translationJobProjectName").textContent = project.name;
+      byId("translationJobProjectId").textContent = project.project_id;
+      byId("translationJobModel").textContent = aiSettings.model;
+      byId("translationJobMode").textContent =
+        force
+          ? "기존 결과 보관 후 전체 재번역"
+          : resume
+          ? "저장된 청크부터 이어하기"
+          : "새 초벌 번역";
+      byId("translationPrompt").value =
+        project.translation_prompt?.value || "";
+      byId("translationPrompt").readOnly = true;
+      byId("translationResumeNote").hidden = !resume;
+      byId("translationForceNote").hidden = !force;
+      byId("translationJobSubmit").textContent =
+        force
+          ? "전체 재번역 시작"
+          : resume
+          ? "초벌 번역 이어서 실행"
+          : "초벌 번역 시작";
+      updateTranslationPromptCount();
+      byId("translationJobDialog").showModal();
+      byId("translationJobDialogCancel").focus();
+    }
+
+    function closeTranslationJobDialog() {
+      byId("translationJobDialog").close();
+    }
+
+    async function startTranslationJob(event) {
+      event.preventDefault();
+      if (!pendingTranslationJobProject) return;
+      const submit = byId("translationJobSubmit");
+      submit.disabled = true;
+      try {
+        const result = await api("/api/jobs/translation", {
+          method: "POST",
+          body: JSON.stringify({
+            project_id: pendingTranslationJobProject.project_id,
+            prompt: byId("translationPrompt").value,
+            force: pendingTranslationForce,
+          }),
+        });
+        translationJobs.set(result.job.project_id, result.job);
+        closeTranslationJobDialog();
+        render();
+        scheduleSourceJobPoll();
+        showToast(
+          result.job.resume
+            ? "저장된 초벌 번역을 이어서 실행합니다."
+            : result.job.force
+            ? "기존 결과를 보관하고 전체 재번역을 시작했습니다."
+            : "초벌 번역 작업을 시작했습니다.",
+        );
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    function sourceTypeLabel(project) {
+      const type = project.source_type;
+      const count = project.source_files?.length || 0;
+      if (type === "images") return count ? `Images · ${count}개` : "Images";
+      if (type === "pdf") return "PDF";
+      if (type === "mixed") return count ? `Mixed · ${count}개` : "Mixed";
+      return "대기";
+    }
+
+    function stepState(project, key) {
+      const p = project.pipeline;
+      if (key === "source") {
+        return p.final_source_approved ? "done" :
+          (p.source_acquired || p.review_source_ready ? "attention" : "");
+      }
+      if (key === "review") {
+        return p.final_source_approved ? "done" :
+          (p.human_review === "pending" || p.human_review === "stale" ? "attention" : "");
+      }
+      if (key === "glossary") {
+        return p.termbase_status === "current" ? "done" :
+          (p.glossary_status !== "not_ready" ? "attention" : "");
+      }
+      return p.final_translation_approved ? "done" :
+        (p.translation_status !== "not_ready" ? "attention" : "");
+    }
+
+    function projectNeedsAttention(project) {
+      return project.stage === "translation_qa_failed" || !project.workspace_ready;
+    }
+
+    function matchesFilter(project) {
+      if (activeFilter === "completed") {
+        return project.pipeline.final_translation_approved;
+      }
+      if (activeFilter === "progress") {
+        return project.stage !== "not_started"
+          && !project.pipeline.final_translation_approved;
+      }
+      if (activeFilter === "attention") {
+        return projectNeedsAttention(project);
+      }
+      return true;
+    }
+
+    function reviewButton(project, type) {
+      const review = project.reviews[type];
+      const disabled = review.enabled ? "" : " disabled";
+      return `<button class="review-button" type="button"
+        data-project="${escapeHtml(project.project_id)}"
+        data-review="${type}" title="${escapeHtml(review.reason)}"${disabled}>
+        ${reviewLabels[type]}
+      </button>`;
+    }
+
+    function sourceRegistrationButton(project) {
+      if (sourceJobIsActive(project.project_id)) return "";
+      if (project.source_type) {
+        if (!project.source_replacement?.allowed) return "";
+        return `<button class="source-register-button replace" type="button"
+          data-register-source="${escapeHtml(project.project_id)}"
+          data-project-name="${escapeHtml(project.name)}"
+          data-source-type="${escapeHtml(project.source_type)}"
+          data-replace-source="true"
+          title="${escapeHtml(project.source_replacement.reason)}">
+          원본 교체
+        </button>`;
+      }
+      return `<button class="source-register-button" type="button"
+        data-register-source="${escapeHtml(project.project_id)}"
+        data-project-name="${escapeHtml(project.name)}"
+        data-replace-source="false">
+        PDF 또는 이미지 원본 등록
+      </button>`;
+    }
+
+    function ocrPromptEditButton(project) {
+      if (
+        project.source_type !== "images"
+        || !project.ocr_prompt_edit?.allowed
+        || sourceJobIsActive(project.project_id)
+      ) {
+        return "";
+      }
+      return `<button class="ocr-prompt-button" type="button"
+        data-edit-ocr-prompt="${escapeHtml(project.project_id)}"
+        title="${escapeHtml(project.ocr_prompt_edit.reason)}">
+        OCR 프롬프트 수정
+      </button>`;
+    }
+
+    function translationPromptEditButton(project) {
+      if (project.pipeline.termbase_status !== "current") return "";
+      const active = activeBackgroundJob();
+      const disabled = active ? " disabled" : "";
+      const title = active
+        ? `${active.project_id} 백그라운드 작업이 실행 중입니다.`
+        : "Gemini 호출 없이 프로젝트 번역 지침만 저장합니다.";
+      const label = project.translation_prompt?.saved
+        ? "번역 프롬프트 수정"
+        : "번역 프롬프트 설정";
+      return `<button class="translation-prompt-button" type="button"
+        data-edit-translation-prompt="${escapeHtml(project.project_id)}"
+        title="${escapeHtml(title)}"${disabled}>
+        ${label}
+      </button>`;
+    }
+
+    function sourceFileSummary(project) {
+      const files = project.source_files || [];
+      if (!files.length) return "";
+      const multipleImages =
+        project.source_type === "images" && files.length > 1;
+      const summary = multipleImages
+        ? `${files[0]} 외 ${files.length - 1}개`
+        : files[0];
+      const listButton = multipleImages
+        ? `<button class="source-file-list-button" type="button"
+            data-source-files="${escapeHtml(project.project_id)}"
+            aria-label="${escapeHtml(project.name)} 원본 파일 ${files.length}개 보기">
+            파일 목록
+          </button>`
+        : "";
+      return `<div class="source-file-row">
+        <span class="source-file-summary" title="${escapeHtml(summary)}">
+          ${escapeHtml(summary)}
+        </span>
+        ${listButton}
+      </div>`;
+    }
+
+    function formatFileSize(bytes) {
+      if (!Number.isFinite(bytes) || bytes < 0) return "";
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    function outputFiles(project) {
+      const outputs = project.outputs || [];
+      if (!outputs.length) return "";
+      const outputRow = (output, label) => `
+        <div class="output-file">
+          <div class="output-file-info">
+            <span class="output-file-name" title="${escapeHtml(output.name)}">
+              ${escapeHtml(output.name)}
+            </span>
+            <span class="output-file-size">
+              ${escapeHtml(formatFileSize(output.size_bytes))}
+            </span>
+          </div>
+          <button class="output-download-button" type="button"
+            data-download-output="${escapeHtml(output.path)}"
+            data-project="${escapeHtml(project.project_id)}"
+            data-download-name="${escapeHtml(output.download_name)}"
+            title="저장 위치를 선택해 다운로드"
+            aria-label="${escapeHtml(output.name)} 저장 위치 선택">
+            ${escapeHtml(label)}
+          </button>
+        </div>`;
+
+      let rows;
+      let summary;
+      const combined = outputs.find(
+        (output) => output.name === "combined_kor.txt",
+      );
+      const imageOutputs = outputs.filter(
+        (output) => output.name !== "combined_kor.txt",
+      );
+      if (
+        project.source_type === "images"
+        && combined
+        && imageOutputs.length
+      ) {
+        const archiveName =
+          `${project.project_id}_image_outputs.zip`;
+        const totalBytes = imageOutputs.reduce(
+          (sum, output) => sum + output.size_bytes,
+          0,
+        );
+        rows = outputRow(combined, "통합본 저장") + `
+          <div class="output-file">
+            <div class="output-file-info">
+              <span class="output-file-name"
+                title="이미지별 번역 파일 전체">
+                이미지별 번역 파일
+              </span>
+              <span class="output-file-size">
+                ${imageOutputs.length}개 TXT ·
+                ${escapeHtml(formatFileSize(totalBytes))}
+              </span>
+            </div>
+            <button class="output-download-button" type="button"
+              data-download-output-archive
+              data-project="${escapeHtml(project.project_id)}"
+              data-download-name="${escapeHtml(archiveName)}"
+              title="이미지별 파일을 ZIP으로 저장"
+              aria-label="이미지별 파일 ${imageOutputs.length}개 전체 저장">
+              이미지별 파일 전체 저장
+            </button>
+          </div>`;
+        summary = `이미지별 파일 ${imageOutputs.length}개`;
+      } else {
+        rows = outputs.map(
+          (output) => outputRow(output, "번역본 저장"),
+        ).join("");
+        summary = `${outputs.length}개 파일`;
+      }
+      return `<section class="output-files" aria-label="최종 번역 결과">
+        <div class="output-files-head">
+          <strong>최종 번역 결과</strong>
+          <span>${escapeHtml(summary)}</span>
+        </div>
+        <div class="output-file-list">${rows}</div>
+      </section>`;
+    }
+
+    function projectCard(project) {
+      const pathTitle = escapeHtml(project.path);
+      const jobLocked = projectJobIsActive(project.project_id);
+      return `<article class="project-card">
+        <div class="project-head">
+          <div>
+            <h2 class="project-name">${escapeHtml(project.name)}</h2>
+            <span class="project-id">${escapeHtml(project.project_id)}</span>
+          </div>
+          <div class="project-controls">
+            <span class="source-badge">${sourceTypeLabel(project)}</span>
+            <button class="delete-project-button" type="button"
+              data-delete-project="${escapeHtml(project.project_id)}"
+              data-project-name="${escapeHtml(project.name)}"
+              aria-label="${escapeHtml(project.name)} 프로젝트 삭제"
+              title="${jobLocked
+                ? "백그라운드 작업 중에는 삭제할 수 없습니다."
+                : "프로젝트 삭제"}"${jobLocked ? " disabled" : ""}>×</button>
+          </div>
+        </div>
+        ${sourceFileSummary(project)}
+        <div class="stage-row">
+          <span class="stage">${escapeHtml(project.stage_label)}</span>
+          <span class="progress-value">${project.progress}%</span>
+        </div>
+        <div class="progress-track" aria-label="진행률 ${project.progress}%">
+          <div class="progress-bar" style="width:${project.progress}%"></div>
+        </div>
+        <div class="pipeline" aria-label="작업 단계">
+          <span class="pipeline-step ${stepState(project, "source")}">원문 추출</span>
+          <span class="pipeline-step ${stepState(project, "review")}">원문 검수</span>
+          <span class="pipeline-step ${stepState(project, "glossary")}">용어 정리</span>
+          <span class="pipeline-step ${stepState(project, "translation")}">번역 검수</span>
+        </div>
+        ${outputFiles(project)}
+        <div class="actions">
+          ${sourceJobStatus(project)}
+          ${glossaryJobStatus(project)}
+          ${translationJobStatus(project)}
+          ${translationReviewAttention(project)}
+          ${sourceJobButton(project)}
+          ${glossaryJobButton(project)}
+          ${translationPromptEditButton(project)}
+          ${translationJobButton(project)}
+          ${ocrPromptEditButton(project)}
+          ${reviewButton(project, "source")}
+          ${reviewButton(project, "glossary")}
+          ${reviewButton(project, "translation")}
+          ${sourceRegistrationButton(project)}
+        </div>
+        <div class="path" title="${pathTitle}">${pathTitle}</div>
+      </article>`;
+    }
+
+    function createProjectCard() {
+      return `<button class="create-project-card" type="button"
+        data-create-project>
+        <span class="create-mark" aria-hidden="true">+</span>
+        <strong>새 프로젝트</strong>
+        <span>번역 작업 공간 추가</span>
+      </button>`;
+    }
+
+    function render() {
+      if (!dashboard) return;
+      const query = byId("searchInput").value.trim().toLocaleLowerCase("ko");
+      const projects = dashboard.projects.filter((project) => {
+        const haystack = `${project.name} ${project.project_id}`.toLocaleLowerCase("ko");
+        return haystack.includes(query) && matchesFilter(project);
+      });
+
+      const summary = dashboard.summary;
+      byId("summaryProjects").textContent = summary.projects;
+      byId("summaryProgress").textContent = summary.in_progress;
+      byId("summaryCompleted").textContent = summary.completed;
+      byId("summaryAttention").textContent = summary.needs_attention;
+
+      const warning = byId("warningBanner");
+      if (dashboard.warnings.length) {
+        warning.textContent =
+          `읽지 못한 프로젝트 폴더가 ${dashboard.warnings.length}개 있습니다. ` +
+          "터미널의 glk projects 결과에서 세부 내용을 확인하세요.";
+        warning.style.display = "block";
+      } else {
+        warning.style.display = "none";
+      }
+
+      const cards = projects.map(projectCard);
+      if (projects.length && activeFilter === "all" && !query) {
+        cards.push(createProjectCard());
+      }
+      byId("projectGrid").innerHTML = cards.join("");
+      const empty = byId("emptyState");
+      empty.style.display = projects.length ? "none" : "block";
+      if (!dashboard.projects.length) {
+        byId("emptyCreateButton").style.display = "block";
+        byId("emptyTitle").textContent = "아직 프로젝트가 없습니다";
+        byId("emptyText").textContent =
+          "새 프로젝트를 만들고 번역 작업을 시작하세요.";
+      } else {
+        byId("emptyCreateButton").style.display = "none";
+        byId("emptyTitle").textContent = "조건에 맞는 프로젝트가 없습니다";
+        byId("emptyText").textContent = "검색어나 상태 필터를 바꿔보세요.";
+      }
+    }
+
+    async function refresh(silent = false) {
+      const button = byId("refreshButton");
+      button.disabled = true;
+      try {
+        const [dashboardDocument, jobsDocument] = await Promise.all([
+          api("/api/dashboard"),
+          api("/api/jobs"),
+        ]);
+        dashboard = dashboardDocument;
+        setSourceJobs(jobsDocument.jobs || []);
+        setGlossaryJobs(jobsDocument.glossary_jobs || []);
+        setTranslationJobs(jobsDocument.translation_jobs || []);
+        render();
+        scheduleSourceJobPoll();
+        const time = new Intl.DateTimeFormat("ko-KR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }).format(new Date());
+        byId("lastUpdated").textContent = `${time} 기준`;
+        if (!silent) showToast("프로젝트 상태를 새로 불러왔습니다.");
+      } catch (error) {
+        byId("lastUpdated").textContent = "연결을 확인해 주세요";
+        showToast(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function openReview(projectId, reviewType) {
+      try {
+        const result = await api("/api/review/open", {
+          method: "POST",
+          body: JSON.stringify({
+            project_id: projectId,
+            review_type: reviewType,
+          }),
+        });
+        window.location.assign(result.url);
+      } catch (error) {
+        showToast(error.message, true);
+        await refresh(true);
+      }
+    }
+
+    async function saveDownload(
+      button,
+      {
+        requestUrl,
+        downloadName,
+        description,
+        mimeType,
+        extensions,
+      },
+    ) {
+      button.disabled = true;
+      try {
+        let fileHandle = null;
+        if (typeof window.showSaveFilePicker === "function") {
+          try {
+            fileHandle = await window.showSaveFilePicker({
+              suggestedName: downloadName,
+              types: [{
+                description,
+                accept: {[mimeType]: extensions},
+              }],
+            });
+          } catch (error) {
+            if (error?.name === "AbortError") return;
+            throw error;
+          }
+        }
+
+        const response = await fetch(requestUrl, {
+          headers: {"X-GLK-Token": AUTH_TOKEN},
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(
+            () => ({message: `HTTP ${response.status}`}),
+          );
+          throw new Error(payload.message || `HTTP ${response.status}`);
+        }
+        const blob = await response.blob();
+        if (fileHandle) {
+          const writable = await fileHandle.createWritable();
+          try {
+            await writable.write(blob);
+            await writable.close();
+          } catch (error) {
+            await writable.abort().catch(() => {});
+            throw error;
+          }
+          showToast(`'${downloadName}' 파일을 저장했습니다.`);
+        } else {
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = downloadName;
+          anchor.hidden = true;
+          document.body.append(anchor);
+          anchor.click();
+          anchor.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          showToast(`'${downloadName}' 다운로드를 시작했습니다.`);
+        }
+      } catch (error) {
+        showToast(error.message, true);
+        await refresh(true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function downloadOutput(button) {
+      const query = new URLSearchParams({
+        project_id: button.dataset.project,
+        path: button.dataset.downloadOutput,
+      });
+      await saveDownload(button, {
+        requestUrl: `/api/output?${query}`,
+        downloadName:
+          button.dataset.downloadName || "translation.txt",
+        description: "텍스트 파일",
+        mimeType: "text/plain",
+        extensions: [".txt"],
+      });
+    }
+
+    async function downloadOutputArchive(button) {
+      const projectId = button.dataset.project;
+      const query = new URLSearchParams({project_id: projectId});
+      await saveDownload(button, {
+        requestUrl: `/api/output-archive?${query}`,
+        downloadName:
+          button.dataset.downloadName
+          || `${projectId}_image_outputs.zip`,
+        description: "ZIP 압축 파일",
+        mimeType: "application/zip",
+        extensions: [".zip"],
+      });
+    }
+
+    function openProjectDialog() {
+      byId("projectDialog").showModal();
+      byId("projectName").focus();
+    }
+
+    function closeProjectDialog() {
+      byId("projectDialog").close();
+    }
+
+    function selectedSourceType() {
+      return byId("sourceForm").elements.source_type.value;
+    }
+
+    function promptBytes(inputId) {
+      return new TextEncoder().encode(byId(inputId).value).length;
+    }
+
+    function updatePromptCount(inputId, countId) {
+      const bytes = promptBytes(inputId);
+      const count = byId(countId);
+      count.textContent =
+        `${bytes.toLocaleString("ko-KR")} / ${MAX_OCR_PROMPT_BYTES.toLocaleString("ko-KR")} bytes`;
+      count.classList.toggle("limit", bytes > MAX_OCR_PROMPT_BYTES);
+      return bytes;
+    }
+
+    function updateOcrPromptEditCount() {
+      updatePromptCount("ocrPromptEdit", "ocrPromptEditCount");
+    }
+
+    function updateSourceFileInput() {
+      const input = byId("sourceFiles");
+      const images = selectedSourceType() === "images";
+      input.value = "";
+      input.multiple = images;
+      input.accept = images
+        ? ".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+        : ".pdf,application/pdf";
+      byId("sourceFilesLabel").textContent =
+        images ? "이미지 파일" : "PDF 파일";
+      byId("sourceFilesHelp").textContent = images
+        ? "PNG, JPG, JPEG, WebP 파일을 최대 200개 선택하세요. 파일명 자연순으로 등록합니다."
+        : "PDF 파일 한 개를 선택하세요. 전체 업로드 한도는 256 MiB입니다.";
+      byId("selectedFiles").replaceChildren();
+    }
+
+    function renderSelectedFiles() {
+      const collator = new Intl.Collator("ko", {
+        numeric: true,
+        sensitivity: "base",
+      });
+      const files = [...byId("sourceFiles").files]
+        .sort((left, right) => collator.compare(left.name, right.name));
+      const list = byId("selectedFiles");
+      list.replaceChildren();
+      for (const file of files) {
+        const item = document.createElement("li");
+        item.textContent = file.name;
+        list.append(item);
+      }
+    }
+
+    function openSourceDialog(projectId, projectName, replace, sourceType) {
+      const form = byId("sourceForm");
+      form.reset();
+      if (replace && ["pdf", "images"].includes(sourceType)) {
+        form.elements.source_type.value = sourceType;
+      }
+      pendingSourceProject = {
+        projectId,
+        projectName,
+        replace,
+      };
+      byId("sourceDialogKicker").textContent =
+        replace ? "Replace originals" : "Register originals";
+      byId("sourceDialogTitle").textContent =
+        replace ? "원본 교체" : "원본 등록";
+      byId("sourceDialogNote").innerHTML = replace
+        ? "기존 원본은 삭제되고 선택한 파일로 교체됩니다. 저장된 OCR 프롬프트는 유지되며 별도의 <code>OCR 프롬프트 수정</code> 버튼에서 변경할 수 있습니다. 원문 추출·OCR 시작 전까지만 교체할 수 있습니다."
+        : "선택한 파일은 프로젝트의 <code>01_input</code>에 복사합니다. 이미지 형식은 프로젝트 기본 OCR 프롬프트를 유지하며, 등록 뒤 별도의 <code>OCR 프롬프트 수정</code> 버튼에서 변경할 수 있습니다. 이 단계에서는 Gemini 호출을 실행하지 않습니다.";
+      byId("sourceSubmit").textContent =
+        replace ? "기존 원본 교체" : "원본 등록";
+      byId("sourceSubmit").classList.toggle(
+        "source-replace-submit",
+        replace,
+      );
+      byId("sourceProjectName").textContent = projectName;
+      byId("sourceProjectId").textContent = projectId;
+      updateSourceFileInput();
+      byId("sourceDialog").showModal();
+      byId("sourceFiles").focus();
+    }
+
+    function closeSourceDialog() {
+      byId("sourceDialog").close();
+    }
+
+    function openOcrPromptDialog(projectId) {
+      const project = dashboard?.projects.find(
+        (value) => value.project_id === projectId
+      );
+      if (!project?.ocr_prompt_edit?.allowed) {
+        showToast(
+          project?.ocr_prompt_edit?.reason
+            || "OCR 프롬프트를 수정할 수 없습니다.",
+          true,
+        );
+        return;
+      }
+      pendingOcrPromptProject = {
+        projectId,
+        savedOcrPrompt: project.ocr_prompt || "",
+      };
+      byId("ocrPromptProjectName").textContent = project.name;
+      byId("ocrPromptProjectId").textContent = project.project_id;
+      byId("ocrPromptEdit").value = project.ocr_prompt || "";
+      updateOcrPromptEditCount();
+      byId("ocrPromptDialog").showModal();
+      byId("ocrPromptEdit").focus();
+    }
+
+    function closeOcrPromptDialog() {
+      byId("ocrPromptDialog").close();
+    }
+
+    function updateTranslationPromptEditCount() {
+      const value = byId("translationPromptEdit").value;
+      const byteCount = new TextEncoder().encode(value).length;
+      const overLimit = byteCount > MAX_TRANSLATION_PROMPT_BYTES;
+      const count = byId("translationPromptEditCount");
+      count.textContent =
+        `${byteCount.toLocaleString()} / ${MAX_TRANSLATION_PROMPT_BYTES.toLocaleString()} bytes`;
+      count.classList.toggle("limit", overLimit);
+      byId("translationPromptSave").disabled =
+        overLimit || !value.trim();
+    }
+
+    function openTranslationPromptDialog(projectId) {
+      const project = dashboard?.projects.find(
+        (value) => value.project_id === projectId,
+      );
+      if (!project) {
+        showToast("프로젝트 정보를 찾지 못했습니다.", true);
+        return;
+      }
+      if (activeBackgroundJob()) {
+        showToast(
+          "백그라운드 작업 중에는 번역 프롬프트를 수정할 수 없습니다.",
+          true,
+        );
+        return;
+      }
+      const savedPrompt = project.translation_prompt?.value || "";
+      pendingTranslationPromptProject = {
+        projectId,
+        savedPrompt,
+        expectedSha256: project.translation_prompt?.sha256 || "",
+      };
+      byId("translationPromptProjectName").textContent = project.name;
+      byId("translationPromptProjectId").textContent = project.project_id;
+      byId("translationPromptEdit").value = savedPrompt;
+      const status = project.pipeline.translation_status;
+      const impact = byId("translationPromptImpact");
+      impact.hidden = !["partial", "current", "stale"].includes(status);
+      impact.textContent = status === "partial"
+        ? "프롬프트를 변경하면 저장된 일부 청크를 이어갈 수 없으며 전체 재번역이 필요합니다."
+        : "프롬프트를 변경하면 현재 번역 승인이 해제되고 전체 재번역이 필요합니다. 기존 파일은 revisions에 보관됩니다.";
+      updateTranslationPromptEditCount();
+      byId("translationPromptDialog").showModal();
+      byId("translationPromptEdit").focus();
+    }
+
+    function closeTranslationPromptDialog() {
+      byId("translationPromptDialog").close();
+    }
+
+    async function saveTranslationPrompt(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!pendingTranslationPromptProject || !form.reportValidity()) return;
+      const prompt = byId("translationPromptEdit").value;
+      if (!prompt.trim()) {
+        showToast("번역 프롬프트를 입력하세요.", true);
+        byId("translationPromptEdit").focus();
+        return;
+      }
+      if (
+        new TextEncoder().encode(prompt).length
+        > MAX_TRANSLATION_PROMPT_BYTES
+      ) {
+        showToast("번역 프롬프트는 64 KiB 이하여야 합니다.", true);
+        byId("translationPromptEdit").focus();
+        return;
+      }
+      const submit = byId("translationPromptSave");
+      submit.disabled = true;
+      try {
+        const response = await api(
+          `/api/projects/${encodeURIComponent(
+            pendingTranslationPromptProject.projectId
+          )}/translation-prompt`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              translation_prompt: prompt,
+              expected_sha256:
+                pendingTranslationPromptProject.expectedSha256,
+            }),
+          },
+        );
+        const invalidated =
+          response.translation_prompt?.translation_invalidated;
+        closeTranslationPromptDialog();
+        await refresh(true);
+        showToast(
+          invalidated
+            ? "번역 프롬프트를 저장했습니다. 전체 재번역이 필요합니다."
+            : "번역 프롬프트를 저장했습니다.",
+        );
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    function openSourceFilesDialog(projectId) {
+      const project = dashboard?.projects.find(
+        (value) => value.project_id === projectId
+      );
+      if (!project) {
+        showToast("프로젝트 파일 정보를 찾지 못했습니다.", true);
+        return;
+      }
+      pendingSourceFilesProject = project;
+      byId("sourceFilesProjectName").textContent = project.name;
+      byId("sourceFilesProjectId").textContent =
+        `${project.project_id} · ${project.source_files.length}개`;
+      const list = byId("registeredSourceFiles");
+      list.replaceChildren();
+      for (const filename of project.source_files) {
+        const item = document.createElement("li");
+        item.textContent = filename;
+        list.append(item);
+      }
+      const replaceButton = byId("sourceFilesReplace");
+      replaceButton.hidden = !project.source_replacement?.allowed;
+      replaceButton.title = project.source_replacement?.reason || "";
+      byId("sourceFilesDialog").showModal();
+      byId("sourceFilesDialogDone").focus();
+    }
+
+    function closeSourceFilesDialog() {
+      byId("sourceFilesDialog").close();
+    }
+
+    function replaceFromSourceFiles() {
+      const project = pendingSourceFilesProject;
+      if (!project?.source_replacement?.allowed) return;
+      closeSourceFilesDialog();
+      openSourceDialog(
+        project.project_id,
+        project.name,
+        true,
+        project.source_type,
+      );
+    }
+
+    function openDeleteDialog(projectId, projectName) {
+      pendingDeleteProject = {projectId, projectName};
+      byId("deleteProjectName").textContent = projectName;
+      byId("deleteProjectId").textContent = projectId;
+      byId("deleteDialog").showModal();
+      byId("deleteDialogCancel").focus();
+    }
+
+    function closeDeleteDialog() {
+      byId("deleteDialog").close();
+    }
+
+    async function createProject(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!form.reportValidity()) return;
+      const submit = byId("projectSubmit");
+      submit.disabled = true;
+      try {
+        const result = await api("/api/projects", {
+          method: "POST",
+          body: JSON.stringify({
+            name: byId("projectName").value,
+            project_id: byId("projectId").value || null,
+          }),
+        });
+        closeProjectDialog();
+        form.reset();
+        activeFilter = "all";
+        byId("searchInput").value = "";
+        document.querySelectorAll(".filter").forEach((button) => {
+          button.classList.toggle("active", button.dataset.filter === "all");
+        });
+        await refresh(true);
+        showToast(`'${result.project.name}' 프로젝트를 생성했습니다.`);
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    async function deleteProject(event) {
+      event.preventDefault();
+      if (!pendingDeleteProject) return;
+      const project = pendingDeleteProject;
+      const submit = byId("deleteSubmit");
+      submit.disabled = true;
+      try {
+        await api(`/api/projects/${encodeURIComponent(project.projectId)}`, {
+          method: "DELETE",
+        });
+        window.location.reload();
+      } catch (error) {
+        showToast(error.message, true);
+        submit.disabled = false;
+      }
+    }
+
+    async function registerSource(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!pendingSourceProject || !form.reportValidity()) return;
+      const submit = byId("sourceSubmit");
+      const sourceType = selectedSourceType();
+      const collator = new Intl.Collator("ko", {
+        numeric: true,
+        sensitivity: "base",
+      });
+      const files = [...byId("sourceFiles").files]
+        .sort((left, right) => collator.compare(left.name, right.name));
+      if (
+        (sourceType === "pdf" && files.length !== 1)
+        || (sourceType === "images" && !files.length)
+      ) {
+        showToast("등록할 원본 파일을 확인하세요.", true);
+        return;
+      }
+      if (files.length > 200) {
+        showToast("이미지는 한 번에 최대 200개까지 등록할 수 있습니다.", true);
+        return;
+      }
+      const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+      if (totalBytes > 255 * 1024 * 1024) {
+        showToast("전체 파일 크기는 255 MiB 이하여야 합니다.", true);
+        return;
+      }
+
+      const body = new FormData();
+      body.append("source_type", sourceType);
+      for (const file of files) body.append("files", file, file.name);
+      submit.disabled = true;
+      try {
+        const result = await api(
+          `/api/projects/${encodeURIComponent(
+            pendingSourceProject.projectId
+          )}/source`,
+          {
+            method: pendingSourceProject.replace ? "PUT" : "POST",
+            body,
+          },
+        );
+        const replaced = pendingSourceProject.replace;
+        closeSourceDialog();
+        await refresh(true);
+        const count = result.source.files.length;
+        showToast(
+          `${sourceType === "pdf" ? "PDF" : `이미지 ${count}개`} 원본을 ${replaced ? "교체" : "등록"}했습니다.`
+        );
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    async function saveOcrPrompt(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!pendingOcrPromptProject || !form.reportValidity()) return;
+      const prompt = byId("ocrPromptEdit").value;
+      if (!prompt.trim()) {
+        showToast("이미지 OCR 프롬프트를 입력하세요.", true);
+        byId("ocrPromptEdit").focus();
+        return;
+      }
+      if (promptBytes("ocrPromptEdit") > MAX_OCR_PROMPT_BYTES) {
+        showToast("OCR 프롬프트는 64 KiB 이하여야 합니다.", true);
+        byId("ocrPromptEdit").focus();
+        return;
+      }
+      const submit = byId("ocrPromptSubmit");
+      submit.disabled = true;
+      try {
+        await api(
+          `/api/projects/${encodeURIComponent(
+            pendingOcrPromptProject.projectId
+          )}/ocr-prompt`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ocr_prompt: prompt}),
+          },
+        );
+        closeOcrPromptDialog();
+        await refresh(true);
+        showToast("이미지 OCR 프롬프트를 저장했습니다.");
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    byId("refreshButton").addEventListener("click", () => refresh(false));
+    byId("aiSettingsButton").addEventListener(
+      "click",
+      openAiSettingsDialog,
+    );
+    byId("aiSettingsDialogClose").addEventListener(
+      "click",
+      closeAiSettingsDialog,
+    );
+    byId("aiSettingsDialogCancel").addEventListener(
+      "click",
+      closeAiSettingsDialog,
+    );
+    byId("aiSettingsForm").addEventListener("submit", saveAiSettings);
+    byId("aiModelPreset").addEventListener("change", updateAiModelInput);
+    byId("aiApiKeyToggle").addEventListener("click", () => {
+      const input = byId("aiApiKey");
+      const showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      byId("aiApiKeyToggle").textContent = showing ? "보기" : "숨기기";
+      input.focus();
+    });
+    byId("aiSettingsDialog").addEventListener("close", () => {
+      byId("aiSettingsForm").reset();
+      byId("aiApiKey").type = "password";
+      byId("aiApiKeyToggle").textContent = "보기";
+      byId("aiSettingsSubmit").disabled = false;
+      updateAiModelInput();
+    });
+    byId("sourceJobDialogClose").addEventListener(
+      "click",
+      closeSourceJobDialog,
+    );
+    byId("sourceJobDialogCancel").addEventListener(
+      "click",
+      closeSourceJobDialog,
+    );
+    byId("sourceJobForm").addEventListener("submit", startSourceJob);
+    byId("sourceJobDialog").addEventListener("close", () => {
+      pendingSourceJobProject = null;
+      byId("sourceJobOcrPromptField").hidden = true;
+      byId("sourceJobOcrPrompt").value = "";
+      byId("sourceJobSubmit").disabled = false;
+    });
+    byId("glossaryJobDialogClose").addEventListener(
+      "click",
+      closeGlossaryJobDialog,
+    );
+    byId("glossaryJobDialogCancel").addEventListener(
+      "click",
+      closeGlossaryJobDialog,
+    );
+    byId("glossaryJobForm").addEventListener("submit", startGlossaryJob);
+    byId("glossaryJobDialog").addEventListener("close", () => {
+      pendingGlossaryJobProject = null;
+      byId("glossaryJobSubmit").disabled = false;
+    });
+    byId("translationJobDialogClose").addEventListener(
+      "click",
+      closeTranslationJobDialog,
+    );
+    byId("translationJobDialogCancel").addEventListener(
+      "click",
+      closeTranslationJobDialog,
+    );
+    byId("translationJobForm").addEventListener(
+      "submit",
+      startTranslationJob,
+    );
+    byId("translationPrompt").addEventListener(
+      "input",
+      updateTranslationPromptCount,
+    );
+    byId("translationJobDialog").addEventListener("close", () => {
+      pendingTranslationJobProject = null;
+      pendingTranslationForce = false;
+      byId("translationJobForm").reset();
+      byId("translationPrompt").readOnly = false;
+      byId("translationResumeNote").hidden = true;
+      byId("translationForceNote").hidden = true;
+      byId("translationJobSubmit").disabled = false;
+      updateTranslationPromptCount();
+    });
+    byId("emptyCreateButton").addEventListener("click", openProjectDialog);
+    byId("projectDialogClose").addEventListener("click", closeProjectDialog);
+    byId("projectDialogCancel").addEventListener("click", closeProjectDialog);
+    byId("projectForm").addEventListener("submit", createProject);
+    byId("projectDialog").addEventListener("close", () => {
+      byId("projectForm").reset();
+    });
+    byId("sourceDialogClose").addEventListener("click", closeSourceDialog);
+    byId("sourceDialogCancel").addEventListener("click", closeSourceDialog);
+    byId("sourceForm").addEventListener("submit", registerSource);
+    byId("sourceForm").addEventListener("change", (event) => {
+      if (event.target.name === "source_type") updateSourceFileInput();
+      if (event.target.id === "sourceFiles") renderSelectedFiles();
+    });
+    byId("sourceDialog").addEventListener("close", () => {
+      pendingSourceProject = null;
+      byId("sourceForm").reset();
+      byId("sourceSubmit").disabled = false;
+      updateSourceFileInput();
+    });
+    byId("ocrPromptDialogClose").addEventListener(
+      "click",
+      closeOcrPromptDialog,
+    );
+    byId("ocrPromptDialogCancel").addEventListener(
+      "click",
+      closeOcrPromptDialog,
+    );
+    byId("ocrPromptForm").addEventListener("submit", saveOcrPrompt);
+    byId("ocrPromptEdit").addEventListener(
+      "input",
+      updateOcrPromptEditCount,
+    );
+    byId("ocrPromptEditReset").addEventListener("click", () => {
+      byId("ocrPromptEdit").value =
+        pendingOcrPromptProject?.savedOcrPrompt || "";
+      updateOcrPromptEditCount();
+      byId("ocrPromptEdit").focus();
+    });
+    byId("ocrPromptDialog").addEventListener("close", () => {
+      pendingOcrPromptProject = null;
+      byId("ocrPromptForm").reset();
+      byId("ocrPromptSubmit").disabled = false;
+      updateOcrPromptEditCount();
+    });
+    byId("translationPromptDialogClose").addEventListener(
+      "click",
+      closeTranslationPromptDialog,
+    );
+    byId("translationPromptDialogCancel").addEventListener(
+      "click",
+      closeTranslationPromptDialog,
+    );
+    byId("translationPromptForm").addEventListener(
+      "submit",
+      saveTranslationPrompt,
+    );
+    byId("translationPromptEdit").addEventListener(
+      "input",
+      updateTranslationPromptEditCount,
+    );
+    byId("translationPromptEditReset").addEventListener("click", () => {
+      byId("translationPromptEdit").value =
+        pendingTranslationPromptProject?.savedPrompt || "";
+      updateTranslationPromptEditCount();
+      byId("translationPromptEdit").focus();
+    });
+    byId("translationPromptDialog").addEventListener("close", () => {
+      pendingTranslationPromptProject = null;
+      byId("translationPromptForm").reset();
+      byId("translationPromptImpact").hidden = true;
+      byId("translationPromptSave").disabled = false;
+      updateTranslationPromptEditCount();
+    });
+    byId("sourceFilesDialogClose").addEventListener(
+      "click",
+      closeSourceFilesDialog,
+    );
+    byId("sourceFilesDialogDone").addEventListener(
+      "click",
+      closeSourceFilesDialog,
+    );
+    byId("sourceFilesReplace").addEventListener(
+      "click",
+      replaceFromSourceFiles,
+    );
+    byId("sourceFilesDialog").addEventListener("close", () => {
+      pendingSourceFilesProject = null;
+      byId("registeredSourceFiles").replaceChildren();
+    });
+    byId("deleteDialogClose").addEventListener("click", closeDeleteDialog);
+    byId("deleteDialogCancel").addEventListener("click", closeDeleteDialog);
+    byId("deleteForm").addEventListener("submit", deleteProject);
+    byId("deleteDialog").addEventListener("close", () => {
+      pendingDeleteProject = null;
+      byId("deleteSubmit").disabled = false;
+    });
+    byId("searchInput").addEventListener("input", render);
+    document.querySelector(".filters").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-filter]");
+      if (!button) return;
+      activeFilter = button.dataset.filter;
+      document.querySelectorAll(".filter").forEach((value) => {
+        value.classList.toggle("active", value === button);
+      });
+      render();
+    });
+    byId("projectGrid").addEventListener("click", (event) => {
+      const archiveButton = event.target.closest(
+        "[data-download-output-archive]",
+      );
+      if (archiveButton) {
+        downloadOutputArchive(archiveButton);
+        return;
+      }
+      const downloadButton = event.target.closest("[data-download-output]");
+      if (downloadButton) {
+        downloadOutput(downloadButton);
+        return;
+      }
+      const settingsButton = event.target.closest(
+        "[data-require-ai-settings]",
+      );
+      if (settingsButton) {
+        openAiSettingsDialog();
+        return;
+      }
+      const jobButton = event.target.closest("[data-start-source-job]");
+      if (jobButton) {
+        openSourceJobDialog(jobButton.dataset.startSourceJob);
+        return;
+      }
+      const glossaryStartButton = event.target.closest(
+        "[data-start-glossary-job]",
+      );
+      if (glossaryStartButton) {
+        openGlossaryJobDialog(
+          glossaryStartButton.dataset.startGlossaryJob,
+        );
+        return;
+      }
+      const translationStartButton = event.target.closest(
+        "[data-start-translation-job]",
+      );
+      if (translationStartButton) {
+        openTranslationJobDialog(
+          translationStartButton.dataset.startTranslationJob,
+        );
+        return;
+      }
+      const translationPromptButton = event.target.closest(
+        "[data-edit-translation-prompt]",
+      );
+      if (translationPromptButton) {
+        openTranslationPromptDialog(
+          translationPromptButton.dataset.editTranslationPrompt,
+        );
+        return;
+      }
+      const promptButton = event.target.closest("[data-edit-ocr-prompt]");
+      if (promptButton) {
+        openOcrPromptDialog(promptButton.dataset.editOcrPrompt);
+        return;
+      }
+      const sourceFilesButton = event.target.closest("[data-source-files]");
+      if (sourceFilesButton) {
+        openSourceFilesDialog(sourceFilesButton.dataset.sourceFiles);
+        return;
+      }
+      const sourceButton = event.target.closest("[data-register-source]");
+      if (sourceButton) {
+        openSourceDialog(
+          sourceButton.dataset.registerSource,
+          sourceButton.dataset.projectName,
+          sourceButton.dataset.replaceSource === "true",
+          sourceButton.dataset.sourceType || null,
+        );
+        return;
+      }
+      const deleteButton = event.target.closest("[data-delete-project]");
+      if (deleteButton) {
+        openDeleteDialog(
+          deleteButton.dataset.deleteProject,
+          deleteButton.dataset.projectName,
+        );
+        return;
+      }
+      const createButton = event.target.closest("[data-create-project]");
+      if (createButton) {
+        openProjectDialog();
+        return;
+      }
+      const button = event.target.closest("[data-review]");
+      if (!button || button.disabled) return;
+      openReview(button.dataset.project, button.dataset.review);
+    });
+
+    refresh(true);
+    loadAiSettings(true).catch(() => {});
+  </script>
+</body>
+</html>

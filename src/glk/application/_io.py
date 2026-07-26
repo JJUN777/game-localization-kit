@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 from pathlib import Path
 import shutil
 import tempfile
 from typing import Any
+
+
+_UNSUPPORTED_DIRECTORY_FSYNC_ERRNOS = frozenset(
+    error_number
+    for error_number in (
+        errno.EINVAL,
+        getattr(errno, "ENOTSUP", None),
+        getattr(errno, "EOPNOTSUPP", None),
+    )
+    if error_number is not None
+)
 
 
 def _temporary_path(path: Path) -> Path:
@@ -24,9 +36,43 @@ def _temporary_path(path: Path) -> Path:
 def _replace_from_temporary(path: Path, temporary_path: Path) -> None:
     try:
         os.replace(temporary_path, path)
+        _fsync_parent(path)
     except Exception:
         temporary_path.unlink(missing_ok=True)
         raise
+
+
+def _open_parent_directory(path: Path) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    return os.open(path.parent, flags)
+
+
+def _directory_fsync_is_unsupported(error: OSError) -> bool:
+    return error.errno in _UNSUPPORTED_DIRECTORY_FSYNC_ERRNOS
+
+
+def _supports_directory_fsync() -> bool:
+    return os.name != "nt"
+
+
+def _fsync_parent(path: Path) -> None:
+    """Persist a replaced or newly created directory entry where supported."""
+    if not _supports_directory_fsync():
+        return
+    try:
+        descriptor = _open_parent_directory(path)
+    except OSError as error:
+        if _directory_fsync_is_unsupported(error):
+            return
+        raise
+    try:
+        try:
+            os.fsync(descriptor)
+        except OSError as error:
+            if not _directory_fsync_is_unsupported(error):
+                raise
+    finally:
+        os.close(descriptor)
 
 
 def write_bytes_atomic(path: Path, value: bytes) -> None:
@@ -41,6 +87,20 @@ def write_bytes_atomic(path: Path, value: bytes) -> None:
     except Exception:
         temporary_path.unlink(missing_ok=True)
         raise
+
+
+def append_bytes_durable(path: Path, value: bytes) -> None:
+    """Append bytes, fsync the file, and persist a newly created entry."""
+    if not value:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    created = not path.exists()
+    with path.open("ab") as file:
+        file.write(value)
+        file.flush()
+        os.fsync(file.fileno())
+    if created:
+        _fsync_parent(path)
 
 
 def write_text_atomic(path: Path, value: str) -> None:
