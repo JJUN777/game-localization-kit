@@ -14,7 +14,7 @@ import uuid
 from glk.application._hashing import sha256_bytes as _sha256_bytes
 from glk.application._io import write_bytes_atomic as _write_bytes_atomic
 from glk.application._io import write_json_atomic as _write_json_atomic
-from glk.application.project_service import load_project
+from glk.application.project_service import ProjectLocation, load_project
 from glk.application.review_types import (
     SourceReviewBlock,
     SourceReviewDocument,
@@ -450,14 +450,38 @@ def _manual_id(source_type: str, page: int | None, source_file: str) -> str:
     return f"manual-{prefix}-{uuid.uuid4().hex[:16]}"
 
 
-def save_project_source_review(
+@dataclass(frozen=True, slots=True)
+class _SourceReviewSaveContext:
+    location: ProjectLocation
+    paths: WorkspacePaths
+    originals: tuple[SourceBlock, ...]
+    source_sha256: str
+    state: dict[str, Any]
+    prior_manual: dict[str, SourceBlock]
+
+
+@dataclass(frozen=True, slots=True)
+class _SubmittedReviewBlock:
+    block: SourceBlock
+    text: str
+    excluded: bool
+    manual: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _NormalizedSourceReview:
+    ordered_ids: tuple[str, ...]
+    excluded_ids: tuple[str, ...]
+    manual_blocks: dict[str, SourceBlock]
+    rendered_blocks: tuple[SourceBlock, ...]
+
+
+def _load_source_review_save_context(
     *,
     project: str | Path,
-    blocks: list[dict[str, Any]],
+    workspace_root: str | Path,
     expected_review_sha256: str,
-    workspace_root: str | Path = "workspaces",
-) -> SourceReviewDocument:
-    """Save browser edits with optimistic locking and explicit layout decisions."""
+) -> _SourceReviewSaveContext:
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
     originals, source_data = _load_source_blocks(location.path)
@@ -473,16 +497,137 @@ def save_project_source_review(
         raise SourceReviewConflictError(
             "Source review changed after this browser loaded it. Reload before saving."
         )
-    if not isinstance(blocks, list) or not blocks:
-        raise SourceReviewError("blocks must be a non-empty list.")
-
     state = _read_state(paths.source_review_state)
     _, _, prior_manual = _layout(originals, state)
+    return _SourceReviewSaveContext(
+        location,
+        paths,
+        tuple(originals),
+        source_sha256,
+        state,
+        prior_manual,
+    )
+
+
+def _build_manual_review_block(
+    value: dict[str, Any],
+    *,
+    text: str,
+    prior_manual: dict[str, SourceBlock],
+) -> SourceBlock:
+    source_type = value.get("source_type")
+    source_file = value.get("source_file")
+    page = value.get("page")
+    bbox = value.get("bbox")
+    if source_type not in {"pdf", "image"} or not isinstance(source_file, str):
+        raise SourceReviewError("Manual blocks need a valid source type and file.")
+    if source_type == "pdf" and (
+        not isinstance(page, int) or isinstance(page, bool) or page <= 0
+    ):
+        raise SourceReviewError("Manual PDF blocks need a positive page.")
+    if source_type == "image":
+        page = None
+    if (
+        not isinstance(bbox, list)
+        or len(bbox) != 4
+        or not all(
+            isinstance(item, (int, float)) and not isinstance(item, bool)
+            for item in bbox
+        )
+    ):
+        raise SourceReviewError("Manual blocks require a four-number bbox.")
+    coordinates = (
+        float(bbox[0]),
+        float(bbox[1]),
+        float(bbox[2]),
+        float(bbox[3]),
+    )
+    if (
+        coordinates[0] >= coordinates[2]
+        or coordinates[1] >= coordinates[3]
+    ):
+        raise SourceReviewError("Manual block bbox must have a positive area.")
+
+    submitted_id = value.get("id")
+    candidate_id = submitted_id if isinstance(submitted_id, str) else ""
+    if candidate_id in prior_manual:
+        raw_text = prior_manual[candidate_id].raw_text
+        candidate_id = prior_manual[candidate_id].id
+    else:
+        candidate_id = _manual_id(source_type, page, source_file)
+        raw_text = text.strip()
+    try:
+        block = SourceBlock(
+            schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
+            id=candidate_id,
+            source_type=source_type,
+            source_file=source_file,
+            page=page,
+            source_order=1,
+            block_order=1,
+            block_type="paragraph",
+            raw_text=raw_text,
+            corrected_text=None,
+            bbox=coordinates,
+            legibility="clear",
+            status="corrected",
+            warnings=(),
+            source_refs=("manual-review",),
+            source_hash=_source_hash(raw_text),
+        )
+        block.validate()
+    except SourceBlockValidationError as error:
+        raise SourceReviewError(f"Invalid manual block: {error}") from error
+    return block
+
+
+def _parse_submitted_review_block(
+    value: Any,
+    *,
+    original_by_id: dict[str, SourceBlock],
+    prior_manual: dict[str, SourceBlock],
+) -> _SubmittedReviewBlock | None:
+    if not isinstance(value, dict):
+        raise SourceReviewError("Every browser review block must be an object.")
+    block_id = value.get("id")
+    text = value.get("text")
+    excluded = value.get("excluded", False)
+    if not isinstance(excluded, bool):
+        raise SourceReviewError("excluded must be true or false.")
+    if not isinstance(text, str):
+        raise SourceReviewError("Every browser review block needs text.")
+    if isinstance(block_id, str) and block_id in original_by_id:
+        return _SubmittedReviewBlock(
+            original_by_id[block_id],
+            text,
+            excluded,
+            False,
+        )
+    if excluded:
+        return None
+    return _SubmittedReviewBlock(
+        _build_manual_review_block(
+            value,
+            text=text,
+            prior_manual=prior_manual,
+        ),
+        text,
+        False,
+        True,
+    )
+
+
+def _normalize_source_review_blocks(
+    blocks: list[dict[str, Any]],
+    context: _SourceReviewSaveContext,
+) -> _NormalizedSourceReview:
+    if not isinstance(blocks, list) or not blocks:
+        raise SourceReviewError("blocks must be a non-empty list.")
+    originals = list(context.originals)
     original_by_id = {block.id: block for block in originals}
     group_order = _group_order(originals)
     group_sources = {
-        _locator_key(block): block.source_file
-        for block in originals
+        _locator_key(block): block.source_file for block in originals
     }
     seen_originals: set[str] = set()
     seen_ids: set[str] = set()
@@ -493,113 +638,56 @@ def save_project_source_review(
     previous_group = -1
 
     for value in blocks:
-        if not isinstance(value, dict):
-            raise SourceReviewError("Every browser review block must be an object.")
-        block_id = value.get("id")
-        text = value.get("text")
-        excluded = value.get("excluded", False)
-        if not isinstance(excluded, bool):
-            raise SourceReviewError("excluded must be true or false.")
-        if not isinstance(text, str):
-            raise SourceReviewError("Every browser review block needs text.")
-
-        manual = False
-        if isinstance(block_id, str) and block_id in original_by_id:
-            block = original_by_id[block_id]
-            seen_originals.add(block_id)
+        submitted = _parse_submitted_review_block(
+            value,
+            original_by_id=original_by_id,
+            prior_manual=context.prior_manual,
+        )
+        if submitted is None:
+            continue
+        block = submitted.block
+        block_id = block.id
+        if submitted.manual:
+            manual_blocks[block_id] = block
         else:
-            manual = True
-            if excluded:
-                continue
-            source_type = value.get("source_type")
-            source_file = value.get("source_file")
-            page = value.get("page")
-            bbox = value.get("bbox")
-            if source_type not in {"pdf", "image"} or not isinstance(source_file, str):
-                raise SourceReviewError("Manual blocks need a valid source type and file.")
-            if source_type == "pdf" and (
-                not isinstance(page, int) or isinstance(page, bool) or page <= 0
-            ):
-                raise SourceReviewError("Manual PDF blocks need a positive page.")
-            if source_type == "image":
-                page = None
-            if (
-                not isinstance(bbox, list)
-                or len(bbox) != 4
-                or not all(
-                    isinstance(item, (int, float)) and not isinstance(item, bool)
-                    for item in bbox
-                )
-            ):
-                raise SourceReviewError("Manual blocks require a four-number bbox.")
-            if float(bbox[0]) >= float(bbox[2]) or float(bbox[1]) >= float(bbox[3]):
-                raise SourceReviewError("Manual block bbox must have a positive area.")
-            candidate_id = block_id if isinstance(block_id, str) else ""
-            if candidate_id in prior_manual:
-                raw_text = prior_manual[candidate_id].raw_text
-                candidate_id = prior_manual[candidate_id].id
-            else:
-                candidate_id = _manual_id(source_type, page, source_file)
-                raw_text = text.strip()
-            try:
-                block = SourceBlock(
-                    schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
-                    id=candidate_id,
-                    source_type=source_type,
-                    source_file=source_file,
-                    page=page,
-                    source_order=1,
-                    block_order=1,
-                    block_type="paragraph",
-                    raw_text=raw_text,
-                    corrected_text=None,
-                    bbox=(
-                        float(bbox[0]),
-                        float(bbox[1]),
-                        float(bbox[2]),
-                        float(bbox[3]),
-                    ),
-                    legibility="clear",
-                    status="corrected",
-                    warnings=(),
-                    source_refs=("manual-review",),
-                    source_hash=_source_hash(raw_text),
-                )
-                block.validate()
-            except SourceBlockValidationError as error:
-                raise SourceReviewError(f"Invalid manual block: {error}") from error
-            block_id = block.id
-            manual_blocks[block.id] = block
-
+            seen_originals.add(block_id)
         if block_id in seen_ids:
-            raise SourceReviewError(f"Duplicate browser review block: {block_id}")
-        seen_ids.add(str(block_id))
+            raise SourceReviewError(
+                f"Duplicate browser review block: {block_id}"
+            )
+        seen_ids.add(block_id)
+
         group = _locator_key(block)
         if group not in group_order:
-            raise SourceReviewError("Blocks cannot be moved to an unknown page or image.")
-        if manual and block.source_file != group_sources[group]:
+            raise SourceReviewError(
+                "Blocks cannot be moved to an unknown page or image."
+            )
+        if submitted.manual and block.source_file != group_sources[group]:
             raise SourceReviewError(
                 "Manual blocks must use the source file shown for their page or image."
             )
         current_group = group_order[group]
         if current_group < previous_group:
             raise SourceReviewError(
-                "Pages and image files cannot be reordered; only blocks within them can move."
+                "Pages and image files cannot be reordered; "
+                "only blocks within them can move."
             )
         previous_group = current_group
-        ordered_ids.append(str(block_id))
-        if excluded:
-            if manual:
-                continue
-            excluded_ids.append(str(block_id))
+        ordered_ids.append(block_id)
+        if submitted.excluded:
+            excluded_ids.append(block_id)
             continue
-        clean_text = text.strip()
+        clean_text = submitted.text.strip()
         if not clean_text:
-            raise SourceReviewError(f"Block {block_id} has empty reviewed text.")
+            raise SourceReviewError(
+                f"Block {block_id} has empty reviewed text."
+            )
         rendered_blocks.append(
             replace(
                 block,
-                corrected_text=clean_text if clean_text != block.raw_text else None,
+                corrected_text=(
+                    clean_text if clean_text != block.raw_text else None
+                ),
             )
         )
 
@@ -611,21 +699,34 @@ def save_project_source_review(
         )
     if not rendered_blocks:
         raise SourceReviewError("At least one reviewed source block must remain.")
+    return _NormalizedSourceReview(
+        tuple(ordered_ids),
+        tuple(excluded_ids),
+        manual_blocks,
+        tuple(rendered_blocks),
+    )
 
-    rendered = render_source_review_text(rendered_blocks)
-    _write_bytes_atomic(paths.source_review, rendered)
+
+def _write_source_review_save(
+    *,
+    context: _SourceReviewSaveContext,
+    normalized: _NormalizedSourceReview,
+) -> None:
+    rendered = render_source_review_text(list(normalized.rendered_blocks))
+    _write_bytes_atomic(context.paths.source_review, rendered)
+    state = dict(context.state)
     state.update(
         {
             "status": "prepared",
             "format_version": SOURCE_REVIEW_FORMAT_VERSION,
-            "source_sha256": source_sha256,
-            "total_blocks": len(originals),
-            "ordered_block_ids": ordered_ids,
-            "excluded_block_ids": excluded_ids,
+            "source_sha256": context.source_sha256,
+            "total_blocks": len(context.originals),
+            "ordered_block_ids": list(normalized.ordered_ids),
+            "excluded_block_ids": list(normalized.excluded_ids),
             "manual_blocks": [
-                manual_blocks[block_id].to_dict()
-                for block_id in ordered_ids
-                if block_id in manual_blocks
+                normalized.manual_blocks[block_id].to_dict()
+                for block_id in normalized.ordered_ids
+                if block_id in normalized.manual_blocks
             ],
             "review_sha256": _sha256_bytes(rendered),
             "updated_at": _utc_now(),
@@ -639,9 +740,27 @@ def save_project_source_review(
         "approved_blocks_file",
     ):
         state.pop(key, None)
-    _write_json_atomic(paths.source_review_state, state)
+    _write_json_atomic(context.paths.source_review_state, state)
+
+
+def save_project_source_review(
+    *,
+    project: str | Path,
+    blocks: list[dict[str, Any]],
+    expected_review_sha256: str,
+    workspace_root: str | Path = "workspaces",
+) -> SourceReviewDocument:
+    """Save browser edits with optimistic locking and explicit layout decisions."""
+    context = _load_source_review_save_context(
+        project=project,
+        workspace_root=workspace_root,
+        expected_review_sha256=expected_review_sha256,
+    )
+    normalized = _normalize_source_review_blocks(blocks, context)
+    _write_source_review_save(context=context, normalized=normalized)
     return get_project_source_review_document(
-        project=location.path, workspace_root=workspace_root
+        project=context.location.path,
+        workspace_root=workspace_root,
     )
 
 

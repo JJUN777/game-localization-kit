@@ -371,13 +371,20 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     진입 함수는 189줄에서 100줄로 줄었고 성공·cache 재사용·validation 재시도·
     부분 실패 계약을 유지한다.
   - [ ] `translate_project`
-  - [ ] `ocr_project_images`
-  - [ ] `save_project_source_review`
+  - [x] `ocr_project_images`: 요청 입력·원본 등록과 프롬프트 준비, 이미지 한 장의
+    cache·provider·산출물 처리, batch 부분 실패와 이전 텍스트 보존, 최종
+    결합·상태 기록을 분리했다. 진입 함수는 202줄에서 89줄로 줄었고 정상 처리·
+    cache 재사용·강제 재실행 실패 복구·손상 cache·dry-run 계약을 유지한다.
+  - [x] `save_project_source_review`: 저장 전 상태·hash 확인, 제출 블록 해석,
+    수동 블록 생성, 전체 순서·제외 검증과 review/state 기록을 분리했다.
+    진입 함수는 193줄에서 19줄로 줄었고 수동 블록 재사용·bbox·재정렬·누락·
+    optimistic lock·v1 상태 승격 계약을 유지한다.
   - [ ] `retry_failed_translations`
   - 완료 기준: 우선 범위의 각 진입 함수가 120줄 이하이고, 추출한 단계별
     helper에 성공·부분 실패·재개·stale 회귀 테스트가 있어야 한다. 줄 수를
     맞추기 위한 의미 없는 wrapper 분리는 허용하지 않는다.
-  - PDF 단계 검증: 전체 291개 테스트와 mypy 48개 파일·ruff 검사를 통과했다.
+  - PDF·OCR·원문 검수 저장 단계 검증: 전체 291개 테스트와 mypy 48개
+    파일·ruff 검사를 통과했다.
 - [x] `API-001` 결과 객체의 `ok` 의미를 통일하거나 상수 필드를 제거한다.
   - 성공하거나 예외를 던지는 결과 객체는 상수 `ok`를 노출하지 않는다.
   - 일부 실패나 QA 불합격처럼 정상 반환 안에 실제 결과 차이가 있는 객체만
