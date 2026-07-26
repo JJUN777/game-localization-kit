@@ -57,6 +57,19 @@ class PageFailure:
 
 
 @dataclass(frozen=True, slots=True)
+class _PageExtraction:
+    page: int
+    text: str
+    cached: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _PageExtractionBatch:
+    successful: tuple[_PageExtraction, ...]
+    failures: tuple[PageFailure, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ExtractionResult:
     project_path: str
     source_pdf: str
@@ -164,6 +177,172 @@ def _reconstruct_validated_layout(
     raise RuntimeError("Layout validation retry loop ended unexpectedly.")
 
 
+def _extract_pdf_page(
+    *,
+    page: Any,
+    page_number: int,
+    source_hash: str,
+    paths: WorkspacePaths,
+    provider: LayoutProvider,
+    scale: float,
+    force: bool,
+    notify: ProgressCallback,
+) -> _PageExtraction:
+    notify(f"Page {page_number}: extracting PDF fragments")
+    fragments = extract_line_fragments(page, page_number)
+    if not fragments:
+        raise ExtractionError(
+            "No embedded text fragments were found; this page requires OCR."
+        )
+    png_bytes, page_image = render_page(page, scale)
+    fragment_hash = _sha256_json(fragments)
+    page_stem = f"page_{page_number:03d}"
+    _write_bytes_atomic(paths.pdf_pages / f"{page_stem}.png", png_bytes)
+    _write_json_atomic(
+        paths.pdf_fragments / f"{page_stem}.json",
+        {
+            "schema_version": 1,
+            "source_sha256": source_hash,
+            "page": page_number,
+            "page_size": [
+                round(page.rect.width, 2),
+                round(page.rect.height, 2),
+            ],
+            "fragment_sha256": fragment_hash,
+            "fragments": fragments,
+        },
+    )
+
+    layout_path = paths.pdf_layouts / f"{page_stem}.json"
+    cached = None if force else _load_cached_layout(
+        layout_path,
+        source_sha256=source_hash,
+        fragment_sha256=fragment_hash,
+        provider=provider,
+        fragments=fragments,
+    )
+    if cached is not None:
+        layout, blocks = cached
+        validation = validate_layout(fragments, layout)
+        notify(f"Page {page_number}: reused validated layout cache")
+    else:
+        notify(f"Page {page_number}: requesting LLM layout reconstruction")
+        layout, validation = _reconstruct_validated_layout(
+            page_number=page_number,
+            fragments=fragments,
+            page_image=page_image,
+            provider=provider,
+            notify=notify,
+        )
+        blocks = merge_paragraph_continuations(
+            reconstruct_blocks(fragments, layout)
+        )
+    _write_json_atomic(
+        layout_path,
+        {
+            "schema_version": 1,
+            "source_sha256": source_hash,
+            "fragment_sha256": fragment_hash,
+            "page": page_number,
+            "model": provider.model_name,
+            "prompt_version": provider.prompt_version,
+            "postprocess_version": POSTPROCESS_VERSION,
+            "validation": validation,
+            "layout": layout,
+            "reconstructed_blocks": blocks,
+        },
+    )
+    page_text = build_page_text(blocks)
+    _write_text_atomic(paths.pdf_layouts / f"{page_stem}.txt", page_text)
+    return _PageExtraction(page_number, page_text, cached is not None)
+
+
+def _extract_selected_pages(
+    *,
+    source_path: Path,
+    page_indexes: list[int],
+    source_hash: str,
+    paths: WorkspacePaths,
+    provider: LayoutProvider,
+    scale: float,
+    force: bool,
+    notify: ProgressCallback,
+) -> _PageExtractionBatch:
+    successful: list[_PageExtraction] = []
+    failures: list[PageFailure] = []
+    document = pymupdf.open(source_path)
+    try:
+        for page_index in page_indexes:
+            page_number = page_index + 1
+            try:
+                successful.append(
+                    _extract_pdf_page(
+                        page=document[page_index],
+                        page_number=page_number,
+                        source_hash=source_hash,
+                        paths=paths,
+                        provider=provider,
+                        scale=scale,
+                        force=force,
+                        notify=notify,
+                    )
+                )
+            except Exception as error:
+                failures.append(
+                    PageFailure(
+                        page_number,
+                        str(error),
+                        gemini_failure_code(error),
+                    )
+                )
+                notify(f"Page {page_number}: failed: {error}")
+    finally:
+        document.close()
+    return _PageExtractionBatch(tuple(successful), tuple(failures))
+
+
+def _write_extraction_result(
+    *,
+    location: ProjectLocation,
+    paths: WorkspacePaths,
+    source_hash: str,
+    page_count: int,
+    selected_pages: tuple[int, ...],
+    batch: _PageExtractionBatch,
+    provider: LayoutProvider,
+) -> Path:
+    successful_pages = [item.page for item in batch.successful]
+    cached_pages = [item.page for item in batch.successful if item.cached]
+    combined = "\n\n".join(
+        f"[PAGE {item.page}]\n{item.text}" for item in batch.successful
+    )
+    output_path = (
+        paths.source_extracted_partial
+        if batch.failures
+        else paths.source_extracted
+    )
+    _write_text_atomic(output_path, combined)
+    _write_json_atomic(
+        paths.pdf_acquisition_state,
+        {
+            "schema_version": 1,
+            "status": "partial" if batch.failures else "complete",
+            "source_file": location.manifest.source_file,
+            "source_sha256": source_hash,
+            "page_count": page_count,
+            "selected_pages": list(selected_pages),
+            "successful_pages": successful_pages,
+            "cached_pages": cached_pages,
+            "failures": [asdict(failure) for failure in batch.failures],
+            "model": provider.model_name,
+            "prompt_version": provider.prompt_version,
+            "output_file": str(output_path.relative_to(location.path)),
+            "updated_at": _utc_now(),
+        },
+    )
+    return output_path
+
+
 def extract_project_pdf(
     *,
     project: str | Path,
@@ -223,124 +402,33 @@ def extract_project_pdf(
     registered_source = registered.path
     source_hash = registered.sha256
     paths = WorkspacePaths(location.path)
-    pages_dir = paths.pdf_pages
-    fragments_dir = paths.pdf_fragments
-    layouts_dir = paths.pdf_layouts
-    for directory in (pages_dir, fragments_dir, layouts_dir, paths.state_dir):
+    for directory in (
+        paths.pdf_pages,
+        paths.pdf_fragments,
+        paths.pdf_layouts,
+        paths.state_dir,
+    ):
         directory.mkdir(parents=True, exist_ok=True)
 
-    document = pymupdf.open(registered_source)
-    successful_text: dict[int, str] = {}
-    successful_pages: list[int] = []
-    cached_pages: list[int] = []
-    failures: list[PageFailure] = []
-    try:
-        page_indexes = parse_page_selection(pages, document.page_count)
-        for page_index in page_indexes:
-            page_number = page_index + 1
-            notify(f"Page {page_number}: extracting PDF fragments")
-            try:
-                page = document[page_index]
-                fragments = extract_line_fragments(page, page_number)
-                if not fragments:
-                    raise ExtractionError(
-                        "No embedded text fragments were found; this page requires OCR."
-                    )
-                png_bytes, page_image = render_page(page, scale)
-                fragment_hash = _sha256_json(fragments)
-                page_stem = f"page_{page_number:03d}"
-                _write_bytes_atomic(pages_dir / f"{page_stem}.png", png_bytes)
-                _write_json_atomic(
-                    fragments_dir / f"{page_stem}.json",
-                    {
-                        "schema_version": 1,
-                        "source_sha256": source_hash,
-                        "page": page_number,
-                        "page_size": [round(page.rect.width, 2), round(page.rect.height, 2)],
-                        "fragment_sha256": fragment_hash,
-                        "fragments": fragments,
-                    },
-                )
-                layout_path = layouts_dir / f"{page_stem}.json"
-                cached = None if force else _load_cached_layout(
-                    layout_path,
-                    source_sha256=source_hash,
-                    fragment_sha256=fragment_hash,
-                    provider=active_provider,
-                    fragments=fragments,
-                )
-                if cached is not None:
-                    layout, blocks = cached
-                    validation = validate_layout(fragments, layout)
-                    cached_pages.append(page_number)
-                    notify(f"Page {page_number}: reused validated layout cache")
-                else:
-                    notify(f"Page {page_number}: requesting LLM layout reconstruction")
-                    layout, validation = _reconstruct_validated_layout(
-                        page_number=page_number,
-                        fragments=fragments,
-                        page_image=page_image,
-                        provider=active_provider,
-                        notify=notify,
-                    )
-                    blocks = merge_paragraph_continuations(
-                        reconstruct_blocks(fragments, layout)
-                    )
-                _write_json_atomic(
-                    layout_path,
-                    {
-                        "schema_version": 1,
-                        "source_sha256": source_hash,
-                        "fragment_sha256": fragment_hash,
-                        "page": page_number,
-                        "model": active_provider.model_name,
-                        "prompt_version": active_provider.prompt_version,
-                        "postprocess_version": POSTPROCESS_VERSION,
-                        "validation": validation,
-                        "layout": layout,
-                        "reconstructed_blocks": blocks,
-                    },
-                )
-                page_text = build_page_text(blocks)
-                _write_text_atomic(layouts_dir / f"{page_stem}.txt", page_text)
-                successful_text[page_number] = page_text
-                successful_pages.append(page_number)
-            except Exception as error:
-                failures.append(
-                    PageFailure(
-                        page_number,
-                        str(error),
-                        gemini_failure_code(error),
-                    )
-                )
-                notify(f"Page {page_number}: failed: {error}")
-    finally:
-        document.close()
-
-    combined = "\n\n".join(
-        f"[PAGE {page_number}]\n{successful_text[page_number]}"
-        for page_number in successful_pages
+    batch = _extract_selected_pages(
+        source_path=registered_source,
+        page_indexes=page_indexes,
+        source_hash=source_hash,
+        paths=paths,
+        provider=active_provider,
+        scale=scale,
+        force=force,
+        notify=notify,
     )
-    output_path = paths.source_extracted
-    if failures:
-        output_path = paths.source_extracted_partial
-    _write_text_atomic(output_path, combined)
-    run_status = {
-        "schema_version": 1,
-        "status": "complete" if not failures else "partial",
-        "source_file": location.manifest.source_file,
-        "source_sha256": source_hash,
-        "page_count": page_count,
-        "selected_pages": list(selected_pages),
-        "successful_pages": successful_pages,
-        "cached_pages": cached_pages,
-        "failures": [asdict(failure) for failure in failures],
-        "model": active_provider.model_name,
-        "prompt_version": active_provider.prompt_version,
-        "output_file": str(output_path.relative_to(location.path)),
-        "updated_at": _utc_now(),
-    }
-    _write_json_atomic(paths.pdf_acquisition_state, run_status)
+    output_path = _write_extraction_result(
+        location=location,
+        paths=paths,
+        source_hash=source_hash,
+        page_count=page_count,
+        selected_pages=selected_pages,
+        batch=batch,
+        provider=active_provider,
+    )
     return ExtractionResult(
         project_path=str(location.path),
         source_pdf=str(registered_source),
@@ -348,8 +436,10 @@ def extract_project_pdf(
         model=active_provider.model_name,
         prompt_version=active_provider.prompt_version,
         selected_pages=selected_pages,
-        successful_pages=tuple(successful_pages),
-        cached_pages=tuple(cached_pages),
-        failures=tuple(failures),
+        successful_pages=tuple(item.page for item in batch.successful),
+        cached_pages=tuple(
+            item.page for item in batch.successful if item.cached
+        ),
+        failures=batch.failures,
         output_file=str(output_path),
     )

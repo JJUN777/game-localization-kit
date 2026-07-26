@@ -366,9 +366,18 @@ P0·P1 수정 과정에서 필요한 공통 부분부터 작게 추출합니다.
     `do_*`는 각각 CLI 구성과 `ROUTE-001` 범위에서 다룬다.
   - 입력 준비, cache/checkpoint 복원, 외부 호출, 결과 검증과 최종 저장을
     독립 helper로 분리하되 진입 함수는 use case 순서와 조기 반환만 조정한다.
+  - [x] `extract_project_pdf`: 페이지 하나의 fragment·cache·provider·산출물
+    처리, 선택 페이지 반복과 부분 실패 수집, 최종 결합·상태 기록을 분리했다.
+    진입 함수는 189줄에서 100줄로 줄었고 성공·cache 재사용·validation 재시도·
+    부분 실패 계약을 유지한다.
+  - [ ] `translate_project`
+  - [ ] `ocr_project_images`
+  - [ ] `save_project_source_review`
+  - [ ] `retry_failed_translations`
   - 완료 기준: 우선 범위의 각 진입 함수가 120줄 이하이고, 추출한 단계별
     helper에 성공·부분 실패·재개·stale 회귀 테스트가 있어야 한다. 줄 수를
     맞추기 위한 의미 없는 wrapper 분리는 허용하지 않는다.
+  - PDF 단계 검증: 전체 291개 테스트와 mypy 48개 파일·ruff 검사를 통과했다.
 - [x] `API-001` 결과 객체의 `ok` 의미를 통일하거나 상수 필드를 제거한다.
   - 성공하거나 예외를 던지는 결과 객체는 상수 `ok`를 노출하지 않는다.
   - 일부 실패나 QA 불합격처럼 정상 반환 안에 실제 결과 차이가 있는 객체만
