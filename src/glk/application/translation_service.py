@@ -110,6 +110,16 @@ class _TranslationCheckpoint:
     existing_output_data: bytes
 
 
+@dataclass(slots=True)
+class _TranslationExecution:
+    completed: dict[str, TranslationSegment]
+    output_digest: Any
+    output_bytes: int
+    completed_chunks: int
+    validation_issue_messages: list[str]
+    validation_issue_block_ids: set[str]
+
+
 def _utc_now() -> str:
     return (
         datetime.now(timezone.utc)
@@ -953,6 +963,152 @@ def _write_partial_translation_state(
     )
 
 
+def _prepare_translation_execution(
+    inputs: _TranslationInputs,
+    provider: TranslationProvider,
+    checkpoint: _TranslationCheckpoint,
+    *,
+    max_characters: int,
+) -> _TranslationExecution:
+    existing_segments = list(checkpoint.existing_segments)
+    completed = {
+        segment.source_block_id: segment for segment in existing_segments
+    }
+    execution = _TranslationExecution(
+        completed=completed,
+        output_digest=hashlib.sha256(checkpoint.existing_output_data),
+        output_bytes=len(checkpoint.existing_output_data),
+        completed_chunks=0,
+        validation_issue_messages=[],
+        validation_issue_block_ids=set(),
+    )
+    block_by_id = {block.id: block for block in inputs.blocks}
+    for segment in existing_segments:
+        block = block_by_id[segment.source_block_id]
+        errors = _validate_translated_text(
+            block=block,
+            translated_text=segment.translated_text,
+            termbase_entries=list(inputs.termbase_entries),
+        )
+        if errors:
+            execution.validation_issue_messages.extend(errors)
+            execution.validation_issue_block_ids.add(block.id)
+    if not existing_segments:
+        _write_partial_translation_state(
+            inputs,
+            provider,
+            max_characters=max_characters,
+            completed_blocks=0,
+            completed_chunks=0,
+            output_hash=None,
+            output_bytes=0,
+            failed_chunk=None,
+            failure_reason=None,
+            validation_issue_count=0,
+            validation_issue_blocks=0,
+        )
+    return execution
+
+
+def _translate_pending_chunks(
+    inputs: _TranslationInputs,
+    provider: TranslationProvider,
+    execution: _TranslationExecution,
+    *,
+    max_characters: int,
+    notify: ProgressCallback,
+) -> None:
+    chunks = list(inputs.chunks)
+    termbase_entries = list(inputs.termbase_entries)
+    for chunk_index, chunk in enumerate(chunks, start=1):
+        if all(block.id in execution.completed for block in chunk.blocks):
+            execution.completed_chunks += 1
+            notify(
+                f"Chunk {chunk_index}/{len(chunks)}: reused completed translation"
+            )
+            continue
+        if any(block.id in execution.completed for block in chunk.blocks):
+            raise TranslationError(
+                f"Chunk {chunk.id} is only partially stored. Use --force to restart."
+            )
+        notify(f"Chunk {chunk_index}/{len(chunks)}: requesting translation")
+        try:
+            translated = _request_translation_chunk(
+                chunk,
+                chunk_index=chunk_index,
+                total_chunks=len(chunks),
+                provider=provider,
+                termbase_entries=termbase_entries,
+                project_instructions=inputs.project_instructions,
+                notify=notify,
+            )
+        except Exception as error:
+            output_hash = (
+                execution.output_digest.hexdigest()
+                if execution.output_bytes > 0
+                else None
+            )
+            _write_partial_translation_state(
+                inputs,
+                provider,
+                max_characters=max_characters,
+                completed_blocks=len(execution.completed),
+                completed_chunks=execution.completed_chunks,
+                output_hash=output_hash,
+                output_bytes=execution.output_bytes,
+                failed_chunk=chunk.id,
+                failure_reason=str(error),
+                validation_issue_count=len(
+                    execution.validation_issue_messages
+                ),
+                validation_issue_blocks=len(
+                    execution.validation_issue_block_ids
+                ),
+            )
+            raise TranslationError(
+                f"Translation failed for {chunk.id}. Completed chunks were preserved; "
+                f"fix the issue and use --resume. Cause: {error}"
+            ) from error
+
+        chunk_segments, issue_messages, issue_block_ids = (
+            _build_translation_segments(
+                chunk,
+                translated,
+                provider=provider,
+                termbase_entries=termbase_entries,
+                prompt_hash=inputs.prompt_hash,
+                termbase_hash=inputs.termbase_hash,
+            )
+        )
+        execution.validation_issue_messages.extend(issue_messages)
+        execution.validation_issue_block_ids.update(issue_block_ids)
+        for segment in chunk_segments:
+            execution.completed[segment.source_block_id] = segment
+        execution.completed_chunks += 1
+        chunk_data = _serialize_segments(chunk_segments)
+        if execution.output_bytes:
+            _append_bytes_durable(inputs.paths.translation_segments, chunk_data)
+        else:
+            _write_bytes_atomic(inputs.paths.translation_segments, chunk_data)
+        execution.output_digest.update(chunk_data)
+        execution.output_bytes += len(chunk_data)
+        _write_partial_translation_state(
+            inputs,
+            provider,
+            max_characters=max_characters,
+            completed_blocks=len(execution.completed),
+            completed_chunks=execution.completed_chunks,
+            output_hash=execution.output_digest.hexdigest(),
+            output_bytes=execution.output_bytes,
+            failed_chunk=None,
+            failure_reason=None,
+            validation_issue_count=len(execution.validation_issue_messages),
+            validation_issue_blocks=len(
+                execution.validation_issue_block_ids
+            ),
+        )
+
+
 def _finalize_translation_run(
     inputs: _TranslationInputs,
     prompt_path: Path,
@@ -1094,15 +1250,6 @@ def translate_project(
     if dry_run:
         return _dry_run_translation_result(inputs)
     canonical_prompt_path = _ensure_translation_prompt(inputs)
-    paths = inputs.paths
-    blocks = list(inputs.blocks)
-    termbase_entries = list(inputs.termbase_entries)
-    project_instructions = inputs.project_instructions
-    termbase_hash = inputs.termbase_hash
-    prompt_hash = inputs.prompt_hash
-    chunks = list(inputs.chunks)
-
-    output_path = paths.translation_segments
     restored = _restore_translation_checkpoint(
         inputs,
         canonical_prompt_path,
@@ -1111,150 +1258,34 @@ def translate_project(
     )
     if isinstance(restored, TranslationRunResult):
         return restored
-    previous_state = restored.previous_state
-    existing_segments = list(restored.existing_segments)
-    existing_output_data = restored.existing_output_data
     active_provider = provider or GeminiTranslationProvider.from_environment(
         model_name,
         settings_root=settings_root,
     )
-    completed = {
-        segment.source_block_id: segment for segment in existing_segments
-    }
-    output_digest = hashlib.sha256(existing_output_data)
-    output_bytes = len(existing_output_data)
-    block_by_id = {block.id: block for block in blocks}
-    for segment in existing_segments:
-        block = block_by_id.get(segment.source_block_id)
-        if (
-            block is None
-            or segment.source_text != block.effective_text
-            or segment.source_sha256
-            != _sha256_bytes(block.effective_text.encode("utf-8"))
-            or segment.model != active_provider.model_name
-            or segment.prompt_sha256 != prompt_hash
-            or segment.termbase_sha256 != termbase_hash
-        ):
-            raise TranslationError(
-                "Partial translation segments do not match current inputs. Use --force."
-            )
-
-    if not existing_segments:
-        _write_partial_translation_state(
-            inputs,
-            active_provider,
-            max_characters=max_characters,
-            completed_blocks=0,
-            completed_chunks=0,
-            output_hash=None,
-            output_bytes=0,
-            failed_chunk=None,
-            failure_reason=None,
-            validation_issue_count=0,
-            validation_issue_blocks=0,
-        )
-
-    completed_chunks = 0
-    validation_issue_messages: list[str] = []
-    validation_issue_block_ids: set[str] = set()
-    for segment in existing_segments:
-        block = block_by_id[segment.source_block_id]
-        errors = _validate_translated_text(
-            block=block,
-            translated_text=segment.translated_text,
-            termbase_entries=termbase_entries,
-        )
-        if errors:
-            validation_issue_messages.extend(errors)
-            validation_issue_block_ids.add(block.id)
-    for chunk_index, chunk in enumerate(chunks, start=1):
-        if all(block.id in completed for block in chunk.blocks):
-            completed_chunks += 1
-            notify(f"Chunk {chunk_index}/{len(chunks)}: reused completed translation")
-            continue
-        if any(block.id in completed for block in chunk.blocks):
-            raise TranslationError(
-                f"Chunk {chunk.id} is only partially stored. Use --force to restart."
-            )
-        notify(f"Chunk {chunk_index}/{len(chunks)}: requesting translation")
-        try:
-            translated = _request_translation_chunk(
-                chunk,
-                chunk_index=chunk_index,
-                total_chunks=len(chunks),
-                provider=active_provider,
-                termbase_entries=termbase_entries,
-                project_instructions=project_instructions,
-                notify=notify,
-            )
-        except Exception as error:
-            output_hash = (
-                output_digest.hexdigest() if output_bytes > 0 else None
-            )
-            _write_partial_translation_state(
-                inputs,
-                active_provider,
-                max_characters=max_characters,
-                completed_blocks=len(completed),
-                completed_chunks=completed_chunks,
-                output_hash=output_hash,
-                output_bytes=output_bytes,
-                failed_chunk=chunk.id,
-                failure_reason=str(error),
-                validation_issue_count=len(validation_issue_messages),
-                validation_issue_blocks=len(validation_issue_block_ids),
-            )
-            raise TranslationError(
-                f"Translation failed for {chunk.id}. Completed chunks were preserved; "
-                f"fix the issue and use --resume. Cause: {error}"
-            ) from error
-
-        chunk_segments, issue_messages, issue_block_ids = (
-            _build_translation_segments(
-                chunk,
-                translated,
-                provider=active_provider,
-                termbase_entries=termbase_entries,
-                prompt_hash=prompt_hash,
-                termbase_hash=termbase_hash,
-            )
-        )
-        validation_issue_messages.extend(issue_messages)
-        validation_issue_block_ids.update(issue_block_ids)
-        for segment in chunk_segments:
-            completed[segment.source_block_id] = segment
-        completed_chunks += 1
-        chunk_data = _serialize_segments(chunk_segments)
-        if output_bytes:
-            _append_bytes_durable(output_path, chunk_data)
-        else:
-            _write_bytes_atomic(output_path, chunk_data)
-        output_digest.update(chunk_data)
-        output_bytes += len(chunk_data)
-        _write_partial_translation_state(
-            inputs,
-            active_provider,
-            max_characters=max_characters,
-            completed_blocks=len(completed),
-            completed_chunks=completed_chunks,
-            output_hash=output_digest.hexdigest(),
-            output_bytes=output_bytes,
-            failed_chunk=None,
-            failure_reason=None,
-            validation_issue_count=len(validation_issue_messages),
-            validation_issue_blocks=len(validation_issue_block_ids),
-        )
+    execution = _prepare_translation_execution(
+        inputs,
+        active_provider,
+        restored,
+        max_characters=max_characters,
+    )
+    _translate_pending_chunks(
+        inputs,
+        active_provider,
+        execution,
+        max_characters=max_characters,
+        notify=notify,
+    )
 
     return _finalize_translation_run(
         inputs,
         canonical_prompt_path,
         active_provider,
         max_characters=max_characters,
-        previous_state=previous_state,
-        resumed=bool(existing_segments),
-        completed=completed,
-        output_digest=output_digest,
-        output_bytes=output_bytes,
-        validation_issue_messages=validation_issue_messages,
-        validation_issue_block_ids=validation_issue_block_ids,
+        previous_state=restored.previous_state,
+        resumed=bool(restored.existing_segments),
+        completed=execution.completed,
+        output_digest=execution.output_digest,
+        output_bytes=execution.output_bytes,
+        validation_issue_messages=execution.validation_issue_messages,
+        validation_issue_block_ids=execution.validation_issue_block_ids,
     )
