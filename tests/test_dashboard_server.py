@@ -114,12 +114,18 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(self.server.ai_settings.settings_root, expected)
         self.assertEqual(self.server.job_manager.settings_root, expected)
 
-    def test_port_collision_preserves_original_socket_error(self) -> None:
-        with self.assertRaises(OSError) as raised:
+    def test_bind_failure_preserves_original_socket_error(self) -> None:
+        bind_error = OSError(errno.EADDRINUSE, "Address already in use")
+        with (
+            patch(
+                "glk.infrastructure.local_http.TCPServer.server_bind",
+                side_effect=bind_error,
+            ),
+            self.assertRaises(OSError) as raised,
+        ):
             create_dashboard_server(
                 workspace_root=self.workspace_root,
                 settings_root=self.settings_root,
-                port=self.server.server_port,
             )
 
         self.assertEqual(raised.exception.errno, errno.EADDRINUSE)
