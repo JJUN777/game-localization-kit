@@ -1198,6 +1198,17 @@ class TranslationReviewTests(unittest.TestCase):
                 ].decode("utf-8"),
                 "전투 단계\n\n각 사냥꾼은 스태미나 2를 얻습니다.\n",
             )
+            self.assertEqual(
+                image_outputs[
+                    project_path / "05_output/combined_kor.txt"
+                ].decode("utf-8"),
+                "[card-01.png]\n\n"
+                "전투 단계\n\n"
+                "각 사냥꾼은 스태미나 2를 얻습니다.\n\n"
+                "----------------------\n\n"
+                "[hero.jpg]\n\n"
+                "사냥꾼들은 {HP} 10을 사용할 수 있습니다.\n",
+            )
             pipeline = inspect_project(
                 "translation_project", workspace_root
             )["pipeline"]

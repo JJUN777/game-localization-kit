@@ -1,4 +1,4 @@
-# 전체 작업 흐름
+# CLI와 workspace 작업 흐름
 
 이 문서는 `glk` CLI의 프로젝트 생성부터 최종 번역 승인까지의 실행 순서,
 사람의 판단 지점, 주요 출력 파일과 상태 전이를 정리한 기준입니다.
@@ -62,7 +62,7 @@ flowchart TD
     APPROVED --> BUILD[glk glossary build<br/>로컬 용어 후보 수집]
     BUILD --> TSV[03_terminology/glossary_review.tsv]
     TSV --> GLOSSARY_UI[glk review glossary<br/>표 형식 localhost 검수 화면]
-    GLOSSARY_UI --> EDIT[상태·번역어·분류·메모 수정<br/>일괄 처리·누락 용어 추가]
+    GLOSSARY_UI --> EDIT[상태·번역어·분류 수정<br/>일괄 처리·누락 용어 추가]
     EDIT --> IMPORT[화면에서 termbase 생성<br/>또는 glk glossary import]
     IMPORT --> TERMBASE[03_terminology/termbase.json]
     TERMBASE --> TRANSLATE[glk translate<br/>ID 기반 Gemini 초벌 번역]
@@ -97,9 +97,9 @@ flowchart TD
 ## 1. 프로젝트 생성
 
 ```bash
-glk init "Primal Rulebook" --project-id primal
+glk init "Sample Rulebook" --project-id sample_rulebook
 glk projects
-glk status --project primal
+glk status --project sample_rulebook
 ```
 
 - 프로젝트 이름은 화면과 manifest에서 읽는 이름입니다.
@@ -130,7 +130,7 @@ workspaces/<project_id>/01_input/
 가장 간단한 시작 방법은 대화형 통합 명령입니다.
 
 ```bash
-glk run --project primal
+glk run --project sample_rulebook
 ```
 
 한 입력 폴더에만 원본이 있으면 종류와 경로를 자동 감지합니다. 양쪽에 모두 원본이 있으면 선택을 요청합니다. `glk run`은 원문 획득, block 정규화, draft/review 생성과 로컬 QA까지 실행합니다.
@@ -141,10 +141,10 @@ glk run --project primal
 
 ```bash
 # PDF 전체 페이지
-glk run --project primal --input-type pdf --file rulebook.pdf
+glk run --project sample_rulebook --input-type pdf --file rulebook.pdf
 
 # PDF 일부 페이지만 선택
-glk run --project primal --input-type pdf --file rulebook.pdf --pages 1,3-5
+glk run --project sample_rulebook --input-type pdf --file rulebook.pdf --pages 1,3-5
 
 # 이미지 루트 폴더와 모든 하위 폴더
 glk run --project cards --input-type images --folder card_images/
@@ -159,7 +159,7 @@ AI 설정, background job과 재시도 화면의 구체적인 동작은
 원본을 등록한 뒤에는 입력 경로를 생략할 수 있습니다.
 
 ```bash
-glk run --project primal
+glk run --project sample_rulebook
 ```
 
 ### 개별 단계 명령
@@ -167,10 +167,10 @@ glk run --project primal
 `extract`, `ocr`, `segment`, `qa`는 문제를 진단하거나 한 단계만 다시 실행할 때 사용합니다.
 
 ```bash
-glk extract --project primal --file rulebook.pdf
+glk extract --project sample_rulebook --file rulebook.pdf
 glk ocr --project cards --folder card_images/
-glk segment --project primal
-glk qa --project primal
+glk segment --project sample_rulebook
+glk qa --project sample_rulebook
 ```
 
 ---
@@ -228,7 +228,7 @@ QA는 LLM을 호출하거나 원문을 자동 수정하지 않습니다. 현재 
 ### 브라우저 검수 화면
 
 ```bash
-glk review source --project primal
+glk review source --project sample_rulebook
 ```
 
 PDF는 추출 단계에서 렌더링한 페이지 이미지가 표시되며, 이미지 OCR 프로젝트는 `01_input/images/`의 실제 이미지가 표시됩니다. 화면에서 다음 작업을 할 수 있습니다.
@@ -263,8 +263,8 @@ Increase your HP by 10.
 브라우저의 `검사`와 `최종 승인` 버튼을 사용하거나, CLI에서 실행합니다.
 
 ```bash
-glk review finalize --project primal --dry-run   # 파일을 쓰지 않는 검사
-glk review finalize --project primal             # 최종화
+glk review finalize --project sample_rulebook --dry-run   # 파일을 쓰지 않는 검사
+glk review finalize --project sample_rulebook             # 최종화
 ```
 
 검사 항목: marker, block 순서, 빈 본문, 미해결 OCR 표시, token 구조와 stale 상태
@@ -272,7 +272,7 @@ glk review finalize --project primal             # 최종화
 `{HP}` 같은 token 변경을 의도했다면 원본을 확인한 뒤에만 사용합니다.
 
 ```bash
-glk review finalize --project primal --allow-token-changes
+glk review finalize --project sample_rulebook --allow-token-changes
 ```
 
 최종 결과: `02_source/final.txt`와 `.glk/segments/approved_source.jsonl`
@@ -288,7 +288,7 @@ glk review finalize --project primal --allow-token-changes
 원문 획득 결과가 바뀐 상태에서 `glk segment`를 다시 실행하면 새 draft만 만들고 기존 review를 stale로 표시합니다. 비교를 마치고 작업본을 초기화할 때만:
 
 ```bash
-glk review prepare --project primal --force
+glk review prepare --project sample_rulebook --force
 ```
 
 ---
@@ -298,7 +298,7 @@ glk review prepare --project primal --force
 최종 원문이 승인된 뒤 후보 TSV를 생성합니다.
 
 ```bash
-glk glossary build --project primal
+glk glossary build --project sample_rulebook
 ```
 
 대시보드에서는 승인 완료 프로젝트 카드의 `용어 후보 생성 시작`을 누르면
@@ -310,13 +310,13 @@ API 비용은 발생하지 않습니다. 완료되면 프로젝트 상태를 다
 
 ```bash
 # 편집 내용을 버리고 새 후보로 초기화 (비교·백업 후에만)
-glk glossary build --project primal --force
+glk glossary build --project sample_rulebook --force
 ```
 
 ### 브라우저 검토 화면
 
 ```bash
-glk review glossary --project primal
+glk review glossary --project sample_rulebook
 ```
 
 HTML 표에서 모든 자동 후보를 `approved`, `keep`, `rejected` 중 하나로 확정합니다. 검색·필터, 첫 등장 위치·출현 횟수·원문 용어·상태 정렬, 여러 행 선택 후 상태 일괄 변경, 실제 문맥 펼쳐보기와 수동 용어 추가를 지원합니다. 저장은 기존 `glossary_review.tsv`를 갱신합니다. 정확한 컬럼과 상태값은 [용어집 검토 사양](GLOSSARY.md)을 따릅니다.
@@ -327,7 +327,7 @@ HTML 표에서 모든 자동 후보를 `approved`, `keep`, `rejected` 중 하나
 
 ```bash
 glk glossary import \
-  --project primal \
+  --project sample_rulebook \
   --file 03_terminology/glossary_review.tsv
 ```
 
@@ -350,7 +350,7 @@ import가 수행하는 작업:
 
 ```bash
 glk glossary import \
-  --project primal \
+  --project sample_rulebook \
   --file 03_terminology/glossary_review.tsv \
   --allow-missing-terms
 ```
@@ -364,8 +364,8 @@ glk glossary import \
 최종 원문과 termbase가 모두 `current`일 때만 번역을 시작합니다.
 
 ```bash
-glk translate --project primal --dry-run   # API 없이 청크 계획 확인
-glk translate --project primal             # 실제 번역
+glk translate --project sample_rulebook --dry-run   # API 없이 청크 계획 확인
+glk translate --project sample_rulebook             # 실제 번역
 ```
 
 GUI의 prompt 편집, background job, 이어하기와 전체 재번역 화면은
@@ -377,7 +377,7 @@ GUI의 prompt 편집, background job, 이어하기와 전체 재번역 화면은
 
 ```bash
 glk translate \
-  --project primal \
+  --project sample_rulebook \
   --prompt prompts/primal_translation.txt \
   --model gemini-2.5-flash
 ```
@@ -398,8 +398,8 @@ glk translate \
 번역은 source block을 중간에 자르지 않고 순서대로 청크화합니다. 기본 상한은 원문 10,000자입니다.
 
 ```bash
-glk translate --project primal --max-characters 8000
-glk translate --project primal --resume   # 중단 후 완료된 청크부터 이어서
+glk translate --project sample_rulebook --max-characters 8000
+glk translate --project sample_rulebook --resume   # 중단 후 완료된 청크부터 이어서
 ```
 
 승인 원문, termbase, project prompt, 모델, hard rule 버전이나 청크 설정이 달라지면 기존 결과를 stale로 처리합니다.
@@ -432,7 +432,7 @@ CLI `glk translate --force`는 draft가 달라져도 기존 `review.txt`를 덮�
 ### 브라우저 검수 화면
 
 ```bash
-glk review translation --project primal
+glk review translation --project sample_rulebook
 ```
 
 사용 가능한 localhost 포트를 골라 기본 브라우저를 자동으로 엽니다. 화면 기능:
@@ -450,7 +450,7 @@ PASS block을 포함한 모든 번역문을 수정할 수 있습니다. PASS는 
 서버는 `127.0.0.1`에만 바인딩됩니다. 터미널에서 `Ctrl+C`로 종료합니다.
 
 ```bash
-glk review translation --project primal --no-open --port 8765
+glk review translation --project sample_rulebook --no-open --port 8765
 ```
 
 대시보드에서 연 화면의 복귀와 완료 동작은
@@ -475,7 +475,7 @@ Each Hunter gains 2 Stamina.
 ### QA와 재번역
 
 ```bash
-glk translation qa --project primal
+glk translation qa --project sample_rulebook
 ```
 
 최종 승인을 차단하는 오류:
@@ -491,11 +491,11 @@ glk translation qa --project primal
 QA의 `code`는 영문 식별자로 유지합니다. 사람이 보는 HTML과 보고서의 `message`에는 한글 사유와 실제 차이값을 기록합니다.
 
 ```bash
-glk retry --failed --project primal --dry-run   # 대상 확인
-glk retry --failed --project primal             # ERROR block만 재번역
+glk retry --failed --project sample_rulebook --dry-run   # 대상 확인
+glk retry --failed --project sample_rulebook             # ERROR block만 재번역
 
-glk translation finalize --project primal --dry-run
-glk translation finalize --project primal
+glk translation finalize --project sample_rulebook --dry-run
+glk translation finalize --project sample_rulebook
 ```
 
 `glk retry --failed`는 ERROR block만 한 개씩 재번역합니다. 정상 block과 사람이 수정한 다른 block은 그대로 유지합니다. 교체 전·후 번역은 `04_translation/revisions/translation_retry_*.json`에 기록됩니다. 검수 UI의 `오류만 재번역`은 현재 편집을 먼저 저장하고 같은 작업을 background job으로 시작합니다. 화면을 기다리게 하지 않고 진행률과 실패 사유를 표시하며, 실패한 작업은 같은 버튼으로 다시 시도할 수 있습니다.
@@ -511,15 +511,21 @@ glk translation finalize --project primal
 | `05_output/<이미지 파일명>_kor.txt` | 원본 하위 폴더를 보존한 이미지별 승인 번역본 |
 | `05_output/combined_kor.txt` | source 경계와 구분선을 유지한 이미지 프로젝트 통합본 |
 
+이미지 통합본의 source 경계는 `[원본 파일명]` 형식으로 표시하며 내부 작업
+폴더 경로와 `SOURCE` 표시는 포함하지 않습니다.
+
 GUI 다운로드는 현재 승인 상태와 SHA-256이 일치하는 결과만 허용합니다. 화면별
-동작은 [GUI 사용 가이드](GUI.md#9-결과-다운로드)를 참고합니다.
+동작은 [GUI 사용 가이드](GUI.md#9-결과-다운로드)를 참고합니다. 이미지
+프로젝트의 `이미지별 파일 전체 저장`은 `combined_kor.txt`를 제외한 이미지별
+TXT를 원본 하위 폴더 구조 그대로 ZIP에 담아 요청 시 생성하며, ZIP 자체는
+workspace에 저장하지 않습니다.
 
 ### Stale 처리
 
 재번역으로 review가 stale이 되면 기존 사람 수정은 자동으로 덮어쓰지 않습니다.
 
 ```bash
-glk translation prepare --project primal --force   # 새 draft로 초기화
+glk translation prepare --project sample_rulebook --force   # 새 draft로 초기화
 ```
 
 ---
@@ -527,7 +533,7 @@ glk translation prepare --project primal --force   # 새 draft로 초기화
 ## 9. 상태와 재실행
 
 ```bash
-glk status --project primal
+glk status --project sample_rulebook
 ```
 
 | 출력 | 의미 |
@@ -614,3 +620,4 @@ workspaces/<project_id>/
 | 데이터 모델·계층·hash 정책 | [아키텍처](ARCHITECTURE.md) |
 | TSV·termbase 계약 | [용어집 검토 사양](GLOSSARY.md) |
 | LLM 호출·재시도·캐시 또는 요금 기준 | [LLM 사용량과 비용](COSTS.md) |
+| 버전별 사용자 기능·동작·안정성 변경 | [릴리즈 노트](RELEASE_NOTES.md) |

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 from typing import Any
 
@@ -1035,7 +1035,7 @@ def _render_final_translation(
             lines.append(
                 f"[PAGE {locator[1]}]"
                 if locator[0] == "page"
-                else f"[SOURCE {locator[1]}]"
+                else f"[{PurePosixPath(str(locator[1])).name}]"
             )
             lines.append("")
             previous_locator = locator

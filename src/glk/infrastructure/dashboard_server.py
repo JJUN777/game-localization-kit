@@ -91,6 +91,7 @@ _MAX_TRANSLATION_PROMPT_REQUEST_BYTES = (
 )
 _MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 _MAX_UPLOAD_FILES = 200
+DASHBOARD_DEFAULT_PORT = 8765
 _REVIEW_TYPES = {"source", "glossary", "translation"}
 _UNSAFE_UPLOAD_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _WINDOWS_RESERVED_NAMES = {
@@ -127,21 +128,25 @@ class DashboardHttpServer(LocalHttpServer):
         glossary_job_runner: GlossaryJobRunner | None = None,
         translation_job_runner: TranslationJobRunner | None = None,
     ) -> None:
-        super().__init__(server_address, handler_class)
-        self.workspace_root = str(workspace_root)
-        self.settings_root = Path(settings_root).expanduser().resolve()
-        self.ai_settings = AiSettingsService(self.settings_root)
-        self.job_manager = DashboardJobManager(
-            workspace_root,
-            settings_root=self.settings_root,
-            runner=source_job_runner,
-            glossary_runner=glossary_job_runner,
-            translation_runner=translation_job_runner,
-        )
         self._review_lock = threading.Lock()
         self._review_servers: dict[
             tuple[str, str], tuple[LocalHttpServer, threading.Thread]
         ] = {}
+        super().__init__(server_address, handler_class)
+        try:
+            self.workspace_root = str(workspace_root)
+            self.settings_root = Path(settings_root).expanduser().resolve()
+            self.ai_settings = AiSettingsService(self.settings_root)
+            self.job_manager = DashboardJobManager(
+                workspace_root,
+                settings_root=self.settings_root,
+                runner=source_job_runner,
+                glossary_runner=glossary_job_runner,
+                translation_runner=translation_job_runner,
+            )
+        except Exception:
+            super().server_close()
+            raise
 
     @property
     def dashboard_url(self) -> str:
@@ -205,7 +210,9 @@ class DashboardHttpServer(LocalHttpServer):
             review_thread.join(timeout=2)
 
     def server_close(self) -> None:
-        self.job_manager.close()
+        job_manager = getattr(self, "job_manager", None)
+        if job_manager is not None:
+            job_manager.close()
         self.close_review_servers()
         super().server_close()
 
@@ -1163,7 +1170,7 @@ def serve_dashboard(
     *,
     workspace_root: str | Path = "workspaces",
     settings_root: str | Path | None = None,
-    port: int = 0,
+    port: int = DASHBOARD_DEFAULT_PORT,
     open_browser: bool = True,
 ) -> None:
     server = create_dashboard_server(

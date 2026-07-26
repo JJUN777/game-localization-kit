@@ -194,6 +194,32 @@ review TXT는 `[PAGE]` 또는 `[SOURCE]`, `[BLOCK]`, `[[GLK_END ...]]` marker로
 - PDF: 응답 후 fragment 누락·중복을 검증하고, 검증 실패 시 해당 페이지를 최대 2회 재시도합니다 (최초 포함 총 3회). 세 번 모두 실패하면 임의 보정 없이 실패로 남깁니다.
 - LLM 응답이 구조 검증에 실패하면 로컬 추정 결과로 조용히 대체하지 않고 실패 또는 검토 상태를 남깁니다.
 
+### 대시보드 Gemini 모델 목록
+
+`AI 설정` 드롭다운의 단일 데이터 기준은
+[`src/glk/data/gemini_models.json`](../src/glk/data/gemini_models.json)입니다.
+대시보드 서버가 이 JSON을 검증해 UI에 전달하므로 HTML이나 Python 코드에
+모델 ID를 중복해서 추가하지 않습니다.
+
+JSON에는 공식 문서 확인일인 `last_verified`, 문서 주소인 `source_url`, API에
+그대로 전달하는 `models[].id`, 화면 설명인 `description_ko`, 기본 권장 여부인
+`recommended`를 기록합니다. 2026-07-24에 확인한 초기 목록은 다음과 같습니다.
+
+| API 모델 ID | 용도 |
+|---|---|
+| `gemini-3.5-flash` | 복잡한 문서와 멀티모달 작업을 위한 안정 Flash 모델 |
+| `gemini-3.1-flash-lite` | 대량 추출과 저비용 처리를 위한 3.x 안정 모델 |
+| `gemini-2.5-flash` | 속도와 품질의 균형이 좋은 기본 모델 |
+| `gemini-2.5-pro` | 복잡한 문서와 추론 작업에 적합한 고성능 모델 |
+| `gemini-2.5-flash-lite` | 단순 추출과 대량 처리에 적합한 저비용 모델 |
+
+목록을 갱신할 때는 공식 모델·지원 중단 문서에서 `generateContent`, 이미지·PDF
+입력, 구조화 출력과 생성 옵션 지원 여부를 확인한 뒤 안정 모델만 JSON에
+추가하고 `last_verified`를 바꿉니다. Preview·experimental 모델은 기본 목록보다
+대시보드의 `직접 입력`을 우선합니다. 모델별 sampling parameter가 다르면
+PDF layout·이미지 OCR·번역 provider의 옵션 호환성을 먼저 확인해야 합니다.
+변경 뒤에는 전체 테스트와 Orca 대시보드 드롭다운을 검증합니다.
+
 호출 단위, 재시도·캐시가 비용에 미치는 영향은 [LLM 사용량과 비용](COSTS.md)에 기록합니다.
 
 ---
@@ -299,6 +325,8 @@ translation provider는 각 작업의 prompt·응답 schema·결과 검증만 �
 - 용어 후보 생성은 최종 승인된 원문만 허용하고 stale TSV는 자동 덮어쓰기 차단
 - 결과 다운로드는 workspace 바로 아래 프로젝트의 승인된 `05_output` 경로만
   허용하고 승인 SHA-256과 전송 직전 파일 hash를 다시 확인
+- 이미지별 결과 ZIP은 승인된 개별 TXT를 전송 시 메모리에서 묶고
+  `combined_kor.txt`를 제외하며 원본의 상대 폴더 구조를 유지
 - 일부 원본 실패와 전체 원본 실패를 구분하고 provider 오류는 모델·인증·권한·
   사용량·네트워크 유형별 안전한 사용자 안내로 변환
 - 원본 multipart 요청의 전체 크기·파일 개수·파일명·확장자와 이미지 OCR

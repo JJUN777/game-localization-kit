@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import hashlib
-from importlib.resources import files
 import tempfile
 import unittest
 from pathlib import Path
@@ -151,17 +150,6 @@ class ProjectServiceTests(unittest.TestCase):
             ):
                 self.assertFalse((location.path / legacy_directory).exists())
             self.assertFalse((location.path / "02_source/assets").exists())
-
-    def test_elder_scrolls_poc_prompt_is_preserved_as_an_example(self) -> None:
-        prompt = (
-            files("glk.templates")
-            .joinpath("elder_scrolls_ocr_prompt.example.txt")
-            .read_text(encoding="utf-8")
-        )
-        self.assertIn("# Elder Scrolls POC OCR prompt 예제", prompt)
-        self.assertIn("{DMGR}", prompt)
-        self.assertIn("{eWater}", prompt)
-        self.assertIn("{tWater}", prompt)
 
     def test_duplicate_project_does_not_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

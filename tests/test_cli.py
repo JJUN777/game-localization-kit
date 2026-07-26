@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import io
 import hashlib
 import json
@@ -40,7 +41,7 @@ class CliTests(unittest.TestCase):
         with redirect_stdout(output):
             exit_code = main(["version"])
         self.assertEqual(exit_code, 0)
-        self.assertRegex(output.getvalue(), r"^glk \d+\.\d+\.\d+\n$")
+        self.assertEqual(output.getvalue(), "glk 2.0.0\n")
 
     def test_ui_command_starts_local_dashboard(self) -> None:
         with patch("glk.cli.serve_dashboard") as serve:
@@ -66,6 +67,29 @@ class CliTests(unittest.TestCase):
                 "open_browser": False,
             },
         )
+
+    def test_ui_command_uses_stable_default_port(self) -> None:
+        with patch("glk.cli.serve_dashboard") as serve:
+            exit_code = main(["ui", "--no-open"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(serve.call_args.kwargs["port"], 8765)
+
+    def test_ui_command_explains_when_port_is_already_in_use(self) -> None:
+        error_output = io.StringIO()
+        with (
+            patch(
+                "glk.cli.serve_dashboard",
+                side_effect=OSError(errno.EADDRINUSE, "Address already in use"),
+            ),
+            redirect_stderr(error_output),
+        ):
+            exit_code = main(["ui", "--no-open"])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("대시보드 포트를 이미 사용 중입니다.", error_output.getvalue())
+        self.assertIn("--port", error_output.getvalue())
+        self.assertNotIn("Traceback", error_output.getvalue())
 
     def test_projects_command_lists_workspace_as_json(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

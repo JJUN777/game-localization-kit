@@ -77,7 +77,7 @@ review	Hunter		term		Hunter | Hunters	28	p2,p4,p8	Each Hunter gains 2 Stamina.	t
 | `source_term` | 필요시 | 기준 원문 용어 |
 | `translation` | O | 확정 한국어 번역어 |
 | `category` | O | 용어 유형 (아래 참고) |
-| `note` | O | 번역 원칙, 예외, 메모 |
+| `note` | TSV 직접 편집 | 이전 버전과 외부 편집기의 번역 원칙·메모 보존 |
 | `variants` | — | 발견된 대소문자·복수형 변형 (자동 계산) |
 | `occurrences` | — | 승인 원문 출현 횟수 (자동 계산) |
 | `locations` | — | 원본 페이지·파일 위치 (자동 계산) |
@@ -117,13 +117,13 @@ review	Hunter		term		Hunter | Hunters	28	p2,p4,p8	Each Hunter gains 2 Stamina.	t
 ## 브라우저 검토 화면
 
 ```bash
-glk review glossary --project primal
+glk review glossary --project sample_rulebook
 ```
 
 HTML 표에서 지원하는 기능:
 
 - 상태 4종과 카테고리 6종 드롭다운
-- 원문·번역·문맥·메모 검색과 상태·카테고리 필터
+- 원문 용어·번역어·출현 문맥 검색과 상태·카테고리 필터
 - 체크박스로 여러 후보를 선택한 뒤 상태 일괄 변경
 - 실제 출현 위치, 표기 변형과 예문 펼쳐보기
 - 자동 후보를 보존한 채 수동 용어 행 추가·삭제
@@ -191,7 +191,7 @@ approved⇥Critical Hit⇥치명타⇥term⇥항상 치명타로 번역⇥⇥⇥
 
 ```bash
 glk glossary import \
-  --project primal \
+  --project sample_rulebook \
   --file 03_terminology/glossary_review.tsv \
   --allow-missing-terms
 ```
@@ -210,8 +210,8 @@ glk glossary import \
 
 ```bash
 # 후보 수를 조정하거나 결과만 미리 확인
-glk glossary build --project primal --min-frequency 2 --max-words 4 --max-candidates 500
-glk glossary build --project primal --dry-run
+glk glossary build --project sample_rulebook --min-frequency 2 --max-words 4 --max-candidates 500
+glk glossary build --project sample_rulebook --dry-run
 ```
 
 ---

@@ -1239,8 +1239,8 @@
 
     .toast {
       position: fixed;
-      right: 24px;
-      bottom: 24px;
+      inset: auto 24px 24px auto;
+      margin: 0;
       z-index: 10;
       max-width: min(430px, calc(100% - 48px));
       padding: 14px 17px;
@@ -1874,11 +1874,19 @@
 
     function showToast(message, isError = false) {
       const toast = byId("toast");
+      const openDialogs = document.querySelectorAll("dialog[open]");
+      const toastHost = openDialogs.length
+        ? openDialogs[openDialogs.length - 1]
+        : document.body;
+      toastHost.append(toast);
       toast.textContent = message;
       toast.className = `toast show${isError ? " error" : ""}`;
       window.clearTimeout(toastTimer);
       toastTimer = window.setTimeout(() => {
         toast.className = "toast";
+        if (toast.parentElement !== document.body) {
+          document.body.append(toast);
+        }
       }, 3500);
     }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import sys
 from collections.abc import Sequence
@@ -46,7 +47,11 @@ from glk.application.translation_review_service import (
 from glk.domain.project import ProjectError
 from glk.domain.workspace import IMAGE_SOURCE_ROOT, WorkspacePaths, is_pdf_source_file
 from glk.error_response import make_error_response
-from glk.infrastructure.dashboard_server import DashboardError, serve_dashboard
+from glk.infrastructure.dashboard_server import (
+    DASHBOARD_DEFAULT_PORT,
+    DashboardError,
+    serve_dashboard,
+)
 from glk.infrastructure.gemini_common import GeminiConfigurationError
 from glk.infrastructure.glossary_review_server import serve_glossary_review
 from glk.infrastructure.source_review_server import serve_source_review
@@ -987,7 +992,14 @@ def _run_dashboard(args: argparse.Namespace) -> int:
             port=args.port,
             open_browser=not args.no_open,
         )
-    except (DashboardError, ProjectError, OSError, ValueError) as error:
+    except OSError as error:
+        code = (
+            "DASHBOARD_PORT_IN_USE"
+            if error.errno == errno.EADDRINUSE
+            else "DASHBOARD_SERVER_FAILED"
+        )
+        return _print_error(args, code, str(error))
+    except (DashboardError, ProjectError, ValueError) as error:
         return _print_error(args, "DASHBOARD_SERVER_FAILED", str(error))
     return 0
 
@@ -1080,8 +1092,11 @@ def build_parser() -> argparse.ArgumentParser:
     ui_parser.add_argument(
         "--port",
         type=int,
-        default=0,
-        help="Local port; 0 selects an available port",
+        default=DASHBOARD_DEFAULT_PORT,
+        help=(
+            f"Dashboard port; defaults to {DASHBOARD_DEFAULT_PORT}. "
+            "Use another port if it is already in use"
+        ),
     )
     ui_parser.add_argument(
         "--no-open",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import errno
 from io import BytesIO
 import json
 import os
@@ -112,6 +113,16 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(self.server.settings_root, expected)
         self.assertEqual(self.server.ai_settings.settings_root, expected)
         self.assertEqual(self.server.job_manager.settings_root, expected)
+
+    def test_port_collision_preserves_original_socket_error(self) -> None:
+        with self.assertRaises(OSError) as raised:
+            create_dashboard_server(
+                workspace_root=self.workspace_root,
+                settings_root=self.settings_root,
+                port=self.server.server_port,
+            )
+
+        self.assertEqual(raised.exception.errno, errno.EADDRINUSE)
 
     def _run_glossary_job(
         self,
@@ -288,6 +299,9 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("data-download-output-archive", html)
         self.assertIn("통합본 저장", html)
         self.assertIn("이미지별 파일 전체 저장", html)
+        self.assertIn('id="toast" role="status"', html)
+        self.assertIn('document.querySelectorAll("dialog[open]")', html)
+        self.assertIn("toastHost.append(toast)", html)
         self.assertIn("/api/output-archive", html)
         self.assertIn("window.showSaveFilePicker", html)
         self.assertIn("fileHandle.createWritable()", html)

@@ -28,6 +28,7 @@ _CODE_MESSAGES = {
     "SOURCE_JOB_START_FAILED": "원문 준비 작업을 시작하지 못했습니다.",
     "SOURCE_JOB_CONFLICT": "다른 원문 준비 작업이 실행 중입니다.",
     "DASHBOARD_SERVER_FAILED": "통합 대시보드를 열지 못했습니다.",
+    "DASHBOARD_PORT_IN_USE": "대시보드 포트를 이미 사용 중입니다. 실행 중인 대시보드를 사용하거나 --port로 다른 포트를 지정하세요.",
     "EXTRACTION_FAILED": "PDF 원문 추출에 실패했습니다.",
     "IMAGE_OCR_FAILED": "이미지 OCR에 실패했습니다.",
     "RUN_INPUT_FAILED": "처리할 원문 입력을 결정하지 못했습니다.",
