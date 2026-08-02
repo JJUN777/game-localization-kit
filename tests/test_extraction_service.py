@@ -211,7 +211,7 @@ class ExtractionServiceTests(unittest.TestCase):
                     provider=FakeLayoutProvider(),
                 )
 
-    def test_invalid_layout_is_partial_and_not_cached(self) -> None:
+    def test_repeated_fragment_omission_is_preserved_for_source_review(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             workspace_root = root / "workspaces"
@@ -225,16 +225,36 @@ class ExtractionServiceTests(unittest.TestCase):
                 workspace_root=workspace_root,
                 provider=provider,
             )
-            self.assertFalse(result.ok)
-            self.assertEqual(result.successful_pages, ())
-            self.assertIn("fragment validation", result.failures[0].error)
-            self.assertEqual(
-                result.failures[0].code,
-                "GEMINI_RESPONSE_INVALID",
-            )
+            self.assertTrue(result.ok)
+            self.assertEqual(result.successful_pages, (1,))
+            self.assertEqual(result.failures, ())
             self.assertEqual(provider.calls, 3)
-            self.assertFalse(
-                (workspace_root / "rulebook/.glk/cache/pdf/layouts/page_001.json").exists()
+            layout_path = (
+                workspace_root / "rulebook/.glk/cache/pdf/layouts/page_001.json"
+            )
+            metadata = json.loads(layout_path.read_text(encoding="utf-8"))
+            self.assertTrue(metadata["validation"]["recovered"])
+            self.assertEqual(
+                metadata["validation"]["recovered_missing"],
+                ["P001-F001"],
+            )
+            self.assertIn(
+                "AI 레이아웃 정렬 누락 복구",
+                metadata["reconstructed_blocks"][0]["warnings"][0],
+            )
+
+            cached_provider = FakeLayoutProvider(fail_if_called=True)
+            cached = extract_project_pdf(
+                project="rulebook",
+                workspace_root=workspace_root,
+                provider=cached_provider,
+            )
+            self.assertTrue(cached.ok)
+            self.assertEqual(cached.cached_pages, (1,))
+            cached_metadata = json.loads(layout_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                cached_metadata["validation"]["recovered_missing"],
+                ["P001-F001"],
             )
 
     def test_retries_fragment_validation_failure_and_caches_recovered_layout(self) -> None:

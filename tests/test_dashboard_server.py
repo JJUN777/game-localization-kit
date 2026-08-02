@@ -740,6 +740,7 @@ class DashboardServerTests(unittest.TestCase):
             html = response.read().decode("utf-8")
         self.assertIn("원문 이미지 · 추출문 검수", html)
         self.assertIn("원문 승인이 완료되었습니다", html)
+        self.assertIn("AI 정렬 누락만 보기", html)
         self.assertIn(
             f"const RETURN_URL = {json.dumps(self.server.dashboard_url)};",
             html,

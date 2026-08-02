@@ -22,7 +22,7 @@ from glk.domain.workspace import IMAGE_SOURCE_ROOT, WorkspacePaths, is_pdf_sourc
 from glk.extraction.layout import join_fragment_texts_with_warnings
 
 
-SEGMENTATION_VERSION = "source-block-v3"
+SEGMENTATION_VERSION = "source-block-v4"
 _VOLATILE_ACQUISITION_FIELDS = {"updated_at", "cached_pages", "cached_images"}
 
 
@@ -205,6 +205,23 @@ def _line_wrap_hyphen_warnings(
     return warnings
 
 
+def _pdf_block_warnings(
+    value: dict[str, Any],
+    fragment_ids: list[str],
+    fragments: dict[str, dict[str, Any]],
+) -> tuple[str, ...]:
+    stored = value.get("warnings", [])
+    if not isinstance(stored, list) or not all(
+        isinstance(warning, str) for warning in stored
+    ):
+        raise SegmentationError("PDF source block warnings must contain strings.")
+    combined = [
+        *stored,
+        *_line_wrap_hyphen_warnings(fragment_ids, fragments),
+    ]
+    return tuple(dict.fromkeys(combined))
+
+
 def _build_pdf_blocks(
     project_path: Path, source_file: str
 ) -> tuple[list[SourceBlock], list[Path]]:
@@ -254,7 +271,7 @@ def _build_pdf_blocks(
                 raise SegmentationError(f"Invalid fragment references on page {page}.")
             source_order += 1
             raw_text = text.strip()
-            warnings = _line_wrap_hyphen_warnings(fragment_ids, fragments)
+            warnings = _pdf_block_warnings(value, fragment_ids, fragments)
             block = SourceBlock(
                 schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
                 id=_block_id(

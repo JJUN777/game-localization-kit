@@ -9,6 +9,7 @@ from glk.extraction.layout import (
     join_fragment_texts_with_warnings,
     merge_paragraph_continuations,
     parse_page_selection,
+    recover_layout_fragment_references,
     reconstruct_blocks,
     validate_layout,
 )
@@ -136,6 +137,63 @@ class LayoutRuleTests(unittest.TestCase):
             with self.subTest(block=block):
                 with self.assertRaises(LayoutValidationError):
                     validate_layout(self.fragments, {"blocks": [block]})
+
+    def test_recovers_missing_fragments_as_review_required_blocks(self) -> None:
+        fragments = [
+            {"id": "P001-F001", "text": "First", "block_index": 0},
+            {"id": "P001-F002", "text": "Missing line", "block_index": 1},
+            {"id": "P001-F003", "text": "Last", "block_index": 2},
+        ]
+        layout = {
+            "blocks": [
+                {
+                    "type": "heading",
+                    "fragment_ids": ["P001-F001"],
+                    "include_in_text": True,
+                    "reason": "",
+                },
+                {
+                    "type": "paragraph",
+                    "fragment_ids": ["P001-F003"],
+                    "include_in_text": True,
+                    "reason": "",
+                },
+            ]
+        }
+
+        repaired, report = recover_layout_fragment_references(fragments, layout)
+        blocks = reconstruct_blocks(fragments, repaired)
+
+        self.assertTrue(report["valid"])
+        self.assertTrue(report["recovered"])
+        self.assertEqual(report["recovered_missing"], ["P001-F002"])
+        self.assertEqual(
+            [fragment_id for block in repaired["blocks"] for fragment_id in block["fragment_ids"]],
+            ["P001-F001", "P001-F002", "P001-F003"],
+        )
+        self.assertEqual(blocks[1]["text"], "Missing line")
+        self.assertIn("AI 레이아웃 정렬 누락 복구", blocks[1]["warnings"][0])
+
+    def test_recovery_removes_unknown_and_duplicate_references(self) -> None:
+        layout = {
+            "blocks": [
+                {
+                    **self.layout["blocks"][0],
+                    "fragment_ids": [
+                        "P001-F001",
+                        "P999-F999",
+                        "P001-F001",
+                    ],
+                }
+            ]
+        }
+
+        repaired, report = recover_layout_fragment_references(self.fragments, layout)
+
+        validate_layout(self.fragments, repaired)
+        self.assertEqual(report["recovered_missing"], ["P001-F002"])
+        self.assertEqual(report["removed_unknown"], ["P999-F999"])
+        self.assertEqual(report["removed_duplicates"], ["P001-F001"])
 
     def test_join_fragment_texts_handles_wraps_and_spacing(self) -> None:
         self.assertEqual(

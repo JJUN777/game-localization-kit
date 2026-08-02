@@ -19,6 +19,7 @@ class SourceReviewGroup(TypedDict):
     source_file: str
     label: str
     image_url: str
+    layout_warnings: int
 
 
 class SourceReviewBlock(TypedDict):
@@ -35,6 +36,7 @@ class SourceReviewBlock(TypedDict):
     excluded: bool
     changed: bool
     warnings: list[str]
+    layout_warnings: int
     issues: list[dict[str, Any]]
 
 
@@ -45,6 +47,7 @@ class SourceReviewSummary(TypedDict):
     manual: int
     changed: int
     warnings: int
+    layout_warnings: int
     issues: int
 
 

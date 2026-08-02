@@ -117,13 +117,13 @@ def read_blocks(path: Path) -> list[SourceBlock]:
 
 
 class SegmentationServiceTests(unittest.TestCase):
-    def test_rebuilds_v2_cache_once_before_reusing_v3_result(self) -> None:
+    def test_rebuilds_v3_cache_once_before_reusing_v4_result(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
             project_path = create_pdf_source(workspace_root)
             with patch(
                 "glk.application.segmentation_service.SEGMENTATION_VERSION",
-                "source-block-v2",
+                "source-block-v3",
             ):
                 previous = segment_project_source(
                     project="pdf_source", workspace_root=workspace_root
@@ -144,7 +144,7 @@ class SegmentationServiceTests(unittest.TestCase):
                     encoding="utf-8"
                 )
             )
-            self.assertEqual(state["version"], "source-block-v3")
+            self.assertEqual(state["version"], "source-block-v4")
 
     def test_normalizes_pdf_blocks_and_reuses_cache(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -258,6 +258,28 @@ class SegmentationServiceTests(unittest.TestCase):
                     "줄바꿈 하이픈 결합 확인: multi- + player → multiplayer",
                 ),
             )
+
+    def test_preserves_pdf_layout_recovery_warning_for_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            project_path = create_pdf_source(workspace_root)
+            layout_path = project_path / ".glk/cache/pdf/layouts/page_001.json"
+            layout = json.loads(layout_path.read_text(encoding="utf-8"))
+            warning = (
+                "AI 레이아웃 정렬 누락 복구: P001-F002 — "
+                "원본 이미지에서 위치와 순서를 확인하세요."
+            )
+            layout["reconstructed_blocks"][1]["warnings"] = [warning]
+            write_json(layout_path, layout)
+
+            result = segment_project_source(
+                project="pdf_source", workspace_root=workspace_root
+            )
+
+            self.assertEqual(result.flagged_blocks, 1)
+            blocks = read_blocks(project_path / ".glk/segments/source.jsonl")
+            self.assertEqual(blocks[1].status, "flagged")
+            self.assertEqual(blocks[1].warnings, (warning,))
 
     def test_rejects_partial_source_acquisition(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

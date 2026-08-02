@@ -26,6 +26,7 @@ from glk.domain.source_block import (
     SourceBlockValidationError,
 )
 from glk.domain.workspace import WorkspacePaths, is_pdf_source_file
+from glk.extraction.layout import LAYOUT_RECOVERY_WARNING_PREFIX
 
 
 SOURCE_REVIEW_FORMAT_VERSION = 2
@@ -801,6 +802,7 @@ def get_project_source_review_document(
     issues = _qa_issues(location.path)
     groups: list[SourceReviewGroup] = []
     group_ids: dict[tuple[str, str | int], str] = {}
+    group_indexes: dict[tuple[str, str | int], int] = {}
     document_blocks: list[SourceReviewBlock] = []
     for block_id in ordered:
         block = all_blocks[block_id]
@@ -808,6 +810,7 @@ def get_project_source_review_document(
         if key not in group_ids:
             group_id = f"group-{len(groups) + 1}"
             group_ids[key] = group_id
+            group_indexes[key] = len(groups)
             groups.append(
                 {
                     "id": group_id,
@@ -820,10 +823,16 @@ def get_project_source_review_document(
                         else block.source_file.removeprefix("01_input/images/")
                     ),
                     "image_url": f"/api/source-image?group={group_id}",
+                    "layout_warnings": 0,
                 }
             )
         is_excluded = block_id in excluded
         text = block.effective_text if is_excluded else texts[block_id]
+        layout_warning_count = sum(
+            warning.startswith(LAYOUT_RECOVERY_WARNING_PREFIX)
+            for warning in block.warnings
+        )
+        groups[group_indexes[key]]["layout_warnings"] += layout_warning_count
         document_blocks.append(
             {
                 "id": block.id,
@@ -839,6 +848,7 @@ def get_project_source_review_document(
                 "excluded": is_excluded,
                 "changed": text != block.raw_text,
                 "warnings": list(block.warnings),
+                "layout_warnings": layout_warning_count,
                 "issues": issues.get(block.id, []),
             }
         )
@@ -861,6 +871,9 @@ def get_project_source_review_document(
             "manual": sum(block["manual"] for block in document_blocks),
             "changed": sum(block["changed"] for block in document_blocks),
             "warnings": sum(len(block["warnings"]) for block in document_blocks),
+            "layout_warnings": sum(
+                block["layout_warnings"] for block in document_blocks
+            ),
             "issues": sum(len(block["issues"]) for block in document_blocks),
         },
         "original_pdf_url": "/api/original-pdf" if source_type == "pdf" else None,

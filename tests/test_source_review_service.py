@@ -235,6 +235,29 @@ class SourceReviewServiceTests(unittest.TestCase):
             self.assertEqual(document["summary"]["warnings"], 1)
             self.assertEqual(document["summary"]["issues"], 0)
 
+    def test_browser_document_counts_layout_recovery_warnings_by_page(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            warning = (
+                "AI 레이아웃 정렬 누락 복구: P001-F002 — "
+                "원본 이미지에서 위치와 순서를 확인하세요."
+            )
+            self.create_source(
+                workspace_root,
+                [make_block(1, "Recovered source.", warnings=(warning,))],
+            )
+            prepare_project_source_review(
+                project="review_project", workspace_root=workspace_root
+            )
+
+            document = get_project_source_review_document(
+                project="review_project", workspace_root=workspace_root
+            )
+
+            self.assertEqual(document["groups"][0]["layout_warnings"], 1)
+            self.assertEqual(document["blocks"][0]["layout_warnings"], 1)
+            self.assertEqual(document["summary"]["layout_warnings"], 1)
+
     def test_browser_document_does_not_duplicate_source_warning_as_qa(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"

@@ -42,7 +42,11 @@
       width: 100%; text-align: left; margin-bottom: 7px; display: flex; justify-content: space-between;
     }
     .group span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .group-meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .group-meta.warning { color: var(--warn); }
     .group.active { border-color: var(--accent); background: #1c3a35; }
+    .filter-button { width: 100%; margin-bottom: 12px; }
+    .filter-button.active { border-color: var(--warn); color: var(--warn); background: #282317; }
     main { padding: 14px; border-right: 1px solid var(--line); }
     .viewer-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
     .canvas { position: relative; margin: auto; width: 100%; max-width: none; user-select: none; }
@@ -120,6 +124,7 @@
   </header>
   <div class="layout">
     <aside>
+      <button id="layoutWarningFilter" class="filter-button hidden"></button>
       <div id="groups"></div>
     </aside>
     <main>
@@ -162,6 +167,7 @@
     let drawStart = null;
     let drawElement = null;
     let newCounter = 0;
+    let layoutWarningsOnly = false;
 
     const $ = (id) => document.getElementById(id);
     const api = async (path, options = {}) => {
@@ -179,12 +185,14 @@
       clearTimeout(notice.timer);
       notice.timer = setTimeout(() => $("notice").classList.add("hidden"), 4200);
     };
-    const groupBlocks = () => documentState.blocks.filter((b) => b.group_id === currentGroup);
+    const allGroupBlocks = () => documentState.blocks.filter((b) => b.group_id === currentGroup);
+    const groupBlocks = () => allGroupBlocks().filter((b) => !layoutWarningsOnly || b.layout_warnings);
     const groupById = () => documentState.groups.find((g) => g.id === currentGroup);
 
     function renderGroups() {
       $("groups").innerHTML = "";
       for (const group of documentState.groups) {
+        if (layoutWarningsOnly && !group.layout_warnings) continue;
         const count = documentState.blocks.filter((b) => b.group_id === group.id && !b.excluded).length;
         const button = document.createElement("button");
         button.className = `group${group.id === currentGroup ? " active" : ""}`;
@@ -192,7 +200,8 @@
         const label = document.createElement("span");
         label.textContent = group.label;
         const total = document.createElement("span");
-        total.textContent = count;
+        total.className = `group-meta${group.layout_warnings ? " warning" : ""}`;
+        total.textContent = group.layout_warnings ? `${count} · 누락 ${group.layout_warnings}` : count;
         button.append(label, total);
         button.onclick = () => { currentGroup = group.id; selectedId = null; render(); };
         $("groups").appendChild(button);
@@ -253,7 +262,8 @@
         head.innerHTML = `
           <span class="card-id" title="${block.id}">${block.id}</span>
           ${block.manual ? '<span class="tag manual">수동 추가</span>' : ""}
-          ${block.warnings.length ? `<span class="tag warning">추출 경고 ${block.warnings.length}</span>` : ""}
+          ${block.layout_warnings ? `<span class="tag warning">AI 정렬 누락 ${block.layout_warnings}</span>` : ""}
+          ${block.warnings.length - block.layout_warnings ? `<span class="tag warning">추출 경고 ${block.warnings.length - block.layout_warnings}</span>` : ""}
           ${block.issues.length ? `<span class="tag issue">QA ${block.issues.length}</span>` : ""}
           <span class="grow"></span>`;
         const up = document.createElement("button"); up.className = "mini"; up.textContent = "↑";
@@ -312,10 +322,17 @@
         manual: documentState.blocks.filter((b) => b.manual).length,
         changed: documentState.blocks.filter((b) => b.manual || b.text !== b.raw_text).length,
         warnings: documentState.blocks.reduce((total, b) => total + b.warnings.length, 0),
+        layoutWarnings: documentState.blocks.reduce((total, b) => total + b.layout_warnings, 0),
         issues: documentState.blocks.reduce((total, b) => total + b.issues.length, 0)
       };
       $("project").textContent = `${documentState.project_name} · ${documentState.review_status}`;
-      $("summary").textContent = `전체 ${s.blocks} · 제외 ${s.excluded} · 수동 ${s.manual} · 수정 ${s.changed} · 추출 경고 ${s.warnings} · QA ${s.issues}`;
+      $("summary").textContent = `전체 ${s.blocks} · 제외 ${s.excluded} · 수동 ${s.manual} · 수정 ${s.changed} · AI 정렬 누락 ${s.layoutWarnings} · 기타 추출 경고 ${s.warnings - s.layoutWarnings} · QA ${s.issues}`;
+      const filter = $("layoutWarningFilter");
+      filter.classList.toggle("hidden", !s.layoutWarnings);
+      filter.classList.toggle("active", layoutWarningsOnly);
+      filter.textContent = layoutWarningsOnly
+        ? "전체 블록 보기"
+        : `AI 정렬 누락만 보기 (${s.layoutWarnings})`;
     }
 
     function render() {
@@ -359,7 +376,7 @@
         id: `new-${++newCounter}`, group_id: group.id, source_type: group.source_type,
         source_file: group.source_file, page: group.page, block_type: "paragraph",
         text: "", raw_text: "", bbox, manual: true, excluded: false, changed: true,
-        warnings: [], issues: []
+        warnings: [], layout_warnings: 0, issues: []
       };
       const groupItems = groupBlocks();
       const anchor = selectedId ? documentState.blocks.findIndex((b) => b.id === selectedId) : -1;
@@ -389,8 +406,23 @@
     }
     $("save").onclick = () => mutate("/api/save", "저장했습니다.");
     $("validate").onclick = () => mutate("/api/validate", "검증을 통과했습니다.");
+    $("layoutWarningFilter").onclick = () => {
+      layoutWarningsOnly = !layoutWarningsOnly;
+      if (layoutWarningsOnly && !groupById()?.layout_warnings) {
+        currentGroup = documentState.groups.find((group) => group.layout_warnings)?.id || currentGroup;
+      }
+      selectedId = null;
+      render();
+    };
     $("finalize").onclick = async () => {
-      if (!confirm("현재 원문을 최종 승인할까요?")) return;
+      const layoutWarnings = documentState.blocks.reduce(
+        (total, block) => total + block.layout_warnings,
+        0
+      );
+      const message = layoutWarnings
+        ? `AI가 정렬 중 누락해 자동 복구한 원문이 ${layoutWarnings}건 있습니다. 원본 이미지에서 위치와 순서를 확인했다면 최종 승인하세요.`
+        : "현재 원문을 최종 승인할까요?";
+      if (!confirm(message)) return;
       const result = await mutate("/api/finalize", "최종 원문을 승인했습니다.");
       if (result) $("approvalCompleteDialog").showModal();
     };
@@ -406,7 +438,10 @@
     (async () => {
       try {
         documentState = await api("/api/review");
-        currentGroup = documentState.groups[0]?.id || null;
+        currentGroup = (
+          documentState.groups.find((group) => group.layout_warnings)
+          || documentState.groups[0]
+        )?.id || null;
         render();
       } catch (error) { notice(error.message, true); }
     })();

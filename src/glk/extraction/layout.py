@@ -13,7 +13,8 @@ from PIL import Image
 
 
 PROMPT_VERSION = "layout-fragment-v1"
-POSTPROCESS_VERSION = "column-continuation-v2"
+POSTPROCESS_VERSION = "column-continuation-v3"
+LAYOUT_RECOVERY_WARNING_PREFIX = "AI 레이아웃 정렬 누락 복구"
 BLOCK_TYPES = (
     "heading",
     "paragraph",
@@ -54,6 +55,15 @@ class LayoutValidationError(ValueError):
     """Raised when a layout response loses or invents source fragments."""
 
     code = "GEMINI_RESPONSE_INVALID"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        report: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.report = report
 
 
 class LayoutProvider(Protocol):
@@ -181,7 +191,7 @@ Fragments:
 """
 
 
-def validate_layout(
+def _layout_validation_report(
     fragments: list[dict[str, Any]], layout: dict[str, Any]
 ) -> dict[str, Any]:
     if not isinstance(layout, dict) or not isinstance(layout.get("blocks"), list):
@@ -217,9 +227,135 @@ def validate_layout(
         and not report["duplicates"]
         and len(returned_ids) == len(expected_ids)
     )
-    if not report["valid"]:
-        raise LayoutValidationError(f"Layout failed fragment validation: {report}")
     return report
+
+
+def validate_layout(
+    fragments: list[dict[str, Any]], layout: dict[str, Any]
+) -> dict[str, Any]:
+    report = _layout_validation_report(fragments, layout)
+    if not report["valid"]:
+        raise LayoutValidationError(
+            f"Layout failed fragment validation: {report}",
+            report=report,
+        )
+    return report
+
+
+def _missing_fragment_groups(
+    fragments: list[dict[str, Any]], missing_ids: set[str]
+) -> list[list[str]]:
+    """Group adjacent omitted lines from the same native PDF text block."""
+    groups: list[list[str]] = []
+    previous_index: int | None = None
+    previous_block: Any = None
+    for index, fragment in enumerate(fragments):
+        fragment_id = fragment["id"]
+        if fragment_id not in missing_ids:
+            continue
+        native_block = fragment.get("block_index")
+        if (
+            groups
+            and previous_index == index - 1
+            and previous_block == native_block
+        ):
+            groups[-1].append(fragment_id)
+        else:
+            groups.append([fragment_id])
+        previous_index = index
+        previous_block = native_block
+    return groups
+
+
+def _recovery_insert_index(
+    blocks: list[dict[str, Any]],
+    fragment_positions: dict[str, int],
+    recovered_ids: list[str],
+) -> int:
+    """Place a recovered block beside the closest surviving extracted fragment."""
+    first_position = fragment_positions[recovered_ids[0]]
+    last_position = fragment_positions[recovered_ids[-1]]
+    previous: tuple[int, int] | None = None
+    following: tuple[int, int] | None = None
+    for block_index, block in enumerate(blocks):
+        for fragment_id in block["fragment_ids"]:
+            position = fragment_positions[fragment_id]
+            if position < first_position and (
+                previous is None or position > previous[0]
+            ):
+                previous = (position, block_index)
+            if position > last_position and (
+                following is None or position < following[0]
+            ):
+                following = (position, block_index)
+    if following is not None:
+        return following[1]
+    if previous is not None:
+        return previous[1] + 1
+    return len(blocks)
+
+
+def recover_layout_fragment_references(
+    fragments: list[dict[str, Any]], layout: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Preserve every source fragment after repeated LLM reference failures.
+
+    Unknown references and repeated occurrences are discarded because they do not
+    represent additional source text. Omitted source fragments are restored as
+    review-required blocks near the closest surviving fragment.
+    """
+    original_report = _layout_validation_report(fragments, layout)
+    if original_report["valid"]:
+        return layout, original_report
+
+    expected_ids = [fragment["id"] for fragment in fragments]
+    expected_set = set(expected_ids)
+    seen: set[str] = set()
+    cleaned_blocks: list[dict[str, Any]] = []
+    for block in layout["blocks"]:
+        kept_ids: list[str] = []
+        for fragment_id in block["fragment_ids"]:
+            if fragment_id not in expected_set or fragment_id in seen:
+                continue
+            seen.add(fragment_id)
+            kept_ids.append(fragment_id)
+        if kept_ids:
+            cleaned_blocks.append({**block, "fragment_ids": kept_ids})
+
+    fragment_positions = {
+        fragment_id: index for index, fragment_id in enumerate(expected_ids)
+    }
+    missing_ids = set(expected_ids) - seen
+    recovered_ids: list[str] = []
+    for group in _missing_fragment_groups(fragments, missing_ids):
+        recovered_ids.extend(group)
+        recovered_block = {
+            "type": "paragraph",
+            "fragment_ids": group,
+            "include_in_text": True,
+            "reason": "Restored after repeated layout response omission.",
+            "recovered_fragment_ids": group,
+            "recovery_warnings": [
+                f"{LAYOUT_RECOVERY_WARNING_PREFIX}: {fragment_id} — "
+                "원본 이미지에서 위치와 순서를 확인하세요."
+                for fragment_id in group
+            ],
+        }
+        insert_at = _recovery_insert_index(
+            cleaned_blocks,
+            fragment_positions,
+            group,
+        )
+        cleaned_blocks.insert(insert_at, recovered_block)
+
+    repaired_layout = {**layout, "blocks": cleaned_blocks}
+    validation = validate_layout(fragments, repaired_layout)
+    validation["recovered"] = True
+    validation["recovered_missing"] = recovered_ids
+    validation["removed_unknown"] = original_report["unknown"]
+    validation["removed_duplicates"] = original_report["duplicates"]
+    validation["original_returned_count"] = original_report["returned_count"]
+    return repaired_layout, validation
 
 
 def join_fragment_texts_with_warnings(
@@ -266,11 +402,18 @@ def reconstruct_blocks(
         text, warnings = join_fragment_texts_with_warnings(
             [by_id[fragment_id]["text"] for fragment_id in fragment_ids]
         )
+        recovery_warnings = block.get("recovery_warnings", [])
+        if not isinstance(recovery_warnings, list) or not all(
+            isinstance(warning, str) for warning in recovery_warnings
+        ):
+            raise LayoutValidationError(
+                "recovery_warnings must contain only strings."
+            )
         blocks.append(
             {
                 **block,
                 "text": text,
-                "warnings": list(warnings),
+                "warnings": [*recovery_warnings, *warnings],
             }
         )
     return blocks
@@ -290,6 +433,8 @@ def merge_paragraph_continuations(
             and block.get("type") == "paragraph"
             and previous.get("include_in_text") is True
             and block.get("include_in_text") is True
+            and not previous.get("recovered_fragment_ids")
+            and not block.get("recovered_fragment_ids")
             and not re.search(r"[.!?:;][\"'’”)]?$", previous.get("text", ""))
             and bool(next_start)
             and next_start[0].islower()

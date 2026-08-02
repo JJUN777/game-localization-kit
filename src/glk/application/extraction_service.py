@@ -39,6 +39,7 @@ from glk.extraction.layout import (
     merge_paragraph_continuations,
     parse_page_selection,
     reconstruct_blocks,
+    recover_layout_fragment_references,
     render_page,
     validate_layout,
 )
@@ -137,7 +138,7 @@ def _load_cached_layout(
     fragment_sha256: str,
     provider: LayoutProvider,
     fragments: list[dict[str, Any]],
-) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]] | None:
     value = read_json_object(path)
     if value is None:
         return None
@@ -147,12 +148,32 @@ def _load_cached_layout(
             and value.get("fragment_sha256") == fragment_sha256
             and value.get("model") == provider.model_name
             and value.get("prompt_version") == provider.prompt_version
+            and value.get("postprocess_version") == POSTPROCESS_VERSION
         )
         if not metadata_matches:
             return None
         layout = value["layout"]
-        validate_layout(fragments, layout)
-        return layout, merge_paragraph_continuations(reconstruct_blocks(fragments, layout))
+        validation = validate_layout(fragments, layout)
+        stored_validation = value.get("validation")
+        if isinstance(stored_validation, dict) and stored_validation.get("recovered"):
+            validation.update(
+                {
+                    key: stored_validation[key]
+                    for key in (
+                        "recovered",
+                        "recovered_missing",
+                        "removed_unknown",
+                        "removed_duplicates",
+                        "original_returned_count",
+                    )
+                    if key in stored_validation
+                }
+            )
+        return (
+            layout,
+            merge_paragraph_continuations(reconstruct_blocks(fragments, layout)),
+            validation,
+        )
     except (KeyError, ValueError, TypeError) as error:
         raise invalid_cache(path, "invalid PDF layout") from error
 
@@ -165,14 +186,25 @@ def _reconstruct_validated_layout(
     provider: LayoutProvider,
     notify: ProgressCallback,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Retry only structurally valid LLM responses without repairing source IDs."""
+    """Retry invalid LLM responses, then preserve omitted source for review."""
     for attempt in range(1, LAYOUT_VALIDATION_ATTEMPTS + 1):
         layout = provider.reconstruct(page_number, fragments, page_image)
         try:
             return layout, validate_layout(fragments, layout)
         except LayoutValidationError as error:
             if attempt == LAYOUT_VALIDATION_ATTEMPTS:
-                raise
+                if error.report is None:
+                    raise
+                repaired_layout, validation = recover_layout_fragment_references(
+                    fragments,
+                    layout,
+                )
+                notify(
+                    f"Page {page_number}: preserved "
+                    f"{len(validation['recovered_missing'])} omitted fragments "
+                    "for source review after 3 invalid layout responses"
+                )
+                return repaired_layout, validation
             notify(
                 f"Page {page_number}: layout fragment validation failed; "
                 f"retrying LLM reconstruction ({attempt + 1}/"
@@ -226,8 +258,7 @@ def _extract_pdf_page(
         fragments=fragments,
     )
     if cached is not None:
-        layout, blocks = cached
-        validation = validate_layout(fragments, layout)
+        layout, blocks, validation = cached
         notify(f"Page {page_number}: reused validated layout cache")
     else:
         notify(f"Page {page_number}: requesting LLM layout reconstruction")
