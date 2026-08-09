@@ -121,6 +121,9 @@ class TranslationReviewServerTests(unittest.TestCase):
         self.assertIn("keep_rule_applied: \"원문 유지 적용\"", html)
         self.assertIn("highlightSourceTerm", html)
         self.assertIn("최종 번역 승인이 완료되었습니다", html)
+        self.assertIn('id="qa-override-button"', html)
+        self.assertIn("예외 승인 후 최종 승인", html)
+        self.assertIn("qa_override_reason", html)
         self.assertIn('number_changed: "숫자 불일치"', html)
         self.assertIn("${issueLabel(issue)} · ${issue.message}", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
@@ -224,6 +227,94 @@ class TranslationReviewServerTests(unittest.TestCase):
         )
         self.assertTrue(
             (self.project_path / "05_output/rulebook_kor.txt").is_file()
+        )
+
+    def test_can_finalize_with_an_audited_semantic_qa_override(self) -> None:
+        _, document, _ = self._request("/api/review")
+        translations = {
+            block["id"]: block["translation"]
+            for block in document["blocks"]
+        }
+        translations[document["blocks"][0]["id"]] = "전투 3"
+
+        status, qa_payload, _ = self._request(
+            "/api/qa",
+            method="POST",
+            payload={
+                "review_sha256": document["review_sha256"],
+                "translations": translations,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(qa_payload["result"]["passed"])
+        summary = qa_payload["document"]["summary"]
+        self.assertEqual(summary["errors"], 1)
+        self.assertEqual(summary["overridable_errors"], 1)
+        self.assertEqual(summary["blocking_errors"], 0)
+
+        status, blocked, _ = self._request(
+            "/api/finalize",
+            method="POST",
+            payload={
+                "review_sha256": qa_payload["document"]["review_sha256"],
+                "translations": translations,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(blocked["result"]["finalized"])
+
+        reason = "원문 월 이름을 한국어 숫자 월 표기로 옮긴 것을 확인함"
+        status, finalized, _ = self._request(
+            "/api/finalize",
+            method="POST",
+            payload={
+                "review_sha256": blocked["document"]["review_sha256"],
+                "translations": translations,
+                "qa_override_reason": reason,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(finalized["ok"])
+        self.assertTrue(finalized["result"]["finalized"])
+        self.assertTrue(finalized["result"]["qa_errors_overridden"])
+        self.assertEqual(finalized["result"]["error_count"], 1)
+        state = json.loads(
+            (self.project_path / ".glk/state/translation_review.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(state["status"], "approved")
+        self.assertEqual(state["qa_override"]["reason"], reason)
+        self.assertEqual(state["qa_override"]["error_count"], 1)
+        self.assertEqual(
+            state["qa_override"]["review_sha256"],
+            finalized["document"]["review_sha256"],
+        )
+
+    def test_does_not_override_protected_content_errors(self) -> None:
+        _, document, _ = self._request("/api/review")
+        translations = {
+            block["id"]: block["translation"]
+            for block in document["blocks"]
+        }
+        translations[document["blocks"][2]["id"]] = (
+            "사냥꾼들은 체력 10을 사용할 수 있습니다."
+        )
+
+        status, payload, _ = self._request(
+            "/api/finalize",
+            method="POST",
+            payload={
+                "review_sha256": document["review_sha256"],
+                "translations": translations,
+                "qa_override_reason": "검토함",
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertFalse(payload["ok"])
+        self.assertIn("cannot be overridden", payload["detail"])
+        self.assertFalse(
+            (self.project_path / "05_output/rulebook_kor.txt").exists()
         )
 
     def test_rejects_unknown_block_without_modifying_review(self) -> None:

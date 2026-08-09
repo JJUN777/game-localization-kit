@@ -273,11 +273,18 @@
     .option-line {
       display: flex;
       align-items: center;
-      gap: 7px;
-      margin-top: 12px;
-      color: var(--muted);
-      font-size: 12px;
+      gap: 10px;
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      color: var(--ink);
+      border: 1px solid #ead9a5;
+      border-radius: 10px;
+      background: var(--warning-bg);
+      font-size: 13px;
     }
+    .option-line input { flex: 0 0 auto; }
+    .option-line strong { display: block; }
+    .option-line small { display: block; color: var(--muted); }
     dialog {
       width: min(480px, calc(100vw - 32px));
       padding: 24px;
@@ -317,6 +324,7 @@
       opacity: 0;
       transform: translateY(12px);
       pointer-events: none;
+      white-space: pre-line;
       transition: .2s ease;
     }
     .toast.show { opacity: 1; transform: translateY(0); }
@@ -352,6 +360,13 @@
       </div>
       <span class="file-state" id="file-state">불러오는 중</span>
     </div>
+    <label class="option-line">
+      <input id="allow-missing" type="checkbox">
+      <span>
+        <strong>승인 원문에 없는 수동 용어 허용</strong>
+        <small>확장판 용어처럼 원문에서 찾을 수 없는 용어를 의도적으로 등록할 때만 선택하세요.</small>
+      </span>
+    </label>
     <section class="toolbar">
       <div class="toolbar-row search-row">
         <select class="control" id="status-filter" aria-label="상태 필터">
@@ -405,10 +420,6 @@
         </tbody>
       </table>
     </section>
-    <label class="option-line">
-      <input id="allow-missing" type="checkbox">
-      승인 원문에서 찾을 수 없는 수동 용어도 명시적으로 허용
-    </label>
   </main>
   <dialog id="termbaseCompleteDialog" aria-labelledby="termbaseCompleteTitle">
     <h2 id="termbaseCompleteTitle">용어집 생성이 완료되었습니다</h2>
@@ -487,7 +498,22 @@
       node.textContent = message;
       node.className = `toast show${error ? " error" : ""}`;
       clearTimeout(toast.timer);
-      toast.timer = setTimeout(() => { node.className = "toast"; }, 3400);
+      toast.timer = setTimeout(
+        () => { node.className = "toast"; },
+        error ? 9000 : 3400
+      );
+    }
+
+    function importFailureMessage(payload) {
+      const lines = [
+        `TSV는 저장했지만 termbase를 만들지 못했습니다: ${payload.message}`
+      ];
+      if (payload.detail) lines.push(`실패 항목: ${payload.detail}`);
+      lines.push(
+        "표시된 행의 상태·번역어·중복 여부를 확인하세요. " +
+        "원문에 없는 수동 용어라면 화면 상단의 허용 항목을 선택한 뒤 다시 시도하세요."
+      );
+      return lines.join("\n");
     }
 
     function option(value, label, selected = false) {
@@ -839,7 +865,7 @@
           );
           $("#termbaseCompleteDialog").showModal();
         } else {
-          toast(`TSV는 저장했지만 termbase를 만들지 못했습니다: ${payload.message}`, true);
+          toast(importFailureMessage(payload), true);
         }
       } catch (error) {
         toast(error.message, true);
