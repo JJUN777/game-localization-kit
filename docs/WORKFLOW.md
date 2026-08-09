@@ -31,14 +31,14 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    START([작업 시작]) --> SETUP[CLI 설치<br/>GEMINI_API_KEY 설정]
+    START([작업 시작]) --> SETUP[CLI 설치<br/>AI 제공자·API 키 설정]
     SETUP --> INIT[glk init<br/>프로젝트 workspace 생성]
     INIT --> PLACE[01_input/pdf 또는 01_input/images에<br/>번역할 원본 넣기]
     PLACE --> RUN[glk run<br/>입력 자동 감지·통합 실행]
     RUN --> INPUT{원문 입력}
 
-    INPUT -->|PDF| PDF[PDF fragment·좌표 추출<br/>Gemini 읽기 순서 판정<br/>검증 실패 시 최대 2회 재시도]
-    INPUT -->|이미지 폴더| IMAGE[이미지별 Gemini OCR<br/>하위 폴더 구조 보존]
+    INPUT -->|PDF| PDF[PDF fragment·좌표 추출<br/>선택한 AI로 읽기 순서 판정<br/>검증 실패 시 최대 2회 재시도]
+    INPUT -->|이미지 폴더| IMAGE[선택한 AI로 이미지별 OCR<br/>하위 폴더 구조 보존]
     PDF --> NORMALIZE[공통 source block 정규화]
     IMAGE --> NORMALIZE
 
@@ -65,7 +65,7 @@ flowchart TD
     GLOSSARY_UI --> EDIT[상태·번역어·분류 수정<br/>일괄 처리·누락 용어 추가]
     EDIT --> IMPORT[화면에서 termbase 생성<br/>또는 glk glossary import]
     IMPORT --> TERMBASE[03_terminology/termbase.json]
-    TERMBASE --> TRANSLATE[glk translate<br/>ID 기반 Gemini 초벌 번역]
+    TERMBASE --> TRANSLATE[glk translate<br/>ID 기반 AI 초벌 번역]
     TRANSLATE --> TRANS_SEG[.glk/segments/translation.jsonl]
     TRANS_SEG --> TRANS_DRAFT[04_translation/draft.txt]
     TRANS_SEG --> TRANS_REVIEW[04_translation/review.txt]
@@ -75,7 +75,7 @@ flowchart TD
     TRANS_HUMAN --> TRANS_QA[브라우저에서 로컬 QA 실행]
     TRANS_QA -->|오류| TRANS_DECIDE{오류 처리 방법}
     TRANS_DECIDE -->|직접 수정| TRANS_UI
-    TRANS_DECIDE -->|ERROR만 Gemini 재번역| TRANS_RETRY[glk retry --failed<br/>또는 UI 오류만 재번역]
+    TRANS_DECIDE -->|ERROR만 AI 재번역| TRANS_RETRY[glk retry --failed<br/>또는 UI 오류만 재번역]
     TRANS_RETRY --> REVISION[04_translation/revisions/translation_retry_*.json]
     REVISION --> TRANS_UI
     TRANS_QA -->|통과| TRANS_CHECK[glk translation finalize --dry-run]
@@ -302,7 +302,7 @@ glk glossary build --project sample_rulebook
 ```
 
 대시보드에서는 승인 완료 프로젝트 카드의 `용어 후보 생성 시작`을 누르면
-동일한 로컬 작업을 background job으로 실행합니다. Gemini API를 호출하지 않아
+동일한 로컬 작업을 background job으로 실행합니다. AI API를 호출하지 않아
 API 비용은 발생하지 않습니다. 완료되면 프로젝트 상태를 다시 읽고 `용어 검수`
 버튼을 활성화합니다.
 
@@ -409,7 +409,7 @@ glk translate --project sample_rulebook --resume   # 중단 후 완료된 청크
 완료된 청크는 `.glk/segments/translation.jsonl`에 append하고 state에 파일 byte
 길이와 SHA-256 checkpoint를 함께 기록합니다. state 갱신 전에 프로세스가
 중단되어 미확정 꼬리가 남으면 `--resume`이 마지막 checkpoint로 되돌린 뒤
-계속합니다. 모든 청크가 저장된 뒤 draft·review 생성 중 중단된 경우에는 Gemini를
+계속합니다. 모든 청크가 저장된 뒤 draft·review 생성 중 중단된 경우에는 AI를
 다시 호출하지 않고 저장된 청크로 산출물을 완성합니다.
 
 ### 생성 파일
@@ -444,7 +444,7 @@ glk review translation --project sample_rulebook
 - 오류·경고·수정됨 필터와 block 이동
 - 번역문만 수정하고 `04_translation/review.txt`에 안전하게 저장
 - 저장 후 로컬 QA 실행과 오류 확인
-- QA ERROR가 연결된 block만 Gemini로 재번역하고 다시 검수
+- QA ERROR가 연결된 block만 선택한 AI로 재번역하고 다시 검수
 - 오류가 0개인 결과의 최종 승인
 - 검토 가능한 QA 오류의 사유 기록 후 예외 승인
 

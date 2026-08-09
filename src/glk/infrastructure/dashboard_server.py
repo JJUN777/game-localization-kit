@@ -21,7 +21,8 @@ import webbrowser
 from glk.application._io import write_bytes_atomic
 from glk.application.ai_model_catalog import (
     GeminiModelCatalogError,
-    load_gemini_model_catalog,
+    OpenAIModelCatalogError,
+    load_ai_model_catalogs,
 )
 from glk.application.ai_settings_service import (
     AiSettingsError,
@@ -610,10 +611,11 @@ class _DashboardHandler(LocalHttpRequestHandler):
         if route.name == "ai_settings":
             try:
                 settings = self.server.ai_settings.status()
-                model_catalog = load_gemini_model_catalog()
+                model_catalogs = load_ai_model_catalogs()
             except (
                 AiSettingsError,
                 GeminiModelCatalogError,
+                OpenAIModelCatalogError,
             ) as error:
                 self._send_error_json(
                     HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -626,7 +628,8 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 {
                     "ok": True,
                     "settings": settings.to_dict(),
-                    "model_catalog": model_catalog,
+                    "model_catalog": model_catalogs[settings.provider],
+                    "model_catalogs": model_catalogs,
                 },
             )
             return
@@ -736,7 +739,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 settings = self.server.ai_settings.status()
                 if not settings.api_key_configured:
                     raise DashboardJobError(
-                        "GEMINI_API_KEY is not configured."
+                        f"{settings.provider.upper()} API key is not configured."
                     )
                 with self.server.mutation_lock:
                     job = self.server.job_manager.start_source_job(
@@ -782,7 +785,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 settings = self.server.ai_settings.status()
                 if not settings.api_key_configured:
                     raise DashboardJobError(
-                        "GEMINI_API_KEY is not configured."
+                        f"{settings.provider.upper()} API key is not configured."
                     )
                 with self.server.mutation_lock:
                     job = self.server.job_manager.start_translation_job(
@@ -887,16 +890,20 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 request = self._read_request_json(max_bytes=_MAX_REQUEST_BYTES)
                 api_key = request.get("api_key")
                 model = request.get("model")
+                provider = request.get("provider")
                 if api_key is not None and not isinstance(api_key, str):
                     raise DashboardError(
                         "api_key must be a string or null."
                     )
                 if not isinstance(model, str):
                     raise DashboardError("model must be a string.")
+                if provider is not None and not isinstance(provider, str):
+                    raise DashboardError("provider must be a string.")
                 with self.server.mutation_lock:
                     settings = self.server.ai_settings.save(
                         api_key=api_key,
                         model=model,
+                        provider=provider,
                     )
             except (
                 AiSettingsError,

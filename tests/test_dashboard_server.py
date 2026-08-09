@@ -287,7 +287,7 @@ class DashboardServerTests(unittest.TestCase):
         )
         self.assertIn("이번 작업에 적용할 OCR 프롬프트", html)
         self.assertIn("용어 후보 생성", html)
-        self.assertIn("Gemini API를 사용하지 않으며", html)
+        self.assertIn("AI API를 사용하지 않으며", html)
         self.assertIn("초벌 번역 시작", html)
         self.assertIn("번역 문체·표현 지침", html)
         self.assertIn("번역 프롬프트 설정", html)
@@ -380,6 +380,10 @@ class DashboardServerTests(unittest.TestCase):
             initial["model_catalog"]["source_url"],
             "https://ai.google.dev/gemini-api/docs/models",
         )
+        self.assertEqual(
+            initial["model_catalogs"]["openai"]["provider"],
+            "openai",
+        )
 
         status, saved = self._request(
             "/api/settings/ai",
@@ -413,6 +417,24 @@ class DashboardServerTests(unittest.TestCase):
             'GEMINI_API_KEY="dashboard-secret-key"',
             env_path.read_text(encoding="utf-8"),
         )
+
+        status, openai_saved = self._request(
+            "/api/settings/ai",
+            method="PUT",
+            payload={
+                "provider": "openai",
+                "api_key": "sk-dashboard-openai",
+                "model": "gpt-5.6-terra",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(openai_saved["settings"]["provider"], "openai")
+        self.assertEqual(openai_saved["settings"]["model"], "gpt-5.6-terra")
+        self.assertNotIn("sk-dashboard-openai", json.dumps(openai_saved))
+        env_text = env_path.read_text(encoding="utf-8")
+        self.assertIn('GLK_AI_PROVIDER="openai"', env_text)
+        self.assertIn('OPENAI_API_KEY="sk-dashboard-openai"', env_text)
+        self.assertIn('OPENAI_MODEL="gpt-5.6-terra"', env_text)
 
         status, invalid = self._request(
             "/api/settings/ai",

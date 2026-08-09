@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "google-genai>=1.60,<2",
+  "openai>=2,<3",
   "Pillow>=12.1,<13",
   "PyPDF2>=3.0,<4",
   "PyMuPDF>=1.28,<2",
@@ -50,6 +51,11 @@ files = [
   "src/glk/infrastructure/gemini_layout.py",
   "src/glk/infrastructure/gemini_ocr.py",
   "src/glk/infrastructure/gemini_translation.py",
+  "src/glk/infrastructure/openai_common.py",
+  "src/glk/infrastructure/openai_layout.py",
+  "src/glk/infrastructure/openai_ocr.py",
+  "src/glk/infrastructure/openai_translation.py",
+  "src/glk/infrastructure/ai_provider.py",
   "src/glk/infrastructure/dashboard_routes.py",
   "src/glk/infrastructure/local_http.py",
   "src/glk/infrastructure/source_review_server.py",

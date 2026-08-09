@@ -43,8 +43,7 @@ from glk.extraction.layout import (
     render_page,
     validate_layout,
 )
-from glk.infrastructure.gemini_layout import GeminiLayoutProvider
-from glk.infrastructure.gemini_common import gemini_failure_code
+from glk.infrastructure.ai_provider import ai_failure_code, create_layout_provider
 
 
 LAYOUT_VALIDATION_ATTEMPTS = 3
@@ -329,7 +328,7 @@ def _extract_selected_pages(
                     PageFailure(
                         page_number,
                         str(error),
-                        gemini_failure_code(error),
+                        ai_failure_code(error),
                     )
                 )
                 notify(f"Page {page_number}: failed: {error}")
@@ -423,7 +422,7 @@ def extract_project_pdf(
             dry_run=True,
         )
 
-    active_provider = provider or GeminiLayoutProvider.from_environment(
+    active_provider = provider or create_layout_provider(
         model_name,
         settings_root=settings_root,
     )

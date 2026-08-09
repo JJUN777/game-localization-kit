@@ -7,7 +7,7 @@
 workspace를 사용합니다.
 
 GLK는 AI 결과를 바로 완성본으로 취급하지 않습니다. PDF 텍스트의 읽기 순서를
-Gemini가 재구성하거나 이미지 글자를 OCR한 뒤 사람이 원문을 승인하고, 확정한
+Gemini 또는 OpenAI가 재구성하거나 이미지 글자를 OCR한 뒤 사람이 원문을 승인하고, 확정한
 용어집으로 초벌 번역을 만든 다음 번역을 다시 검수하도록 설계되어 있습니다.
 
 ```mermaid
@@ -32,7 +32,7 @@ flowchart LR
 ## 준비물
 
 - Python 3.10 이상
-- Gemini API 키 ([Google AI Studio](https://aistudio.google.com/apikey)에서 무료 발급)
+- Gemini API 키 또는 OpenAI API 키
 - 텍스트가 포함된 PDF 한 개 또는 PNG/JPG/JPEG/WebP 이미지
 - 로컬 웹 브라우저
 
@@ -85,7 +85,7 @@ glk ui
 명령을 실행하면 기본 브라우저가 자동으로 열립니다. 브라우저에서는 다음 순서로
 진행합니다.
 
-1. 오른쪽 위 `AI 설정`에서 Gemini API 키와 모델을 저장합니다.
+1. 오른쪽 위 `AI 설정`에서 Gemini 또는 OpenAI를 선택하고 API 키와 모델을 저장합니다.
 2. `새 프로젝트 만들기`에서 이름과 프로젝트 ID를 정합니다.
 3. `PDF 또는 이미지 원본 등록`에서 PDF 한 개 또는 이미지 여러 장을 선택합니다.
 4. 프로젝트 카드에서 `PDF 원문 준비 시작` 또는
@@ -134,17 +134,27 @@ glk review translation --project sample_rulebook
 
 ## AI 설정과 비용
 
-대시보드의 `AI 설정`에서 API 키와 모델을 저장할 수 있습니다. 기본 모델은
-`gemini-2.5-flash`이며 드롭다운 목록은
-[`src/glk/data/gemini_models.json`](src/glk/data/gemini_models.json)에서
-관리합니다. 목록에 없는 실제 Gemini API 모델 ID도 직접 입력할 수 있습니다.
+대시보드의 `AI 설정`에서 Gemini와 OpenAI 중 하나를 선택하고 해당 API 키와
+모델을 저장할 수 있습니다. 기존 설치와의 호환을 위해 기본 제공자는 Gemini이며
+기본 모델은 `gemini-2.5-flash`입니다. OpenAI의 기본 모델은
+`gpt-5.6-terra`입니다. 목록에 없는 실제 API 모델 ID도 직접 입력할 수 있습니다.
 
 API 키는 저장 여부만 브라우저에 표시되며 저장된 값은 다시 보내지 않습니다.
-셸의 `GEMINI_API_KEY`와 `GEMINI_MODEL` 환경변수가 `.env`보다 우선합니다.
+셸의 `GLK_AI_PROVIDER`, 제공자별 API 키와 모델 환경변수가 `.env`보다
+우선합니다. CLI에서 OpenAI를 직접 설정하려면 다음 값을 `.env`에 넣습니다.
+
+```dotenv
+GLK_AI_PROVIDER="openai"
+OPENAI_API_KEY="sk-..."
+OPENAI_MODEL="gpt-5.6-terra"
+```
+
+Gemini는 기존 `GEMINI_API_KEY`, `GEMINI_MODEL`을 그대로 사용합니다. 제공자를
+바꿔도 다른 제공자의 저장된 키와 모델은 삭제하지 않습니다.
 설정 위치를 직접 정하려면 `GLK_SETTINGS_ROOT` 또는
 `glk ui --settings-root <디렉터리>`를 사용하세요.
 
-Gemini API를 사용하는 작업:
+선택한 AI API를 사용하는 작업:
 
 - PDF 텍스트의 읽기 순서 복원
 - 이미지 OCR
@@ -196,7 +206,7 @@ workspaces/<project_id>/
 ## 현재 제한사항
 
 - 영어 원문을 한국어로 번역하는 흐름만 지원
-- Gemini API만 지원
+- Gemini와 OpenAI Responses API 지원
 - 프로젝트당 PDF 한 개
 - 스캔 PDF 직접 OCR 미지원: 페이지를 이미지로 변환해 이미지 흐름 사용
 - 표·자유 배치 문서의 읽기 순서는 원문 검수에서 사람이 바로잡아야 할 수 있음
@@ -208,7 +218,8 @@ workspaces/<project_id>/
 ### API 키 또는 모델 오류
 
 GUI: `AI 설정`에서 키 설정 여부와 모델 ID를 확인하세요.
-CLI: `.env`의 `GEMINI_API_KEY`와 `GEMINI_MODEL` 또는 셸 환경변수를 확인하세요.
+CLI: `.env`의 `GLK_AI_PROVIDER`와 선택한 제공자의 키·모델 환경변수 또는 셸
+환경변수를 확인하세요.
 
 현재 연결 테스트는 없으며 실제 원문 준비나 번역 요청에서 키·모델·권한·사용량
 오류가 확인됩니다.
@@ -251,5 +262,5 @@ CLI: 현재 파일과 새 기준본을 비교한 뒤
 | [릴리즈 노트](docs/RELEASE_NOTES.md) | 버전별 변경 이력 |
 
 수동 smoke test용 원본은
-[`examples/smoke/`](examples/smoke/README.md)에 있습니다. 실제 Gemini API로
+[`examples/smoke/`](examples/smoke/README.md)에 있습니다. 실제 AI API로
 실행하면 사용량과 비용이 발생할 수 있습니다.

@@ -1,6 +1,6 @@
 # LLM 사용량과 비용
 
-이 문서는 GLK에서 Gemini API 호출이 발생하는 단계, 비용 계산 방법과 실제 프로젝트 기준 예시를 정리합니다.
+이 문서는 GLK에서 AI API 호출이 발생하는 단계, 비용 계산 방법과 실제 프로젝트 기준 예시를 정리합니다.
 
 **대상 독자**: 프로젝트를 시작하기 전 비용을 예측하거나, 비용을 줄이고 싶은 모든 사용자
 
@@ -11,6 +11,9 @@
 > 아래 금액 기준: `gemini-2.5-flash`, 1달러 = 1,550원, Gemini 무료 할당량 미적용, 정상 1회 처리
 >
 > **Gemini 무료 티어 범위 안에서는 비용이 발생하지 않습니다.** 현재 프로젝트의 실제 한도는 [Google AI Studio](https://aistudio.google.com/)에서 확인합니다. 무료 한도는 모델과 계정에 따라 다를 수 있으므로 [공식 Rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)도 참고합니다.
+>
+> 아래 금액과 실측 예시는 Gemini 전용입니다. OpenAI를 선택한 경우 모델별
+> 입력·출력 단가가 다르므로 [OpenAI API 가격 안내](https://developers.openai.com/api/docs/pricing)에서 현재 단가를 확인하세요.
 
 ### 룰북 PDF (페이지당)
 
@@ -91,7 +94,7 @@ thinking 제외 실측: 약 3원
 전체 재번역을 선택하면 기존 청크를 재사용하지 않으므로 모든 번역 chunk에
 비용이 다시 발생합니다.
 
-`--dry-run`은 입력과 실행 가능 여부만 확인하며 Gemini를 호출하지 않습니다.
+`--dry-run`은 입력과 실행 가능 여부만 확인하며 AI API를 호출하지 않습니다.
 
 ---
 
@@ -206,7 +209,8 @@ Page 2: reused validated layout cache
 - 처리 규칙이나 prompt version 변경
 - `--force` 강제 재생성
 
-사람이 수정하는 `review.txt`, 로컬 QA, HTML 검수 화면 자체는 Gemini를 호출하지 않습니다. 명시적으로 재번역을 실행할 때만 비용이 추가됩니다.
+사람이 수정하는 `review.txt`, 로컬 QA, HTML 검수 화면 자체는 AI API를
+호출하지 않습니다. 명시적으로 재번역을 실행할 때만 비용이 추가됩니다.
 
 ---
 
@@ -223,7 +227,10 @@ Page 2: reused validated layout cache
 
 ## 현재 측정 한계
 
-GLK는 아직 Gemini 응답의 usage metadata를 프로젝트 상태에 영구 저장하지 않습니다. 이 문서의 token과 비용은 `count_tokens`, 저장된 출력과 공식 단가를 이용한 추정치입니다.
+GLK는 아직 AI 응답의 usage metadata를 프로젝트 상태에 영구 저장하지 않습니다.
+이 문서의 token과 비용은 Gemini `count_tokens`, 저장된 출력과 공식 단가를
+이용한 추정치입니다. OpenAI 사용량은 OpenAI 대시보드의 실제 요청 사용량을
+확인해야 합니다.
 
 향후 usage metadata를 저장하면 `glk status`에서 다음 정보를 제공할 수 있습니다.
 

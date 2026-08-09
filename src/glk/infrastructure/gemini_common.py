@@ -271,6 +271,8 @@ def run_with_gemini_retry(
 class GeminiProviderBase:
     """Shared configuration, client creation, and retry shell for providers."""
 
+    provider_name = "gemini"
+
     def __init__(
         self,
         *,
