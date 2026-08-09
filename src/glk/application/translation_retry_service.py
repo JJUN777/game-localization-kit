@@ -32,7 +32,12 @@ from glk.application.translation_types import (
     TranslationProvider,
     TranslationValidationError,
 )
-from glk.infrastructure.gemini_translation import GeminiTranslationProvider
+from glk.infrastructure.ai_provider import (
+    create_translation_provider,
+    resolve_ai_model_name,
+    resolve_ai_provider_name,
+    translation_provider_prompt_version,
+)
 from glk.domain.workspace import WorkspacePaths
 
 
@@ -81,14 +86,26 @@ class _TranslationRetryExecution:
     changes: tuple[dict[str, Any], ...]
 
 
-def _read_translation_model(project_path: Path) -> str | None:
+def _read_translation_provider_state(
+    project_path: Path,
+) -> tuple[str | None, str | None]:
     state_path = WorkspacePaths(project_path).translation_state
     try:
         value = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    model = value.get("model") if isinstance(value, dict) else None
-    return model if isinstance(model, str) and model.strip() else None
+        return None, None
+    if not isinstance(value, dict):
+        return None, None
+    model = value.get("model")
+    prompt_version = value.get("provider_prompt_version")
+    return (
+        model if isinstance(model, str) and model.strip() else None,
+        (
+            prompt_version
+            if isinstance(prompt_version, str) and prompt_version.strip()
+            else None
+        ),
+    )
 
 
 def _revision_path(project_path: Path) -> Path:
@@ -106,6 +123,7 @@ def _prepare_translation_retry(
     expected_review_sha256: str | None,
     provider: TranslationProvider | None,
     model_name: str | None,
+    settings_root: str | Path | None,
 ) -> _TranslationRetryContext:
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
@@ -133,13 +151,27 @@ def _prepare_translation_retry(
         for block in document["blocks"]
         if any(issue["severity"] == "error" for issue in block["issues"])
     )
-    selected_model = (
-        provider.model_name
-        if provider is not None
-        else model_name
-        or _read_translation_model(location.path)
-        or "configured default"
-    )
+    if provider is not None:
+        selected_model = provider.model_name
+    else:
+        provider_name = resolve_ai_provider_name(settings_root)
+        stored_model, stored_prompt_version = _read_translation_provider_state(
+            location.path
+        )
+        matching_stored_model = (
+            stored_model
+            if (
+                stored_prompt_version
+                == translation_provider_prompt_version(provider_name)
+                or (stored_prompt_version is None and provider_name == "gemini")
+            )
+            else None
+        )
+        selected_model = resolve_ai_model_name(
+            model_name or matching_stored_model,
+            provider_name=provider_name,
+            settings_root=settings_root,
+        )
     return _TranslationRetryContext(
         location,
         paths,
@@ -345,6 +377,7 @@ def retry_failed_translations(
         expected_review_sha256=expected_review_sha256,
         provider=provider,
         model_name=model_name,
+        settings_root=settings_root,
     )
     if dry_run or not context.target_blocks:
         return _unchanged_retry_result(context, dry_run=dry_run)
@@ -366,8 +399,8 @@ def retry_failed_translations(
         None,
         context.location.path,
     )
-    active_provider = provider or GeminiTranslationProvider.from_environment(
-        model_name or _read_translation_model(context.location.path),
+    active_provider = provider or create_translation_provider(
+        context.selected_model,
         settings_root=settings_root,
     )
     execution = _execute_translation_retry(

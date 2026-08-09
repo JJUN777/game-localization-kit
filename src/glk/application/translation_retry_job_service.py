@@ -11,8 +11,6 @@ import threading
 from typing import Any
 from uuid import uuid4
 
-from google.genai import errors as gemini_errors
-
 from glk.application.translation_review_service import (
     TranslationReviewConflictError,
 )
@@ -22,10 +20,7 @@ from glk.application.translation_retry_service import (
 )
 from glk.application.translation_types import TranslationValidationError
 from glk.config import resolve_settings_root
-from glk.infrastructure.gemini_common import (
-    GeminiConfigurationError,
-    gemini_status_code,
-)
+from glk.infrastructure.ai_provider import ai_failure_code
 
 
 ACTIVE_RETRY_JOB_STATUSES = frozenset({"queued", "running"})
@@ -117,48 +112,37 @@ def _safe_retry_error(error: BaseException) -> str:
             "AI 재번역 결과가 검증 규칙을 통과하지 못했습니다. "
             "검수 내용은 유지되었습니다. 직접 수정하거나 다시 시도하세요."
         )
-    if any(isinstance(item, GeminiConfigurationError) for item in chain):
+    code = ai_failure_code(error)
+    if code == "GEMINI_API_KEY_MISSING":
         return (
             "Gemini API 키가 설정되지 않았습니다. "
             "대시보드의 AI 설정에서 키를 저장한 뒤 다시 시도하세요."
         )
-    api_error = next(
-        (item for item in chain if isinstance(item, gemini_errors.APIError)),
-        None,
-    )
-    if api_error is not None:
-        code = gemini_status_code(api_error)
-        if code in {400, 401}:
-            return (
-                "Gemini API 키 또는 요청 설정이 올바르지 않습니다. "
-                "AI 설정을 확인한 뒤 다시 시도하세요."
-            )
-        if code == 403:
-            return (
-                "Gemini API 호출 권한이 없습니다. "
-                "API 키 권한과 Google AI 프로젝트 설정을 확인하세요."
-            )
-        if code == 404:
-            return (
-                "선택한 Gemini 모델을 사용할 수 없습니다. "
-                "AI 설정에서 모델을 확인하세요."
-            )
-        if code == 429:
-            return (
-                "Gemini API 사용량 한도를 초과했습니다. "
-                "사용량 또는 결제 설정을 확인한 뒤 다시 시도하세요."
-            )
-        if code == 408 or (code is not None and 500 <= code <= 599):
-            return (
-                "Gemini API가 일시적으로 응답하지 않습니다. "
-                "잠시 후 다시 시도하세요."
-            )
-    if any(
-        isinstance(item, (ConnectionError, TimeoutError))
-        for item in chain
-    ):
+    if code == "OPENAI_API_KEY_MISSING":
         return (
-            "Gemini API에 연결하지 못했습니다. "
+            "OpenAI API 키가 설정되지 않았습니다. "
+            "대시보드의 AI 설정에서 키를 저장한 뒤 다시 시도하세요."
+        )
+    provider = "OpenAI" if code.startswith("OPENAI_") else "Gemini"
+    if code.endswith("API_KEY_OR_REQUEST_INVALID"):
+        return (
+            f"{provider} API 키 또는 요청 설정이 올바르지 않습니다. "
+            "AI 설정을 확인한 뒤 다시 시도하세요."
+        )
+    if code.endswith("PERMISSION_DENIED"):
+        return f"{provider} API 호출 권한이 없습니다. API 키와 프로젝트 권한을 확인하세요."
+    if code.endswith("MODEL_NOT_FOUND"):
+        return f"선택한 {provider} 모델을 사용할 수 없습니다. AI 설정에서 모델을 확인하세요."
+    if code.endswith("QUOTA_EXCEEDED"):
+        return (
+            f"{provider} API 사용량 한도를 초과했습니다. "
+            "사용량 또는 결제 설정을 확인한 뒤 다시 시도하세요."
+        )
+    if code.endswith("TEMPORARILY_UNAVAILABLE"):
+        return f"{provider} API가 일시적으로 응답하지 않습니다. 잠시 후 다시 시도하세요."
+    if code.endswith("NETWORK_ERROR"):
+        return (
+            f"{provider} API에 연결하지 못했습니다. "
             "네트워크 연결을 확인한 뒤 다시 시도하세요."
         )
     return (

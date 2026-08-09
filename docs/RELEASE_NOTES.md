@@ -3,6 +3,21 @@
 사용자에게 영향을 주는 기능, 동작 변경과 주요 안정성 개선을 버전별로
 기록합니다.
 
+## 다음 릴리즈
+
+### 추가
+
+- Gemini와 OpenAI 중 사용할 AI 제공자를 선택하는 대시보드 설정
+- `GLK_AI_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_MODEL` `.env` 설정
+- OpenAI Responses API 기반 PDF 레이아웃 분석, 이미지 OCR, 초벌 번역과
+  QA 오류 문장 선택 재번역
+- 제공자별 모델 목록, 안전한 오류 안내와 OpenAI adapter 자동 테스트
+
+### 호환성
+
+- 제공자를 지정하지 않은 기존 `.env`는 Gemini를 기본값으로 계속 사용
+- Gemini와 OpenAI 키·모델을 분리 보존해 제공자 전환 시 기존 설정 유지
+
 ## v2.0.0 — 2026-07-26
 
 CLI 중심이던 1.x 흐름에 로컬 웹 대시보드를 추가하고, 프로젝트 생성부터 원문

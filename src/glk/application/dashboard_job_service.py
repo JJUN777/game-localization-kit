@@ -44,7 +44,7 @@ from glk.domain.workspace import (
     WorkspacePaths,
     is_pdf_source_file,
 )
-from glk.infrastructure.gemini_common import gemini_failure_code
+from glk.infrastructure.ai_provider import ai_failure_code
 
 
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running"})
@@ -302,6 +302,8 @@ def _utc_now() -> str:
 def _safe_provider_error(codes: list[str], model: str) -> str:
     """Translate stable provider failure codes into actionable guidance."""
     code_set = set(codes)
+    if "AI_RESPONSE_INVALID" in code_set:
+        return "AI 응답 형식을 검증하지 못했습니다. 다시 시도하세요."
     if "GEMINI_API_KEY_MISSING" in code_set:
         return (
             "Gemini API 키가 설정되지 않았습니다. "
@@ -338,6 +340,42 @@ def _safe_provider_error(codes: list[str], model: str) -> str:
         return "Gemini가 빈 응답을 반환했습니다. 다시 시도하세요."
     if "GEMINI_RESPONSE_INVALID" in code_set:
         return "Gemini 응답 형식을 검증하지 못했습니다. 다시 시도하세요."
+    if "OPENAI_API_KEY_MISSING" in code_set:
+        return (
+            "OpenAI API 키가 설정되지 않았습니다. "
+            "대시보드의 AI 설정에서 키를 저장한 뒤 다시 시도하세요."
+        )
+    if "OPENAI_API_KEY_OR_REQUEST_INVALID" in code_set:
+        return "OpenAI API 키 또는 요청 설정이 올바르지 않습니다. AI 설정을 확인하세요."
+    if "OPENAI_QUOTA_EXCEEDED" in code_set:
+        return (
+            "OpenAI API 사용량 한도를 초과했습니다. "
+            "사용량 또는 결제 설정을 확인한 뒤 다시 시도하세요."
+        )
+    if "OPENAI_PERMISSION_DENIED" in code_set:
+        return (
+            "OpenAI API 호출 권한이 없습니다. "
+            "API 키와 프로젝트 권한을 확인하세요."
+        )
+    if "OPENAI_MODEL_NOT_FOUND" in code_set:
+        return (
+            f"선택한 OpenAI 모델 '{model}'을 사용할 수 없습니다. "
+            "AI 설정에서 모델을 확인하세요."
+        )
+    if "OPENAI_NETWORK_ERROR" in code_set:
+        return (
+            "OpenAI API에 연결하지 못했습니다. "
+            "네트워크 연결을 확인한 뒤 다시 시도하세요."
+        )
+    if "OPENAI_TEMPORARILY_UNAVAILABLE" in code_set:
+        return (
+            "OpenAI API가 일시적으로 응답하지 않습니다. "
+            "잠시 후 다시 시도하세요."
+        )
+    if "OPENAI_RESPONSE_EMPTY" in code_set:
+        return "OpenAI가 빈 응답을 반환했습니다. 다시 시도하세요."
+    if "OPENAI_RESPONSE_INVALID" in code_set:
+        return "OpenAI 응답 형식을 검증하지 못했습니다. 다시 시도하세요."
     return "원본을 처리하지 못했습니다. 원본 파일을 확인한 뒤 다시 시도하세요."
 
 
@@ -387,10 +425,10 @@ def _safe_translation_error(error: BaseException, model: str) -> str:
         if len(compact_cause) > 600:
             compact_cause = compact_cause[:597] + "..."
         return (
-            "Gemini 번역 결과가 검증 규칙을 통과하지 못했습니다. "
+            "AI 번역 결과가 검증 규칙을 통과하지 못했습니다. "
             f"검증 사유: {compact_cause}"
         )
-    code = gemini_failure_code(error)
+    code = ai_failure_code(error)
     if code != "SOURCE_PROCESSING_FAILED":
         return _safe_provider_error([code], model)
     return (
@@ -1286,7 +1324,7 @@ class DashboardJobManager:
             ),
             result_error=result_error,
             exception_error=lambda caught, job: _safe_provider_error(
-                [gemini_failure_code(caught)],
+                [ai_failure_code(caught)],
                 job.model,
             ),
             completion_message=completion_message,

@@ -1399,7 +1399,7 @@
 
       <p class="source-note" id="sourceDialogNote">
         선택한 파일은 프로젝트의 <code>01_input</code>에 복사합니다.
-        이 단계에서는 추출·OCR이나 Gemini 호출을 실행하지 않습니다.
+        이 단계에서는 추출·OCR이나 AI API 호출을 실행하지 않습니다.
       </p>
       <div class="delete-identity">
         <strong id="sourceProjectName"></strong>
@@ -1564,7 +1564,7 @@
     <form class="modal-form" id="aiSettingsForm">
       <div class="modal-head">
         <div>
-          <p class="modal-kicker">Gemini configuration</p>
+          <p class="modal-kicker">AI provider configuration</p>
           <h2 id="aiSettingsDialogTitle">AI 설정</h2>
         </div>
         <button class="modal-close" id="aiSettingsDialogClose" type="button"
@@ -1572,6 +1572,13 @@
       </div>
 
       <dl class="ai-settings-status">
+        <div>
+          <dt>제공자</dt>
+          <dd>
+            <span class="settings-primary" id="aiProviderStatus">확인 중…</span>
+            <span class="settings-secondary" id="aiProviderSource"></span>
+          </dd>
+        </div>
         <div>
           <dt>API 키</dt>
           <dd>
@@ -1596,7 +1603,15 @@
       </p>
 
       <div class="field">
-        <label for="aiApiKey">Gemini API 키</label>
+        <label for="aiProvider">AI 제공자</label>
+        <select id="aiProvider">
+          <option value="gemini">Google Gemini</option>
+          <option value="openai">OpenAI</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="aiApiKey" id="aiApiKeyLabel">API 키</label>
         <div class="password-input">
           <input id="aiApiKey" type="password" autocomplete="new-password"
             maxlength="512"
@@ -1610,7 +1625,7 @@
       </div>
 
       <div class="field">
-        <label for="aiModelPreset">Gemini 모델</label>
+        <label for="aiModelPreset" id="aiModelLabel">모델</label>
         <select id="aiModelPreset">
           <option value="">모델 목록 불러오는 중…</option>
         </select>
@@ -1620,7 +1635,7 @@
       <div class="field" id="aiCustomModelField" hidden>
         <label for="aiCustomModel">모델 이름</label>
         <input id="aiCustomModel" type="text" maxlength="200"
-          placeholder="예: gemini-2.5-flash">
+          placeholder="모델 ID를 입력하세요">
       </div>
 
       <div class="modal-actions">
@@ -1644,7 +1659,7 @@
       </div>
 
       <p class="source-note">
-        Gemini API를 사용해 원문을 추출한 뒤 검수 블록 생성과 로컬 QA까지
+        선택한 AI API를 사용해 원문을 추출한 뒤 검수 블록 생성과 로컬 QA까지
         백그라운드에서 실행합니다. API 사용량에 따라 비용이 발생할 수 있습니다.
       </p>
       <div class="delete-identity">
@@ -1698,7 +1713,7 @@
 
       <p class="source-note">
         최종 승인된 원문에서 반복되는 이름과 게임 용어 후보를 수집해
-        검수용 TSV를 만듭니다. 이 작업은 Gemini API를 사용하지 않으며
+        검수용 TSV를 만듭니다. 이 작업은 AI API를 사용하지 않으며
         비용이 발생하지 않습니다.
       </p>
       <div class="delete-identity">
@@ -1829,6 +1844,7 @@
     let toastTimer = null;
     let aiSettings = null;
     let aiModelCatalog = null;
+    let aiModelCatalogs = {};
     let sourceJobs = new Map();
     let glossaryJobs = new Map();
     let translationJobs = new Map();
@@ -1907,6 +1923,9 @@
 
     function renderAiSettings() {
       if (!aiSettings) return;
+      const providerLabel = aiSettings.provider === "openai"
+        ? "OpenAI"
+        : "Google Gemini";
       const keyLabel = aiSettings.api_key_configured
         ? "API 키 설정 완료"
         : "API 키 미설정";
@@ -1916,10 +1935,13 @@
         !aiSettings.api_key_configured,
       );
       byId("aiModelSummary").textContent = aiSettings.model;
+      byId("aiProviderStatus").textContent = providerLabel;
+      byId("aiProviderSource").textContent =
+        aiSettingSourceDescription(aiSettings.provider_source);
       byId("aiApiKeyStatus").textContent = keyLabel;
       byId("aiApiKeySource").textContent = aiSettings.api_key_configured
         ? aiSettingSourceDescription(aiSettings.api_key_source)
-        : "Gemini 작업 전에 키를 입력하세요";
+        : `${providerLabel} 작업 전에 키를 입력하세요`;
       byId("aiModelStatus").textContent = aiSettings.model;
       byId("aiModelSource").textContent =
         aiSettingSourceDescription(aiSettings.model_source);
@@ -1949,7 +1971,11 @@
       try {
         const result = await api("/api/settings/ai");
         aiSettings = result.settings;
-        aiModelCatalog = result.model_catalog;
+        aiModelCatalogs = result.model_catalogs || {
+          [aiSettings.provider]: result.model_catalog,
+        };
+        aiModelCatalog = aiModelCatalogs[aiSettings.provider]
+          || result.model_catalog;
         renderAiModelOptions();
         renderAiSettings();
         return aiSettings;
@@ -1970,8 +1996,25 @@
         (model) => model.id === byId("aiModelPreset").value,
       );
       byId("aiModelDescription").textContent = custom
-        ? "목록에 없는 실제 Gemini API 모델 ID를 입력합니다."
+        ? "목록에 없는 실제 API 모델 ID를 입력합니다."
         : selected?.description_ko || "";
+    }
+
+    function updateAiProviderInput({selectRecommended = true} = {}) {
+      const provider = byId("aiProvider").value;
+      const providerLabel = provider === "openai" ? "OpenAI" : "Gemini";
+      aiModelCatalog = aiModelCatalogs[provider] || null;
+      byId("aiApiKeyLabel").textContent = `${providerLabel} API 키`;
+      byId("aiModelLabel").textContent = `${providerLabel} 모델`;
+      renderAiModelOptions();
+      if (selectRecommended) {
+        const recommended = aiModelCatalog?.models?.find(
+          (model) => model.recommended,
+        );
+        byId("aiModelPreset").value = recommended?.id || "custom";
+        byId("aiCustomModel").value = "";
+      }
+      updateAiModelInput();
     }
 
     async function openAiSettingsDialog() {
@@ -1979,6 +2022,8 @@
       button.disabled = true;
       try {
         await loadAiSettings();
+        byId("aiProvider").value = aiSettings.provider;
+        updateAiProviderInput({selectRecommended: false});
         const presets = (aiModelCatalog?.models || []).map(
           (model) => model.id,
         );
@@ -2013,7 +2058,7 @@
       event.preventDefault();
       const model = selectedAiModel();
       if (!model) {
-        showToast("사용할 Gemini 모델 이름을 입력하세요.", true);
+        showToast("사용할 AI 모델 이름을 입력하세요.", true);
         byId("aiCustomModel").focus();
         return;
       }
@@ -2023,6 +2068,7 @@
         const result = await api("/api/settings/ai", {
           method: "PUT",
           body: JSON.stringify({
+            provider: byId("aiProvider").value,
             api_key: byId("aiApiKey").value,
             model,
           }),
@@ -2442,7 +2488,7 @@
 
     function openSourceJobDialog(projectId) {
       if (!aiSettings?.api_key_configured) {
-        showToast("먼저 Gemini API 키를 설정하세요.", true);
+        showToast("먼저 AI API 키를 설정하세요.", true);
         openAiSettingsDialog();
         return;
       }
@@ -2560,7 +2606,7 @@
 
     function openTranslationJobDialog(projectId) {
       if (!aiSettings?.api_key_configured) {
-        showToast("먼저 Gemini API 키를 설정하세요.", true);
+        showToast("먼저 AI API 키를 설정하세요.", true);
         openAiSettingsDialog();
         return;
       }
@@ -2737,7 +2783,7 @@
       const disabled = active ? " disabled" : "";
       const title = active
         ? `${active.project_id} 백그라운드 작업이 실행 중입니다.`
-        : "Gemini 호출 없이 프로젝트 번역 지침만 저장합니다.";
+        : "AI API 호출 없이 프로젝트 번역 지침만 저장합니다.";
       const label = project.translation_prompt?.saved
         ? "번역 프롬프트 수정"
         : "번역 프롬프트 설정";
@@ -3184,7 +3230,7 @@
         replace ? "원본 교체" : "원본 등록";
       byId("sourceDialogNote").innerHTML = replace
         ? "기존 원본은 삭제되고 선택한 파일로 교체됩니다. 저장된 OCR 프롬프트는 유지되며 별도의 <code>OCR 프롬프트 수정</code> 버튼에서 변경할 수 있습니다. 원문 추출·OCR 시작 전까지만 교체할 수 있습니다."
-        : "선택한 파일은 프로젝트의 <code>01_input</code>에 복사합니다. 이미지 형식은 프로젝트 기본 OCR 프롬프트를 유지하며, 등록 뒤 별도의 <code>OCR 프롬프트 수정</code> 버튼에서 변경할 수 있습니다. 이 단계에서는 Gemini 호출을 실행하지 않습니다.";
+        : "선택한 파일은 프로젝트의 <code>01_input</code>에 복사합니다. 이미지 형식은 프로젝트 기본 OCR 프롬프트를 유지하며, 등록 뒤 별도의 <code>OCR 프롬프트 수정</code> 버튼에서 변경할 수 있습니다. 이 단계에서는 AI API 호출을 실행하지 않습니다.";
       byId("sourceSubmit").textContent =
         replace ? "기존 원본 교체" : "원본 등록";
       byId("sourceSubmit").classList.toggle(
@@ -3540,6 +3586,10 @@
       closeAiSettingsDialog,
     );
     byId("aiSettingsForm").addEventListener("submit", saveAiSettings);
+    byId("aiProvider").addEventListener("change", () => {
+      updateAiProviderInput();
+      byId("aiApiKey").value = "";
+    });
     byId("aiModelPreset").addEventListener("change", updateAiModelInput);
     byId("aiApiKeyToggle").addEventListener("click", () => {
       const input = byId("aiApiKey");

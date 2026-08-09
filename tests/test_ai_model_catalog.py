@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from glk.application.ai_model_catalog import load_gemini_model_catalog
+from glk.application.ai_model_catalog import (
+    load_gemini_model_catalog,
+    load_openai_model_catalog,
+)
 from glk.infrastructure.gemini_common import DEFAULT_MODEL
+from glk.infrastructure.openai_common import DEFAULT_OPENAI_MODEL
 
 
 class GeminiModelCatalogTests(unittest.TestCase):
@@ -28,6 +32,18 @@ class GeminiModelCatalogTests(unittest.TestCase):
                 "gemini-2.5-flash-lite",
             ],
         )
+        self.assertEqual(
+            sum(model["recommended"] for model in catalog["models"]),
+            1,
+        )
+
+    def test_openai_catalog_has_one_recommended_default(self) -> None:
+        catalog = load_openai_model_catalog()
+        model_ids = [model["id"] for model in catalog["models"]]
+
+        self.assertEqual(catalog["provider"], "openai")
+        self.assertIn(DEFAULT_OPENAI_MODEL, model_ids)
+        self.assertEqual(len(model_ids), len(set(model_ids)))
         self.assertEqual(
             sum(model["recommended"] for model in catalog["models"]),
             1,

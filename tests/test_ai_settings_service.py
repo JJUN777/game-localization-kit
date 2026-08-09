@@ -12,6 +12,7 @@ from glk.application.ai_settings_service import (
     AiSettingsService,
 )
 from glk.infrastructure.gemini_common import DEFAULT_MODEL
+from glk.infrastructure.openai_common import DEFAULT_OPENAI_MODEL
 
 
 class AiSettingsServiceTests(unittest.TestCase):
@@ -20,7 +21,13 @@ class AiSettingsServiceTests(unittest.TestCase):
         self.settings_root = Path(self.temporary_directory.name)
         self.environment_patch = patch.dict(
             os.environ,
-            {"GEMINI_API_KEY": "", "GEMINI_MODEL": ""},
+            {
+                "GLK_AI_PROVIDER": "",
+                "GEMINI_API_KEY": "",
+                "GEMINI_MODEL": "",
+                "OPENAI_API_KEY": "",
+                "OPENAI_MODEL": "",
+            },
         )
         self.environment_patch.start()
 
@@ -125,6 +132,47 @@ class AiSettingsServiceTests(unittest.TestCase):
             "UNRELATED=value\n",
         )
 
+    def test_saves_and_reports_openai_settings_independently(self) -> None:
+        service = AiSettingsService(
+            self.settings_root,
+            environment={
+                "GLK_AI_PROVIDER": "",
+                "GEMINI_API_KEY": "",
+                "GEMINI_MODEL": "",
+                "OPENAI_API_KEY": "",
+                "OPENAI_MODEL": "",
+            },
+        )
+
+        status = service.save(
+            provider="openai",
+            api_key="sk-test-openai",
+            model=DEFAULT_OPENAI_MODEL,
+        )
+
+        self.assertEqual(status.provider, "openai")
+        self.assertTrue(status.api_key_configured)
+        self.assertEqual(status.model, DEFAULT_OPENAI_MODEL)
+        text = (self.settings_root / ".env").read_text(encoding="utf-8")
+        self.assertIn('GLK_AI_PROVIDER="openai"', text)
+        self.assertIn('OPENAI_API_KEY="sk-test-openai"', text)
+        self.assertIn(f'OPENAI_MODEL="{DEFAULT_OPENAI_MODEL}"', text)
+        self.assertNotIn("sk-test-openai", repr(status.to_dict()))
+
+    def test_openai_default_does_not_require_a_gemini_key(self) -> None:
+        (self.settings_root / ".env").write_text(
+            'GLK_AI_PROVIDER="openai"\n',
+            encoding="utf-8",
+        )
+
+        status = AiSettingsService(
+            self.settings_root,
+            environment={},
+        ).status()
+
+        self.assertEqual(status.provider, "openai")
+        self.assertFalse(status.api_key_configured)
+        self.assertEqual(status.model, DEFAULT_OPENAI_MODEL)
 
 if __name__ == "__main__":
     unittest.main()

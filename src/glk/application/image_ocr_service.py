@@ -38,8 +38,10 @@ from glk.extraction.image_ocr import (
     build_ocr_prompt,
     validate_ocr_result,
 )
-from glk.infrastructure.gemini_ocr import GeminiImageOcrProvider
-from glk.infrastructure.gemini_common import gemini_failure_code
+from glk.infrastructure.ai_provider import (
+    ai_failure_code,
+    create_image_ocr_provider,
+)
 
 
 IMAGE_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS
@@ -397,7 +399,7 @@ def _ocr_registered_images(
                 ImageOcrFailure(
                     source_name,
                     failure_message,
-                    gemini_failure_code(error),
+                    ai_failure_code(error),
                 )
             )
             combined_items.append((text_name, previous_text))
@@ -507,7 +509,7 @@ def ocr_project_images(
     paths = WorkspacePaths(registered.location.path)
     common_instructions = _read_text(registered.prompt)
     common_prompt_hash = _sha256_text(common_instructions)
-    active_provider = provider or GeminiImageOcrProvider.from_environment(
+    active_provider = provider or create_image_ocr_provider(
         model_name,
         settings_root=settings_root,
     )

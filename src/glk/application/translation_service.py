@@ -38,8 +38,12 @@ from glk.domain.translation_segment import (
 )
 from glk.domain.translation_qa import check_translation_contract
 from glk.domain.workspace import WorkspacePaths
-from glk.infrastructure.gemini_common import resolve_model_name
-from glk.infrastructure.gemini_translation import GeminiTranslationProvider
+from glk.infrastructure.ai_provider import (
+    create_translation_provider,
+    resolve_ai_model_name,
+    resolve_ai_provider_name,
+    translation_provider_prompt_version,
+)
 
 
 TRANSLATION_RUN_VERSION = "translation-run-v1"
@@ -580,11 +584,15 @@ def _prepare_translation_inputs(
         active_model = provider.model_name
         provider_prompt_version = provider.prompt_version
     else:
-        active_model = resolve_model_name(
+        provider_name = resolve_ai_provider_name(settings_root)
+        active_model = resolve_ai_model_name(
             model_name,
+            provider_name=provider_name,
             settings_root=settings_root,
         )
-        provider_prompt_version = GeminiTranslationProvider.prompt_version
+        provider_prompt_version = translation_provider_prompt_version(
+            provider_name
+        )
     input_hash = _translation_input_hash(
         approved_hash=approved_hash,
         termbase_hash=termbase_hash,
@@ -1258,7 +1266,7 @@ def translate_project(
     )
     if isinstance(restored, TranslationRunResult):
         return restored
-    active_provider = provider or GeminiTranslationProvider.from_environment(
+    active_provider = provider or create_translation_provider(
         model_name,
         settings_root=settings_root,
     )
