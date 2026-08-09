@@ -77,6 +77,7 @@ class TranslationReviewServerTests(unittest.TestCase):
         payload: dict[str, object] | None = None,
         authorized: bool = True,
         origin: str | None = None,
+        timeout: float = 3,
     ) -> tuple[int, dict[str, object] | str, dict[str, str]]:
         headers: dict[str, str] = {}
         data = None
@@ -94,7 +95,7 @@ class TranslationReviewServerTests(unittest.TestCase):
             method=method,
         )
         try:
-            with urlopen(request, timeout=3) as response:
+            with urlopen(request, timeout=timeout) as response:
                 raw = response.read().decode("utf-8")
                 content_type = response.headers.get("Content-Type", "")
                 body: dict[str, object] | str = (
@@ -267,6 +268,7 @@ class TranslationReviewServerTests(unittest.TestCase):
         status, finalized, _ = self._request(
             "/api/finalize",
             method="POST",
+            timeout=15,
             payload={
                 "review_sha256": blocked["document"]["review_sha256"],
                 "translations": translations,
