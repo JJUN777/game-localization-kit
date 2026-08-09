@@ -341,6 +341,8 @@ import가 수행하는 작업:
 - `03_terminology/termbase.json`과 `.glk/state/glossary_import.json` 원자적 생성
 
 `review` 상태가 하나라도 남거나 자동 후보 행이 삭제되면 import를 차단합니다.
+브라우저는 TSV가 먼저 저장되었음을 알리고, import가 막힌 record와 원인 및
+원문에 없는 수동 용어의 허용 방법을 함께 표시합니다.
 대시보드에서 연 용어 검수 화면은 termbase 생성 성공 뒤 완료 모달을 표시합니다.
 `대시보드로 돌아가기`를 선택하면 대시보드를 새로 열어 번역 준비 상태를 다시
 읽고, `이 화면에 머물기`를 선택하면 현재 표를 유지합니다. CLI에서 검수 화면을
@@ -444,6 +446,7 @@ glk review translation --project sample_rulebook
 - 저장 후 로컬 QA 실행과 오류 확인
 - QA ERROR가 연결된 block만 Gemini로 재번역하고 다시 검수
 - 오류가 0개인 결과의 최종 승인
+- 검토 가능한 QA 오류의 사유 기록 후 예외 승인
 
 PASS block을 포함한 모든 번역문을 수정할 수 있습니다. PASS는 결정적 QA 규칙을 통과했다는 뜻이며 번역 품질 승인이나 편집 잠금이 아닙니다.
 
@@ -488,6 +491,11 @@ glk translation qa --project sample_rulebook
 
 원문과 번역이 완전히 같거나 한국어에 한글이 없는 경우는 warning으로 표시하며 자동으로 승인을 차단하지 않습니다.
 
+숫자 표기와 termbase 적용 오류는 사람이 원문과 번역을 대조한 뒤 사유를 남겨
+예외 승인할 수 있습니다. marker, block 구조, 보호 token과 HTML 태그 손상은
+예외 승인할 수 없습니다. 번역문이 바뀌면 review hash가 달라지므로 이전 예외
+승인은 더 이상 유효하지 않습니다.
+
 QA의 `code`는 영문 식별자로 유지합니다. 사람이 보는 HTML과 보고서의 `message`에는 한글 사유와 실제 차이값을 기록합니다.
 
 ```bash
@@ -502,7 +510,7 @@ glk translation finalize --project sample_rulebook
 
 ### 최종 결과 파일
 
-오류가 0개일 때만 생성됩니다.
+오류가 0개이거나 남은 검토 가능 오류를 사유와 함께 예외 승인했을 때 생성됩니다.
 
 | 파일 | 역할 |
 |---|---|

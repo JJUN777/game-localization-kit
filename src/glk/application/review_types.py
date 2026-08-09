@@ -136,6 +136,8 @@ class TranslationReviewSummary(TypedDict):
     blocks: int
     changed: int
     errors: int
+    overridable_errors: int
+    blocking_errors: int
     warnings: int
     info: int
     passed: bool

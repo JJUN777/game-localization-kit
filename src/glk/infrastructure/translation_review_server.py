@@ -226,9 +226,17 @@ class _TranslationReviewHandler(LocalHttpRequestHandler):
                         "document": document,
                     }
                 else:
+                    qa_override_reason = body.get("qa_override_reason")
+                    if qa_override_reason is not None and not isinstance(
+                        qa_override_reason, str
+                    ):
+                        raise TranslationReviewError(
+                            "qa_override_reason must be a string."
+                        )
                     finalize_result = finalize_project_translation_review(
                         project=self.server.project,
                         workspace_root=self.server.workspace_root,
+                        qa_override_reason=qa_override_reason,
                     )
                     response = {
                         "ok": finalize_result.valid,

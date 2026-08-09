@@ -101,6 +101,13 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertIsInstance(html, str)
         self.assertIn("용어 후보를 표처럼 검수하세요", html)
         self.assertIn("검증 및 termbase 생성", html)
+        self.assertIn("실패 항목: ${payload.detail}", html)
+        self.assertIn("원문에 없는 수동 용어라면 화면 상단의", html)
+        self.assertIn("승인 원문에 없는 수동 용어 허용", html)
+        self.assertLess(
+            html.index('id="allow-missing"'),
+            html.index('class="toolbar-row search-row"'),
+        )
         self.assertIn('id="search-field"', html)
         self.assertIn('<option value="source">원문 용어</option>', html)
         self.assertIn('<option value="translation">번역어</option>', html)
@@ -260,6 +267,38 @@ class GlossaryReviewServerTests(unittest.TestCase):
             payload["document"]["review_sha256"],
             document["review_sha256"],
         )
+
+    def test_import_error_exposes_the_failed_row_detail(self) -> None:
+        _, document, _ = self._request("/api/review")
+        rows = self._editable_rows(document)
+        for row in rows:
+            row["status"] = "rejected"
+        rows.insert(
+            0,
+            {
+                "candidate_id": "",
+                "status": "approved",
+                "source_term": "Missing Manual Term",
+                "translation": "누락 수동 용어",
+                "category": "term",
+                "note": "",
+            },
+        )
+
+        status, payload, _ = self._request(
+            "/api/import",
+            method="POST",
+            payload={
+                "review_sha256": document["review_sha256"],
+                "rows": rows,
+                "allow_missing_terms": False,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(payload["ok"])
+        self.assertIn("Record 2", payload["detail"])
+        self.assertIn("Missing Manual Term", payload["detail"])
+        self.assertIn("not found in the approved source", payload["detail"])
 
     def test_injects_only_a_local_return_url(self) -> None:
         return_url = "http://127.0.0.1:8765/"
