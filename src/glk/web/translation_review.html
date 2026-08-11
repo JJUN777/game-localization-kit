@@ -937,7 +937,7 @@
       overrideButton.disabled =
         interactionBusy || state.dirty || !overrideAllowed;
       overrideButton.textContent = doc.summary.blocking_errors > 0
-        ? `차단 오류 ${doc.summary.blocking_errors}개 수정 필요`
+        ? `빈 번역 ${doc.summary.blocking_errors}개 입력 필요`
         : `QA 오류 ${doc.summary.overridable_errors}개 예외 승인`;
       $("#save-button").disabled = interactionBusy || !state.dirty;
       $("#qa-button").disabled = interactionBusy;
@@ -1239,7 +1239,7 @@
     $("#qa-override-button").addEventListener("click", () => {
       const count = state.document.summary.overridable_errors;
       $("#qaOverrideSummary").textContent =
-        `검토 가능한 QA 오류 ${count}개가 남아 있습니다. ` +
+        `QA 오류 ${count}개가 남아 있습니다. ` +
         "각 오류를 확인했다면 승인 사유를 남기고 최종 승인할 수 있습니다.";
       $("#qaOverrideReason").value = "";
       $("#qaOverrideDialog").showModal();

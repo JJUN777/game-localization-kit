@@ -125,6 +125,7 @@ class TranslationReviewServerTests(unittest.TestCase):
         self.assertIn('id="qa-override-button"', html)
         self.assertIn("예외 승인 후 최종 승인", html)
         self.assertIn("qa_override_reason", html)
+        self.assertIn("빈 번역 ${doc.summary.blocking_errors}개 입력 필요", html)
         self.assertIn('number_changed: "숫자 불일치"', html)
         self.assertIn("${issueLabel(issue)} · ${issue.message}", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
@@ -293,7 +294,7 @@ class TranslationReviewServerTests(unittest.TestCase):
             finalized["document"]["review_sha256"],
         )
 
-    def test_does_not_override_protected_content_errors(self) -> None:
+    def test_can_override_protected_content_errors(self) -> None:
         _, document, _ = self._request("/api/review")
         translations = {
             block["id"]: block["translation"]
@@ -312,9 +313,35 @@ class TranslationReviewServerTests(unittest.TestCase):
                 "qa_override_reason": "검토함",
             },
         )
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["result"]["finalized"])
+        self.assertTrue(payload["result"]["qa_errors_overridden"])
+        self.assertTrue(
+            (self.project_path / "05_output/rulebook_kor.txt").is_file()
+        )
+
+    def test_does_not_override_an_empty_translation(self) -> None:
+        _, document, _ = self._request("/api/review")
+        translations = {
+            block["id"]: block["translation"]
+            for block in document["blocks"]
+        }
+        translations[document["blocks"][0]["id"]] = ""
+
+        status, payload, _ = self._request(
+            "/api/finalize",
+            method="POST",
+            payload={
+                "review_sha256": document["review_sha256"],
+                "translations": translations,
+                "qa_override_reason": "빈 제목을 의도함",
+            },
+        )
+
         self.assertEqual(status, 400)
         self.assertFalse(payload["ok"])
-        self.assertIn("cannot be overridden", payload["detail"])
+        self.assertIn("Empty translations cannot be overridden", payload["detail"])
         self.assertFalse(
             (self.project_path / "05_output/rulebook_kor.txt").exists()
         )

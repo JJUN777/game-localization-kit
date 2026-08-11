@@ -41,11 +41,7 @@ _FINAL_SECTION_SEPARATOR = "----------------------"
 _BLOCK_PATTERN = re.compile(r"^\[BLOCK ([a-z0-9][a-z0-9._-]*)\]$")
 _HANGUL_PATTERN = re.compile(r"[가-힣]")
 _LATIN_PATTERN = re.compile(r"[A-Za-z]")
-_OVERRIDABLE_QA_ERROR_CODES = {
-    "number_changed",
-    "approved_term_missing",
-    "keep_term_changed",
-}
+_NON_OVERRIDABLE_QA_ERROR_CODES = {"empty_translation"}
 _MAX_QA_OVERRIDE_REASON_LENGTH = 1000
 
 
@@ -864,7 +860,7 @@ def _overridable_error_counts(
 ) -> tuple[int, int]:
     overridable = sum(
         issue.severity == "error"
-        and issue.code in _OVERRIDABLE_QA_ERROR_CODES
+        and issue.code not in _NON_OVERRIDABLE_QA_ERROR_CODES
         for issue in issues
     )
     errors = sum(issue.severity == "error" for issue in issues)
@@ -1111,7 +1107,7 @@ def finalize_project_translation_review(
     dry_run: bool = False,
     qa_override_reason: str | None = None,
 ) -> TranslationFinalizeResult:
-    """Promote a safe review, optionally acknowledging semantic QA errors."""
+    """Promote a review, optionally acknowledging its remaining QA errors."""
     context = _load_review_context(project, workspace_root)
     translations, issues = _analyze_review(context)
     errors, warnings, _ = _issue_counts(issues)
@@ -1132,8 +1128,8 @@ def finalize_project_translation_review(
         )
     if override_requested and blocking_errors:
         raise TranslationReviewError(
-            "Structural or protected-content QA errors cannot be overridden. "
-            "Resolve every non-overridable error before final approval."
+            "Empty translations cannot be overridden. Fill every translation "
+            "before final approval."
         )
     qa_errors_overridden = bool(
         override_requested and errors and overridable_errors == errors
