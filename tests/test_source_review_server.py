@@ -126,6 +126,9 @@ class SourceReviewServerTests(unittest.TestCase):
         self.assertIn("const RETURN_URL = null;", html)
         self.assertIn("원문 승인이 완료되었습니다", html)
         self.assertIn("추출 경고", html)
+        self.assertIn('$("addMissing").textContent = active ? "추가 취소"', html)
+        self.assertIn("layoutWarningsOnly = false;\n      unresolvedOnly = false;", html)
+        self.assertIn("const groupItems = allGroupBlocks();", html)
 
         status, payload = self._request("/api/review", authorized=False)
         self.assertEqual(status, 403)

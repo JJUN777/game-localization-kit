@@ -88,7 +88,9 @@
     .box.warning { box-shadow: 0 0 0 2px var(--warn); }
     .box.issue { box-shadow: 0 0 0 2px var(--danger); }
     .box.warning.issue { box-shadow: 0 0 0 2px var(--danger), 0 0 0 4px var(--warn); }
+    .overlay.drawing .box { pointer-events: none; }
     .draw-box { position: absolute; border: 2px dashed var(--blue); background: rgba(105,167,255,.18); pointer-events: none; }
+    #addMissing.active { border-color: var(--blue); color: var(--blue); background: #1b2b42; }
     section.editor { padding: 14px; background: var(--panel); }
     .summary { color: var(--muted); margin-bottom: 10px; }
     .card {
@@ -452,12 +454,34 @@
       ];
     }
 
+    function setDrawMode(active) {
+      drawMode = active;
+      if (!active) {
+        drawStart = null;
+        drawElement?.remove();
+        drawElement = null;
+      }
+      $("overlay").classList.toggle("drawing", active);
+      $("drawHint").classList.toggle("hidden", !active);
+      $("addMissing").classList.toggle("active", active);
+      $("addMissing").textContent = active ? "추가 취소" : "누락 문단 추가";
+    }
+
     $("addMissing").onclick = () => {
-      drawMode = true; $("drawHint").classList.remove("hidden");
+      if (drawMode) {
+        setDrawMode(false);
+        renderOverlay();
+        notice("누락 문단 추가를 취소했습니다.");
+        return;
+      }
+      layoutWarningsOnly = false;
+      unresolvedOnly = false;
+      render();
+      setDrawMode(true);
       notice("원본 이미지에서 누락된 문단 영역을 드래그하세요.");
     };
     $("overlay").onpointerdown = (event) => {
-      if (!drawMode) return;
+      if (!drawMode || (event.pointerType === "mouse" && event.button !== 0)) return;
       event.preventDefault(); drawStart = normalizedPoint(event);
       drawElement = document.createElement("div"); drawElement.className = "draw-box";
       $("overlay").appendChild(drawElement);
@@ -474,7 +498,7 @@
       if (!drawStart) return;
       const end = normalizedPoint(event);
       const bbox = [Math.min(drawStart[0],end[0]), Math.min(drawStart[1],end[1]), Math.max(drawStart[0],end[0]), Math.max(drawStart[1],end[1])];
-      drawStart = null; drawMode = false; drawElement = null; $("drawHint").classList.add("hidden");
+      setDrawMode(false);
       if (bbox[2]-bbox[0] < 5 || bbox[3]-bbox[1] < 5) { renderOverlay(); notice("조금 더 큰 영역을 선택하세요.", true); return; }
       const group = groupById();
       const block = {
@@ -483,13 +507,28 @@
         text: "", raw_text: "", bbox, manual: true, excluded: false, changed: true,
         warnings: [], layout_warnings: 0, issues: []
       };
-      const groupItems = groupBlocks();
+      const groupItems = allGroupBlocks();
       const anchor = selectedId ? documentState.blocks.findIndex((b) => b.id === selectedId) : -1;
-      const fallback = documentState.blocks.lastIndexOf(groupItems[groupItems.length-1]);
-      documentState.blocks.splice(anchor >= 0 ? anchor + 1 : fallback + 1, 0, block);
+      const lastGroupBlock = groupItems[groupItems.length - 1];
+      const fallback = lastGroupBlock
+        ? documentState.blocks.lastIndexOf(lastGroupBlock) + 1
+        : documentState.blocks.length;
+      documentState.blocks.splice(anchor >= 0 ? anchor + 1 : fallback, 0, block);
       selectedId = block.id; render();
       setTimeout(() => document.querySelector(`[data-card="${CSS.escape(block.id)}"] textarea`)?.focus(), 0);
     };
+    $("overlay").onpointercancel = () => {
+      if (!drawMode) return;
+      setDrawMode(false);
+      renderOverlay();
+      notice("누락 문단 추가가 취소되었습니다.", true);
+    };
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !drawMode) return;
+      setDrawMode(false);
+      renderOverlay();
+      notice("누락 문단 추가를 취소했습니다.");
+    });
 
     function payload({allowUnresolvedIcons = false} = {}) {
       return {
