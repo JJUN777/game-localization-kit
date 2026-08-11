@@ -90,7 +90,7 @@ _MAX_OCR_PROMPT_REQUEST_BYTES = MAX_OCR_PROMPT_BYTES * 6 + 1024
 _MAX_TRANSLATION_PROMPT_REQUEST_BYTES = (
     MAX_TRANSLATION_PROMPT_BYTES * 6 + 1024
 )
-_MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+_MAX_UPLOAD_BYTES = 512 * 1024 * 1024
 _MAX_UPLOAD_FILES = 200
 DASHBOARD_DEFAULT_PORT = 8765
 _REVIEW_TYPES = {"source", "glossary", "translation"}
@@ -268,7 +268,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
             raise DashboardError("Invalid Content-Length.") from error
         if length <= 0 or length > _MAX_UPLOAD_BYTES:
             raise DashboardError(
-                "Upload body size must be between 1 byte and 256 MiB."
+                "Upload body size must be between 1 byte and 512 MiB."
             )
 
         envelope = (

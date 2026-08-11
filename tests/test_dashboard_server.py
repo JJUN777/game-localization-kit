@@ -27,6 +27,7 @@ from glk.application.translation_review_service import (
 )
 from glk.application.translation_service import translate_project
 from glk.infrastructure.dashboard_server import (
+    _MAX_UPLOAD_BYTES,
     DashboardHttpServer,
     create_dashboard_server,
 )
@@ -266,6 +267,8 @@ class DashboardServerTests(unittest.TestCase):
         status, html = self._request("/", authorized=False)
         self.assertEqual(status, 200)
         self.assertIn("Game Localization Kit Dashboard", html)
+        self.assertIn("MAX_SOURCE_UPLOAD_BYTES = 500 * 1024 * 1024", html)
+        self.assertIn("선택 파일 한도는 500 MiB", html)
         self.assertIn("data-create-project", html)
         self.assertIn("data-delete-project", html)
         self.assertIn("원본 교체", html)
@@ -287,6 +290,7 @@ class DashboardServerTests(unittest.TestCase):
         )
         self.assertIn("이번 작업에 적용할 OCR 프롬프트", html)
         self.assertIn("용어 후보 생성", html)
+        self.assertEqual(_MAX_UPLOAD_BYTES, 512 * 1024 * 1024)
         self.assertIn("AI API를 사용하지 않으며", html)
         self.assertIn("초벌 번역 시작", html)
         self.assertIn("번역 문체·표현 지침", html)
