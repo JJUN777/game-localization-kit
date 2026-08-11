@@ -50,6 +50,24 @@ class SourceReviewConflictError(SourceReviewError):
     code = "REVIEW_CONFLICT"
 
 
+class SourceReviewUnresolvedTextError(SourceReviewError):
+    """Raised when reviewed text still contains an unresolved OCR marker."""
+
+    code = "SOURCE_REVIEW_UNRESOLVED_TEXT"
+
+
+class SourceReviewTokenError(SourceReviewError):
+    """Raised when reviewed text contains an invalid or unknown icon token."""
+
+    code = "SOURCE_REVIEW_TOKEN_INVALID"
+
+
+class SourceReviewTokenConfirmationError(SourceReviewError):
+    """Raised when icon-token edits have not been explicitly confirmed."""
+
+    code = "SOURCE_REVIEW_TOKEN_CONFIRMATION_REQUIRED"
+
+
 @dataclass(frozen=True, slots=True)
 class ReviewPrepareResult:
     project_path: str
@@ -74,6 +92,8 @@ class ReviewFinalizeResult:
     output_file: str | None
     approved_blocks_file: str | None
     token_changes_allowed: bool
+    unresolved_icons_allowed: bool = False
+    unresolved_icon_blocks: int = 0
     dry_run: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -397,26 +417,33 @@ def _validate_reviewed_text(
     *,
     allowed_tokens: set[str],
     allow_token_changes: bool,
+    allow_unresolved_icons: bool,
 ) -> None:
     token_change_ids: list[str] = []
     for block in blocks:
         text = texts[block.id]
         if "�" in text:
-            raise SourceReviewError(
+            raise SourceReviewUnresolvedTextError(
                 f"Block {block.id} still contains a Unicode replacement character."
             )
         if "[ILLEGIBLE]" in text.upper():
-            raise SourceReviewError(f"Block {block.id} still contains [ILLEGIBLE].")
-        if _UNRESOLVED_ICON_PATTERN.search(text):
-            raise SourceReviewError(f"Block {block.id} still contains an unresolved icon.")
+            raise SourceReviewUnresolvedTextError(
+                f"Block {block.id} still contains [ILLEGIBLE]."
+            )
+        if not allow_unresolved_icons and _UNRESOLVED_ICON_PATTERN.search(text):
+            raise SourceReviewUnresolvedTextError(
+                f"Block {block.id} still contains an unresolved icon."
+            )
         tokens = _TOKEN_PATTERN.findall(text)
         token_stripped = _TOKEN_PATTERN.sub("", text)
         if "{" in token_stripped or "}" in token_stripped:
-            raise SourceReviewError(f"Block {block.id} contains malformed token braces.")
+            raise SourceReviewTokenError(
+                f"Block {block.id} contains malformed token braces."
+            )
         unknown_tokens = sorted(set(tokens) - allowed_tokens) if allowed_tokens else []
         if unknown_tokens:
             formatted = ", ".join(f"{{{token}}}" for token in unknown_tokens)
-            raise SourceReviewError(
+            raise SourceReviewTokenError(
                 f"Block {block.id} contains tokens not defined in the OCR prompt: {formatted}."
             )
         if not block.id.startswith("manual-") and Counter(tokens) != Counter(
@@ -426,7 +453,7 @@ def _validate_reviewed_text(
     if token_change_ids and not allow_token_changes:
         preview = ", ".join(token_change_ids[:5])
         suffix = "..." if len(token_change_ids) > 5 else ""
-        raise SourceReviewError(
+        raise SourceReviewTokenConfirmationError(
             "Icon token changes require explicit confirmation. "
             f"Changed blocks: {preview}{suffix}"
         )
@@ -897,6 +924,7 @@ def _approved_blocks(
         texts,
         allowed_tokens=_load_allowed_tokens(project_path),
         allow_token_changes=bool(state.get("_allow_token_changes")),
+        allow_unresolved_icons=bool(state.get("_allow_unresolved_icons")),
     )
     approved: list[SourceBlock] = []
     changed_blocks = 0
@@ -924,6 +952,7 @@ def finalize_project_source_review(
     project: str | Path,
     workspace_root: str | Path = "workspaces",
     allow_token_changes: bool = False,
+    allow_unresolved_icons: bool = False,
     dry_run: bool = False,
 ) -> ReviewFinalizeResult:
     """Validate the current layout and produce approved source outputs."""
@@ -934,6 +963,7 @@ def finalize_project_source_review(
     )
     validation_state = dict(state)
     validation_state["_allow_token_changes"] = allow_token_changes
+    validation_state["_allow_unresolved_icons"] = allow_unresolved_icons
     approved_blocks, changed_blocks = _approved_blocks(
         location.path,
         originals,
@@ -945,6 +975,11 @@ def finalize_project_source_review(
     )
     final_text = render_source_review_text(approved_blocks)
     approved_data = _serialize_blocks(approved_blocks)
+    unresolved_icon_ids = [
+        block.id
+        for block in approved_blocks
+        if _UNRESOLVED_ICON_PATTERN.search(block.effective_text)
+    ]
     if not dry_run:
         _write_bytes_atomic(paths.source_final, final_text)
         _write_bytes_atomic(paths.approved_source_segments, approved_data)
@@ -959,6 +994,8 @@ def finalize_project_source_review(
                     paths.approved_source_segments
                 ),
                 "approved_blocks_sha256": _sha256_bytes(approved_data),
+                "unresolved_icons_allowed": allow_unresolved_icons,
+                "unresolved_icon_block_ids": unresolved_icon_ids,
                 "approved_at": _utc_now(),
             }
         )
@@ -973,5 +1010,7 @@ def finalize_project_source_review(
             None if dry_run else str(paths.approved_source_segments)
         ),
         token_changes_allowed=allow_token_changes,
+        unresolved_icons_allowed=allow_unresolved_icons,
+        unresolved_icon_blocks=len(unresolved_icon_ids),
         dry_run=dry_run,
     )

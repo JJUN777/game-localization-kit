@@ -116,6 +116,11 @@ class SourceReviewServerTests(unittest.TestCase):
         status, html = self._request("/", authorized=False)
         self.assertEqual(status, 200)
         self.assertIn("원문 이미지 · 추출문 검수", html)
+        self.assertIn("검증 전 미해결", html)
+        self.assertIn('id="unresolvedFilter"', html)
+        self.assertIn('id="approveUnresolvedIcons"', html)
+        self.assertIn("아이콘 표기를 직접 바꿨습니다", html)
+        self.assertIn("[ICON: 주황 마름모] → {DAMAGE}", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
         self.assertNotIn("__GLK_RETURN_URL_JSON__", html)
         self.assertIn("const RETURN_URL = null;", html)
@@ -198,6 +203,45 @@ class SourceReviewServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(finalized["document"]["review_status"], "approved")
         self.assertTrue((self.project_path / "02_source/final.txt").is_file())
+
+    def test_validate_reports_unresolved_ocr_text_as_review_guidance(self) -> None:
+        status, document = self._request("/api/review")
+        self.assertEqual(status, 200)
+        document["blocks"][0]["text"] = "Skill [ICON: gray circular symbol]"
+
+        status, response = self._request(
+            "/api/validate",
+            method="POST",
+            payload={
+                "review_sha256": document["review_sha256"],
+                "blocks": document["blocks"],
+            },
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(response["code"], "SOURCE_REVIEW_UNRESOLVED_TEXT")
+        self.assertIn("미확정 아이콘", response["message"])
+        self.assertIn("unresolved icon", response["detail"])
+
+    def test_can_explicitly_approve_unresolved_icon_descriptions(self) -> None:
+        status, document = self._request("/api/review")
+        self.assertEqual(status, 200)
+        document["blocks"][0]["text"] = "Skill [ICON: gray circular symbol]"
+
+        status, response = self._request(
+            "/api/finalize",
+            method="POST",
+            payload={
+                "review_sha256": document["review_sha256"],
+                "blocks": document["blocks"],
+                "allow_unresolved_icons": True,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(response["result"]["unresolved_icons_allowed"])
+        self.assertEqual(response["result"]["unresolved_icon_blocks"], 1)
+        self.assertEqual(response["document"]["review_status"], "approved")
 
     def test_serves_registered_image_source_without_a_pdf(self) -> None:
         location = create_project(name="Image Visual", workspace_root=self.workspace_root)

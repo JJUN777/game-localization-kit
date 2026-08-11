@@ -186,6 +186,63 @@ class SourceReviewServiceTests(unittest.TestCase):
                     project="review_project", workspace_root=workspace_root
                 )
 
+    def test_finalize_can_explicitly_preserve_unresolved_icon_descriptions(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            project_path = self.create_source(
+                workspace_root,
+                [make_block(1, "Skill [ICON: orange diamond].")],
+            )
+            prepare_project_source_review(
+                project="review_project", workspace_root=workspace_root
+            )
+
+            with self.assertRaises(SourceReviewError):
+                finalize_project_source_review(
+                    project="review_project", workspace_root=workspace_root
+                )
+
+            result = finalize_project_source_review(
+                project="review_project",
+                workspace_root=workspace_root,
+                allow_unresolved_icons=True,
+            )
+
+            self.assertTrue(result.unresolved_icons_allowed)
+            self.assertEqual(result.unresolved_icon_blocks, 1)
+            self.assertIn(
+                "[ICON: orange diamond]",
+                (project_path / "02_source/final.txt").read_text(encoding="utf-8"),
+            )
+            state = json.loads(
+                (project_path / ".glk/state/source_review.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertTrue(state["unresolved_icons_allowed"])
+            self.assertEqual(
+                state["unresolved_icon_block_ids"],
+                ["pdf-p0001-b0001-0000000001"],
+            )
+
+    def test_unresolved_icon_override_does_not_allow_illegible_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            self.create_source(
+                workspace_root,
+                [make_block(1, "Damage [ILLEGIBLE].")],
+            )
+            prepare_project_source_review(
+                project="review_project", workspace_root=workspace_root
+            )
+
+            with self.assertRaises(SourceReviewError):
+                finalize_project_source_review(
+                    project="review_project",
+                    workspace_root=workspace_root,
+                    allow_unresolved_icons=True,
+                )
+
     def test_token_change_requires_explicit_option_and_accepts_windows_newlines(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"

@@ -275,6 +275,14 @@ glk review finalize --project sample_rulebook             # 최종화
 glk review finalize --project sample_rulebook --allow-token-changes
 ```
 
+미확정 `[ICON: ...]` 설명을 의도적으로 그대로 보존하려면 브라우저의
+`미확정 아이콘 그대로 승인`을 사용하거나 CLI에서 다음 옵션을 지정합니다.
+`[ILLEGIBLE]`과 깨진 문자는 이 옵션으로 우회되지 않습니다.
+
+```bash
+glk review finalize --project sample_rulebook --allow-unresolved-icons
+```
+
 최종 결과: `02_source/final.txt`와 `.glk/segments/approved_source.jsonl`
 
 후속 단계는 hash까지 유효한 `approved_source.jsonl`만 입력으로 허용합니다.

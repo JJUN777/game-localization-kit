@@ -275,12 +275,17 @@ class _SourceReviewHandler(LocalHttpRequestHandler):
             review_hash = body.get("review_sha256")
             blocks = body.get("blocks")
             allow_token_changes = body.get("allow_token_changes", False)
+            allow_unresolved_icons = body.get("allow_unresolved_icons", False)
             if not isinstance(review_hash, str):
                 raise SourceReviewError("review_sha256 is required.")
             if not isinstance(blocks, list):
                 raise SourceReviewError("blocks must be a list.")
             if not isinstance(allow_token_changes, bool):
                 raise SourceReviewError("allow_token_changes must be true or false.")
+            if not isinstance(allow_unresolved_icons, bool):
+                raise SourceReviewError(
+                    "allow_unresolved_icons must be true or false."
+                )
             with self.server.mutation_lock:
                 document = save_project_source_review(
                     project=self.server.project,
@@ -295,6 +300,7 @@ class _SourceReviewHandler(LocalHttpRequestHandler):
                         project=self.server.project,
                         workspace_root=self.server.workspace_root,
                         allow_token_changes=allow_token_changes,
+                        allow_unresolved_icons=allow_unresolved_icons,
                         dry_run=path == "/api/validate",
                     )
                     response = {

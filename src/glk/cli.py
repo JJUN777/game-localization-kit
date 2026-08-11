@@ -716,6 +716,7 @@ def _run_review_finalize(args: argparse.Namespace) -> int:
             project=args.project,
             workspace_root=args.workspace_root,
             allow_token_changes=args.allow_token_changes,
+            allow_unresolved_icons=args.allow_unresolved_icons,
             dry_run=args.dry_run,
         )
     except (ProjectError, SourceReviewError, OSError, ValueError) as error:
@@ -1387,6 +1388,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-token-changes",
         action="store_true",
         help="Explicitly permit changes to {ICON} token counts",
+    )
+    review_finalize_parser.add_argument(
+        "--allow-unresolved-icons",
+        action="store_true",
+        help="Approve unresolved [ICON: description] markers without editing them",
     )
     review_finalize_parser.add_argument(
         "--dry-run", action="store_true", help="Validate without writing final files"
