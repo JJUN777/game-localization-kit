@@ -21,6 +21,7 @@ from glk.infrastructure.gemini_common import (
     is_retryable_gemini_error,
     retry_after_seconds,
     run_with_gemini_retry,
+    structured_generation_config,
 )
 from glk.infrastructure.gemini_layout import GeminiLayoutProvider
 from glk.infrastructure.gemini_ocr import GeminiImageOcrProvider
@@ -80,6 +81,19 @@ class GeminiCommonPolicyTests(unittest.TestCase):
         self.assertEqual(options.timeout, DEFAULT_REQUEST_TIMEOUT_MS)
         self.assertIsNotNone(options.retry_options)
         self.assertEqual(options.retry_options.attempts, 1)
+
+    def test_structured_generation_explicitly_disables_sdk_afc(self) -> None:
+        config = structured_generation_config(
+            {"type": "object"},
+            system_instruction="Follow the schema.",
+        )
+
+        self.assertEqual(config.temperature, 0)
+        self.assertEqual(config.response_mime_type, "application/json")
+        self.assertEqual(config.response_json_schema, {"type": "object"})
+        self.assertEqual(config.system_instruction, "Follow the schema.")
+        self.assertIsNotNone(config.automatic_function_calling)
+        self.assertTrue(config.automatic_function_calling.disable)
 
     def test_classifies_api_errors_by_status_code(self) -> None:
         for code in (400, 401, 403, 404, 422):

@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import random
 import time
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 from dotenv import dotenv_values
 from google import genai
@@ -138,6 +138,23 @@ def gemini_http_options(
     return types.HttpOptions(
         timeout=timeout_ms,
         retry_options=types.HttpRetryOptions(attempts=1),
+    )
+
+
+def structured_generation_config(
+    response_json_schema: dict[str, Any],
+    *,
+    system_instruction: str | None = None,
+) -> types.GenerateContentConfig:
+    """Build JSON generation options without SDK automatic function calling."""
+    return types.GenerateContentConfig(
+        temperature=0,
+        system_instruction=system_instruction,
+        response_mime_type="application/json",
+        response_json_schema=response_json_schema,
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(
+            disable=True,
+        ),
     )
 
 

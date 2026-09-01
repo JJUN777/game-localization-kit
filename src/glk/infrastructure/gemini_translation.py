@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from google.genai import types
-
-from glk.infrastructure.gemini_common import GeminiProviderBase
+from glk.infrastructure.gemini_common import (
+    GeminiProviderBase,
+    structured_generation_config,
+)
 
 
 TRANSLATION_PROVIDER_PROMPT_VERSION = "gemini-translation-json-v1"
@@ -44,11 +45,9 @@ class GeminiTranslationProvider(GeminiProviderBase):
     prompt_version = TRANSLATION_PROVIDER_PROMPT_VERSION
 
     def translate(self, prompt: str) -> dict[str, Any]:
-        config = types.GenerateContentConfig(
-            temperature=0,
+        config = structured_generation_config(
+            TRANSLATION_RESPONSE_SCHEMA,
             system_instruction=TRANSLATION_SYSTEM_INSTRUCTION,
-            response_mime_type="application/json",
-            response_json_schema=TRANSLATION_RESPONSE_SCHEMA,
         )
 
         def request() -> dict[str, Any]:
