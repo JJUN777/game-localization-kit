@@ -1,12 +1,27 @@
 {
   "schema_version": 1,
   "provider": "gemini",
-  "last_verified": "2026-07-24",
+  "last_verified": "2026-09-02",
   "source_url": "https://ai.google.dev/gemini-api/docs/models",
   "models": [
     {
+      "id": "gemini-3.7-flash",
+      "description_ko": "코딩과 에이전트 작업까지 지원하는 최신 안정 Flash 모델",
+      "recommended": false
+    },
+    {
+      "id": "gemini-3.6-flash",
+      "description_ko": "속도와 지능의 균형이 좋은 안정 멀티모달 모델",
+      "recommended": false
+    },
+    {
       "id": "gemini-3.5-flash",
-      "description_ko": "복잡한 문서와 멀티모달 작업을 위한 최신 안정 Flash 모델",
+      "description_ko": "복잡한 문서와 멀티모달 작업을 위한 안정 Flash 모델",
+      "recommended": false
+    },
+    {
+      "id": "gemini-3.5-flash-lite",
+      "description_ko": "고처리량 자동화를 위한 빠르고 경제적인 안정 모델",
       "recommended": false
     },
     {
