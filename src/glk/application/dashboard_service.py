@@ -22,10 +22,12 @@ from glk.application.translation_prompt_service import (
     TranslationPromptError,
     load_translation_prompt_document,
 )
+from glk.domain.source_block import SourceBlock, SourceBlockValidationError
 from glk.domain.workspace import WorkspacePaths, is_pdf_source_file
 
 
 DASHBOARD_SCHEMA_VERSION = 1
+_SOURCE_SECTION_SEPARATOR = "======================"
 
 _STAGE_LABELS = {
     "not_started": "시작 전",
@@ -68,6 +70,25 @@ class DashboardOutputError(ValueError):
 @dataclass(frozen=True, slots=True)
 class DashboardOutput:
     path: Path
+    relative_path: str
+    name: str
+    download_name: str
+    size_bytes: int
+    sha256: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "path": self.relative_path,
+            "name": self.name,
+            "download_name": self.download_name,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardSourceOutput:
+    data: bytes
     relative_path: str
     name: str
     download_name: str
@@ -166,6 +187,131 @@ def _approved_outputs(
                 output.name.casefold(),
             ),
         )
+    )
+
+
+def _parse_approved_source_blocks(data: bytes) -> list[SourceBlock]:
+    blocks: list[SourceBlock] = []
+    line_number = 0
+    try:
+        for line_number, line in enumerate(
+            data.decode("utf-8").splitlines(),
+            start=1,
+        ):
+            if line.strip():
+                blocks.append(SourceBlock.from_dict(json.loads(line)))
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        SourceBlockValidationError,
+        TypeError,
+    ) as error:
+        raise DashboardOutputError(
+            f"승인된 원문 블록 {line_number}번 줄이 올바르지 않습니다."
+        ) from error
+    if not blocks or len({block.id for block in blocks}) != len(blocks):
+        raise DashboardOutputError("승인된 원문 블록이 올바르지 않습니다.")
+    return blocks
+
+
+def _render_approved_source_text(blocks: list[SourceBlock]) -> bytes:
+    grouped: dict[tuple[str, str | int], list[str]] = {}
+    for block in sorted(blocks, key=lambda item: item.source_order):
+        text = block.effective_text.strip()
+        if not text:
+            raise DashboardOutputError("승인된 원문 블록에 빈 본문이 있습니다.")
+        block_locator: tuple[str, str | int] = (
+            ("page", block.page)
+            if block.page is not None
+            else ("source", block.source_file)
+        )
+        grouped.setdefault(block_locator, []).append(text)
+
+    lines: list[str] = []
+    for index, (section_locator, texts) in enumerate(grouped.items()):
+        if index:
+            lines.extend((_SOURCE_SECTION_SEPARATOR, ""))
+        lines.append(
+            f"[PAGE {section_locator[1]}]"
+            if section_locator[0] == "page"
+            else f"[{PurePosixPath(str(section_locator[1])).name}]"
+        )
+        lines.append("")
+        for text in texts:
+            lines.extend((text, ""))
+    return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+
+
+def _approved_source_output(
+    project_path: Path,
+    project_id: str,
+) -> DashboardSourceOutput:
+    paths = WorkspacePaths(project_path)
+    try:
+        state = json.loads(
+            paths.source_review_state.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise DashboardOutputError(
+            "최종 원문 승인 상태를 읽을 수 없습니다."
+        ) from error
+    expected_hash = (
+        state.get("approved_blocks_sha256")
+        if isinstance(state, dict)
+        else None
+    )
+    if (
+        not isinstance(state, dict)
+        or state.get("status") != "approved"
+        or not isinstance(expected_hash, str)
+    ):
+        raise DashboardOutputError("최종 승인된 원문이 없습니다.")
+
+    segments_root = paths.segments_dir.resolve()
+    candidate = paths.approved_source_segments.resolve()
+    try:
+        candidate.relative_to(segments_root)
+    except ValueError as error:
+        raise DashboardOutputError(
+            "승인된 원문 블록이 프로젝트 폴더 밖에 있습니다."
+        ) from error
+    try:
+        approved_data = candidate.read_bytes()
+    except OSError as error:
+        raise DashboardOutputError(
+            "승인된 원문 블록을 읽을 수 없습니다."
+        ) from error
+    if hashlib.sha256(approved_data).hexdigest() != expected_hash:
+        raise DashboardOutputError(
+            "승인된 원문 블록이 승인 이후 변경되었습니다."
+        )
+    data = _render_approved_source_text(
+        _parse_approved_source_blocks(approved_data)
+    )
+    return DashboardSourceOutput(
+        data=data,
+        relative_path=paths.relative(paths.source_final),
+        name=paths.source_final.name,
+        download_name=f"{project_id}_source.txt",
+        size_bytes=len(data),
+        sha256=hashlib.sha256(data).hexdigest(),
+    )
+
+
+def get_project_dashboard_source_output(
+    *,
+    project_id: str,
+    workspace_root: str | Path = "workspaces",
+) -> DashboardSourceOutput:
+    """Resolve the current approved source text for dashboard download."""
+    location = load_workspace_project_id(project_id, workspace_root)
+    hash_cache = FileHashCache()
+    status = inspect_project(location.path, hash_cache=hash_cache)
+    if not status["pipeline"]["final_source_approved"]:
+        raise DashboardOutputError("현재 승인된 최종 원문이 없습니다.")
+    return _approved_source_output(
+        location.path,
+        project_id,
     )
 
 
@@ -343,6 +489,15 @@ def _project_document(
             )
         except DashboardOutputError:
             outputs = ()
+    source_output: DashboardSourceOutput | None = None
+    if pipeline["final_source_approved"]:
+        try:
+            source_output = _approved_source_output(
+                Path(summary.path),
+                summary.project_id,
+            )
+        except DashboardOutputError:
+            source_output = None
     replacement_allowed = bool(
         summary.source_type
         and not pipeline["source_processing_started"]
@@ -371,6 +526,9 @@ def _project_document(
         "source_files": _project_source_files(summary, status),
         "ocr_prompt": _project_ocr_prompt(summary),
         "translation_prompt": _project_translation_prompt(summary),
+        "source_output": (
+            source_output.to_dict() if source_output is not None else None
+        ),
         "outputs": [output.to_dict() for output in outputs],
         "stage": summary.stage,
         "stage_label": _STAGE_LABELS.get(summary.stage, summary.stage),

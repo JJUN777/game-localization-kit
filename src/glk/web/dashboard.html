@@ -619,7 +619,8 @@
     }
 
     .ocr-prompt-button,
-    .translation-prompt-button {
+    .translation-prompt-button,
+    .source-download-button {
       grid-column: 1 / -1;
       padding: 10px 12px;
       border: 1px solid rgb(40 115 90 / 38%);
@@ -632,12 +633,14 @@
     }
 
     .ocr-prompt-button:hover,
-    .translation-prompt-button:hover:not(:disabled) {
+    .translation-prompt-button:hover:not(:disabled),
+    .source-download-button:hover:not(:disabled) {
       border-color: var(--green);
       transform: translateY(-1px);
     }
 
-    .translation-prompt-button:disabled {
+    .translation-prompt-button:disabled,
+    .source-download-button:disabled {
       cursor: not-allowed;
       opacity: .55;
     }
@@ -2293,6 +2296,18 @@
       </button>`;
     }
 
+    function sourceDownloadButton(project) {
+      const output = project.source_output;
+      if (!output) return "";
+      return `<button class="source-download-button" type="button"
+        data-download-source
+        data-project="${escapeHtml(project.project_id)}"
+        data-download-name="${escapeHtml(output.download_name)}"
+        title="저장 위치를 선택해 다운로드">
+        검수 완료 원문 TXT 저장
+      </button>`;
+    }
+
     function translationJobStatus(project) {
       const job = translationJobFor(project.project_id);
       if (
@@ -2946,6 +2961,7 @@
           ${translationReviewAttention(project)}
           ${sourceJobButton(project)}
           ${glossaryJobButton(project)}
+          ${sourceDownloadButton(project)}
           ${translationPromptEditButton(project)}
           ${translationJobButton(project)}
           ${ocrPromptEditButton(project)}
@@ -3132,6 +3148,20 @@
         requestUrl: `/api/output?${query}`,
         downloadName:
           button.dataset.downloadName || "translation.txt",
+        description: "텍스트 파일",
+        mimeType: "text/plain",
+        extensions: [".txt"],
+      });
+    }
+
+    async function downloadSourceOutput(button) {
+      const query = new URLSearchParams({
+        project_id: button.dataset.project,
+      });
+      await saveDownload(button, {
+        requestUrl: `/api/source-output?${query}`,
+        downloadName:
+          button.dataset.downloadName || "approved_source.txt",
         description: "텍스트 파일",
         mimeType: "text/plain",
         extensions: [".txt"],
@@ -3768,6 +3798,13 @@
       render();
     });
     byId("projectGrid").addEventListener("click", (event) => {
+      const sourceDownload = event.target.closest(
+        "[data-download-source]",
+      );
+      if (sourceDownload) {
+        downloadSourceOutput(sourceDownload);
+        return;
+      }
       const archiveButton = event.target.closest(
         "[data-download-output-archive]",
       );

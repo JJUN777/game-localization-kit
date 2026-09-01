@@ -305,6 +305,8 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("초벌 번역 완료 ·", html)
         self.assertIn("translation-review-attention", html)
         self.assertIn("최종 번역 결과", html)
+        self.assertIn("검수 완료 원문 TXT 저장", html)
+        self.assertIn("data-download-source", html)
         self.assertIn("data-download-output", html)
         self.assertIn("data-download-output-archive", html)
         self.assertIn("통합본 저장", html)
@@ -313,6 +315,7 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn('document.querySelectorAll("dialog[open]")', html)
         self.assertIn("toastHost.append(toast)", html)
         self.assertIn("/api/output-archive", html)
+        self.assertIn("/api/source-output", html)
         self.assertIn("window.showSaveFilePicker", html)
         self.assertIn("fileHandle.createWritable()", html)
         self.assertIn('error?.name === "AbortError"', html)
@@ -329,6 +332,14 @@ class DashboardServerTests(unittest.TestCase):
         self.assertLess(
             project_card.index('${reviewButton(project, "translation")}'),
             project_card.index("${sourceRegistrationButton(project)}"),
+        )
+        self.assertLess(
+            project_card.index("${glossaryJobButton(project)}"),
+            project_card.index("${sourceDownloadButton(project)}"),
+        )
+        self.assertLess(
+            project_card.index("${sourceDownloadButton(project)}"),
+            project_card.index('${reviewButton(project, "source")}'),
         )
 
         status, unauthorized = self._request(
@@ -855,6 +866,45 @@ class DashboardServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 400)
         self.assertEqual(escaped["code"], "INVALID_REQUEST")
+
+    def test_downloads_only_the_current_approved_source(self) -> None:
+        project_path = create_approved_project(
+            self.workspace_root,
+            sample_blocks(),
+        )
+        path = "/api/source-output?project_id=glossary_project"
+
+        status, unauthorized = self._request(path, authorized=False)
+        self.assertEqual(status, 403)
+        self.assertFalse(unauthorized["ok"])
+
+        request = Request(
+            f"{self.server.origin}{path}",
+            headers={"X-GLK-Token": self.server.auth_token},
+        )
+        with urlopen(request, timeout=3) as response:
+            data = response.read()
+            content_disposition = response.headers["Content-Disposition"]
+            self.assertEqual(response.status, 200)
+            self.assertEqual(
+                response.headers.get_content_type(),
+                "text/plain",
+            )
+        text = data.decode("utf-8")
+        self.assertEqual(text.count("[PAGE 1]"), 1)
+        self.assertNotIn("[BLOCK ", text)
+        self.assertNotIn("[[GLK_", text)
+        self.assertIn("Furwing", text)
+        self.assertIn("Each Hunter gains 2 Stamina.", text)
+        self.assertIn("glossary_project_source.txt", content_disposition)
+
+        (project_path / "02_source/final.txt").write_text(
+            "tampered",
+            encoding="utf-8",
+        )
+        status, changed = self._request(path)
+        self.assertEqual(status, 400)
+        self.assertEqual(changed["code"], "SOURCE_OUTPUT_DOWNLOAD_FAILED")
 
     def test_downloads_only_a_current_approved_output(self) -> None:
         blocks = translation_sample_blocks()

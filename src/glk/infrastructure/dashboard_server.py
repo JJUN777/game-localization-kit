@@ -41,6 +41,7 @@ from glk.application.dashboard_service import (
     get_dashboard_document,
     get_project_dashboard_image_output_archive,
     get_project_dashboard_output,
+    get_project_dashboard_source_output,
 )
 from glk.application.project_service import (
     ProjectNotFoundError,
@@ -231,6 +232,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 "dashboard",
                 "jobs",
                 "ai_settings",
+                "source_output",
                 "output",
                 "output_archive",
             }
@@ -630,6 +632,46 @@ class _DashboardHandler(LocalHttpRequestHandler):
                     "settings": settings.to_dict(),
                     "model_catalog": model_catalogs[settings.provider],
                     "model_catalogs": model_catalogs,
+                },
+            )
+            return
+        if route.name == "source_output":
+            try:
+                query = parse_qs(
+                    route.query,
+                    keep_blank_values=True,
+                    strict_parsing=True,
+                )
+                if set(query) != {"project_id"} or len(query["project_id"]) != 1:
+                    raise DashboardOutputError(
+                        "프로젝트를 정확히 하나 선택하세요."
+                    )
+                source_output = get_project_dashboard_source_output(
+                    project_id=query["project_id"][0],
+                    workspace_root=self.server.workspace_root,
+                )
+                data = source_output.data
+                if hashlib.sha256(data).hexdigest() != source_output.sha256:
+                    raise DashboardOutputError(
+                        "다운로드할 최종 원문을 검증할 수 없습니다."
+                    )
+            except (DashboardOutputError, OSError, ValueError) as error:
+                self._send_error_json(
+                    HTTPStatus.BAD_REQUEST,
+                    error,
+                    code="SOURCE_OUTPUT_DOWNLOAD_FAILED",
+                )
+                return
+            encoded_name = quote(source_output.download_name, safe="")
+            self._send_bytes(
+                HTTPStatus.OK,
+                data,
+                "text/plain; charset=utf-8",
+                extra_headers={
+                    "Content-Disposition": (
+                        "attachment; filename=\"source.txt\"; "
+                        f"filename*=UTF-8''{encoded_name}"
+                    ),
                 },
             )
             return

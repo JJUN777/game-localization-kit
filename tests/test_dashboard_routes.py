@@ -57,6 +57,7 @@ class DashboardRouteTests(unittest.TestCase):
             ("GET", "/api/dashboard", "dashboard", "session"),
             ("GET", "/api/jobs", "jobs", "session"),
             ("GET", "/api/settings/ai", "ai_settings", "session"),
+            ("GET", "/api/source-output", "source_output", "session"),
             ("GET", "/api/output", "output", "session"),
             (
                 "GET",
