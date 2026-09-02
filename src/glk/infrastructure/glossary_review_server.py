@@ -75,6 +75,8 @@ class _GlossaryReviewHandler(LocalHttpRequestHandler):
                 code="LOCAL_ACCESS_REQUIRED",
             )
             return
+        if self._send_web_asset(path):
+            return
         if path == "/":
             template = (
                 resources.files("glk.web")

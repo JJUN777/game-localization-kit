@@ -15,7 +15,7 @@ from send2trash import send2trash
 import tempfile
 import threading
 from typing import Any
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlsplit
 import webbrowser
 
 from glk.application._io import write_bytes_atomic
@@ -561,6 +561,8 @@ class _DashboardHandler(LocalHttpRequestHandler):
         )
 
     def do_GET(self) -> None:
+        if self._send_web_asset(urlsplit(self.path).path):
+            return
         route = self._route_request("GET")
         if route is None:
             return

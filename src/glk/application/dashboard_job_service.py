@@ -404,6 +404,32 @@ def _acquisition_failure_message(
     return f"일부 원본 처리에 실패했습니다. {detail}"
 
 
+def _acquisition_failure_details(
+    acquisition: dict[str, Any],
+    *,
+    source_type: str,
+    model: str,
+) -> list[dict[str, str]]:
+    raw_failures = acquisition.get("failures")
+    if not isinstance(raw_failures, (list, tuple)):
+        return []
+    details: list[dict[str, str]] = []
+    for failure in raw_failures:
+        if not isinstance(failure, dict):
+            continue
+        identifier = failure.get("page" if source_type == "pdf" else "file")
+        code = str(failure.get("code") or "SOURCE_PROCESSING_FAILED")
+        item = (
+            f"페이지 {identifier}"
+            if source_type == "pdf"
+            else str(identifier or "이미지")
+        )
+        details.append(
+            {"item": item, "message": _safe_provider_error([code], model)}
+        )
+    return details
+
+
 def _safe_translation_error(error: BaseException, model: str) -> str:
     chain: list[BaseException] = []
     seen: set[int] = set()
@@ -453,6 +479,35 @@ def _safe_glossary_error(error: BaseException) -> str:
         "용어 후보 생성에 실패했습니다. "
         "승인 원문 상태를 확인한 뒤 다시 시도하세요."
     )
+
+
+def _exception_usage(error: BaseException) -> dict[str, Any] | None:
+    """Find provider usage attached anywhere in a wrapped error chain."""
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        usage = getattr(current, "ai_usage", None)
+        if isinstance(usage, dict):
+            return usage
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _failure_details(
+    error: BaseException,
+    safe_message: str,
+) -> list[dict[str, str]]:
+    """Expose a useful failed item without leaking raw provider responses."""
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        match = re.search(r"Translation failed for ([^.;]+)", str(current))
+        if match:
+            return [{"item": match.group(1), "message": safe_message}]
+        current = current.__cause__ or current.__context__
+    return [{"item": "작업", "message": safe_message}]
 
 
 def _registered_source_type(project_id: str, workspace_root: str | Path) -> str:
@@ -558,6 +613,12 @@ def run_registered_source_pipeline(
             ),
             "source_type": source_type,
             "acquisition": acquisition_data,
+            "usage": acquisition_data.get("usage"),
+            "failure_details": _acquisition_failure_details(
+                acquisition_data,
+                source_type=source_type,
+                model=model,
+            ),
             "segmentation": None,
             "qa": None,
         }
@@ -578,6 +639,8 @@ def run_registered_source_pipeline(
         "status": "succeeded",
         "source_type": source_type,
         "acquisition": acquisition_data,
+        "usage": acquisition_data.get("usage"),
+        "failure_details": [],
         "segmentation": segmentation.to_dict(),
         "qa": qa.to_dict(),
     }
@@ -687,6 +750,8 @@ def run_translation_pipeline(
         "ok": True,
         "status": "succeeded",
         "translation": result.to_dict(),
+        "usage": getattr(result, "usage", None),
+        "failure_details": [],
         "qa": qa_result.to_dict() if qa_result is not None else None,
         "revision_path": (
             WorkspacePaths(location.path).relative(revision_path)
@@ -1250,9 +1315,12 @@ class DashboardJobManager:
             error = result_error(status, run_result)
             result: dict[str, Any] | None = run_result
         except Exception as caught:
-            result = None
             status = "failed"
             error = exception_error(caught, job)
+            result = {
+                "failure_details": _failure_details(caught, error),
+                "usage": _exception_usage(caught),
+            }
 
         with self._lock:
             current_job = store.matching(project_id, job_id)

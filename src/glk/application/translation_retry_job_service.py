@@ -151,6 +151,22 @@ def _safe_retry_error(error: BaseException) -> str:
     )
 
 
+def _exception_usage(error: BaseException) -> dict[str, Any] | None:
+    for item in _exception_chain(error):
+        usage = getattr(item, "ai_usage", None)
+        if isinstance(usage, dict):
+            return usage
+    return None
+
+
+def _failed_block(error: BaseException) -> str | None:
+    for item in _exception_chain(error):
+        match = re.search(r"(?:failed for|validation for) ([^;]+)", str(item))
+        if match:
+            return match.group(1)
+    return None
+
+
 class TranslationRetryJobManager:
     """Own the latest selective-retranslation job for one review server."""
 
@@ -264,9 +280,18 @@ class TranslationRetryJobManager:
                     settings_root=self.settings_root,
                 )
         except Exception as caught:
-            result_payload = None
             status = "failed"
             error = _safe_retry_error(caught)
+            failed_block = _failed_block(caught)
+            result_payload = {
+                "usage": _exception_usage(caught),
+                "failure_details": [
+                    {
+                        "item": failed_block or "재번역 블록",
+                        "message": error,
+                    }
+                ],
+            }
         else:
             result_payload = result.to_dict()
             status = "succeeded"

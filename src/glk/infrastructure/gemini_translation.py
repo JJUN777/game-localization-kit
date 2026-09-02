@@ -51,11 +51,13 @@ class GeminiTranslationProvider(GeminiProviderBase):
         )
 
         def request() -> dict[str, Any]:
+            self.usage.begin_request()
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=prompt,
                 config=config,
             )
+            self.usage.record_gemini(response)
             if not response.text:
                 raise ValueError("Gemini returned an empty translation response.")
             value = json.loads(response.text)

@@ -44,6 +44,7 @@ from glk.infrastructure.ai_provider import (
     resolve_ai_provider_name,
     translation_provider_prompt_version,
 )
+from glk.infrastructure.ai_usage import provider_usage
 
 
 TRANSLATION_RUN_VERSION = "translation-run-v1"
@@ -83,6 +84,7 @@ class TranslationRunResult:
     resumed: bool = False
     review_created: bool = False
     dry_run: bool = False
+    usage: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -966,6 +968,7 @@ def _write_partial_translation_state(
             "failure_reason": failure_reason,
             "validation_issue_count": validation_issue_count,
             "validation_issue_blocks": validation_issue_blocks,
+            "usage": provider_usage(provider),
             "updated_at": _utc_now(),
         },
     )
@@ -1073,10 +1076,14 @@ def _translate_pending_chunks(
                     execution.validation_issue_block_ids
                 ),
             )
-            raise TranslationError(
+            wrapped = TranslationError(
                 f"Translation failed for {chunk.id}. Completed chunks were preserved; "
                 f"fix the issue and use --resume. Cause: {error}"
-            ) from error
+            )
+            usage = provider_usage(provider)
+            if usage is not None:
+                wrapped.ai_usage = usage  # type: ignore[attr-defined]
+            raise wrapped from error
 
         chunk_segments, issue_messages, issue_block_ids = (
             _build_translation_segments(
@@ -1205,6 +1212,7 @@ def _finalize_translation_run(
             "failure_reason": None,
             "validation_issue_count": len(validation_issue_messages),
             "validation_issue_blocks": len(validation_issue_block_ids),
+            "usage": provider_usage(provider),
             "updated_at": _utc_now(),
         },
     )
@@ -1228,6 +1236,7 @@ def _finalize_translation_run(
         validation_issue_blocks=len(validation_issue_block_ids),
         resumed=resumed,
         review_created=review_created,
+        usage=provider_usage(provider),
     )
 
 

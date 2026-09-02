@@ -18,6 +18,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from PIL import Image
 
 from glk.config import resolve_settings_root
+from glk.infrastructure.ai_usage import AiUsageAccumulator
 
 
 DEFAULT_OPENAI_MODEL = "gpt-5.6-terra"
@@ -264,6 +265,7 @@ class OpenAIProviderBase:
         self.model_name = model_name
         self.max_retries = max_retries
         self.base_delay = base_delay
+        self.usage = AiUsageAccumulator(self.provider_name, model_name)
         self.client = OpenAI(
             api_key=api_key,
             timeout=request_timeout_seconds,
@@ -289,8 +291,12 @@ class OpenAIProviderBase:
         )
 
     def run_request(self, operation: Callable[[], ResultT]) -> ResultT:
-        return run_with_openai_retry(
-            operation,
-            max_attempts=self.max_retries,
-            base_delay=self.base_delay,
-        )
+        try:
+            return run_with_openai_retry(
+                operation,
+                max_attempts=self.max_retries,
+                base_delay=self.base_delay,
+            )
+        except Exception as error:
+            error.ai_usage = self.usage.to_dict()  # type: ignore[attr-defined]
+            raise

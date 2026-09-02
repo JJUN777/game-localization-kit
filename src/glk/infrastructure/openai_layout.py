@@ -28,6 +28,7 @@ class OpenAILayoutProvider(OpenAIProviderBase):
         prompt = build_layout_prompt(page_number, fragments)
 
         def request() -> dict[str, Any]:
+            self.usage.begin_request()
             response = self.client.responses.create(
                 model=self.model_name,
                 input=[
@@ -52,6 +53,7 @@ class OpenAILayoutProvider(OpenAIProviderBase):
                     }
                 },
             )
+            self.usage.record_openai(response)
             if not response.output_text:
                 raise OpenAIEmptyResponseError(
                     "OpenAI returned an empty layout response."

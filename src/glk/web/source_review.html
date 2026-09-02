@@ -4,41 +4,28 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GLK 원문 검수</title>
+  <link rel="stylesheet" href="/assets/tokens.css">
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f6f7f8;
-      --panel: #ffffff;
-      --panel2: #f3f4f6;
-      --line: #e1e4e8;
-      --line-strong: #c7cdd3;
-      --text: #24292f;
-      --muted: #66707a;
-      --accent: #32383f;
-      --accent-soft: #f3f4f6;
-      --success: #557565;
-      --success-soft: #eef3f0;
-      --warn: #a9402e;
-      --danger: #a9402e;
-      --danger-soft: #fbefeb;
-      --focus: #0969da;
+      --accent: var(--ink-soft);
+      --accent-soft: var(--soft);
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
     button, textarea, input { font: inherit; }
     button {
-      border: 1px solid var(--line); border-radius: 6px; background: #fff;
+      border: 1px solid var(--line); border-radius: 6px; background: var(--surface);
       color: var(--text); padding: 8px 11px; cursor: pointer;
     }
     button:hover { border-color: var(--line-strong); background: var(--panel2); }
     button.primary {
-      color: #fff; border-color: var(--text); background: var(--text); font-weight: 700;
+      color: var(--on-solid); border-color: var(--text); background: var(--text); font-weight: 700;
     }
     button.primary:hover { border-color: var(--accent); background: var(--accent); }
     button.danger { color: var(--danger); }
     header {
       height: 62px; display: flex; align-items: center; gap: 12px; padding: 0 16px;
-      border-bottom: 1px solid var(--line); background: #fff; position: sticky; top: 0; z-index: 20;
+      border-bottom: 1px solid var(--line); background: var(--surface); position: sticky; top: 0; z-index: 20;
     }
     header h1 { font-size: 18px; margin: 0; }
     .grow { flex: 1; }
@@ -54,7 +41,7 @@
       flex: none; margin-bottom: 12px; padding: 11px; border: 1px solid rgb(216 92 65 / 28%);
       border-radius: 8px; background: var(--danger-soft);
     }
-    .unresolved-panel.complete { border-color: #dbe5df; background: var(--success-soft); }
+    .unresolved-panel.complete { border-color: color-mix(in srgb, var(--success) 35%, var(--line)); background: var(--success-soft); }
     .unresolved-head {
       display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
       margin-bottom: 8px;
@@ -103,7 +90,7 @@
     .summary { color: var(--muted); margin-bottom: 10px; }
     .card {
       border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 10px;
-      background: #fff;
+      background: var(--surface);
     }
     .card.selected { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
     .card.excluded { opacity: .6; }
@@ -120,21 +107,21 @@
     }
     textarea {
       width: 100%; min-height: 100px; resize: vertical; border: 1px solid var(--line);
-      background: #fff; color: var(--text); border-radius: 6px; padding: 9px;
+      background: var(--surface); color: var(--text); border-radius: 6px; padding: 9px;
     }
     textarea:focus { outline: none; border-color: var(--line-strong); }
     .mini { padding: 4px 7px; font-size: 12px; }
     .notice {
       position: fixed; right: 18px; bottom: 18px; max-width: 460px; padding: 12px 15px;
-      border-radius: 8px; color: #fff; background: var(--text); border: 1px solid var(--line); z-index: 30;
+      border-radius: 8px; color: var(--on-solid); background: var(--text); border: 1px solid var(--line); z-index: 30;
     }
-    .notice.error { border-color: var(--danger); color: #fff; background: var(--danger); }
+    .notice.error { border-color: var(--danger); color: var(--on-solid); background: var(--danger); }
     dialog {
       width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line);
-      border-radius: 8px; background: #fff; color: var(--text);
-      padding: 24px; box-shadow: 0 24px 80px rgba(0,0,0,.55);
+      border-radius: 8px; background: var(--surface); color: var(--text);
+      padding: 24px; box-shadow: var(--shadow-dialog);
     }
-    dialog::backdrop { background: rgb(31 35 40 / 48%); }
+    dialog::backdrop { background: var(--overlay); }
     dialog h2 { margin: 0 0 10px; font-size: 21px; }
     dialog p { margin: 0; color: var(--muted); }
     .dialog-actions {
@@ -419,7 +406,13 @@
         layoutWarnings: documentState.blocks.reduce((total, b) => total + b.layout_warnings, 0),
         issues: documentState.blocks.reduce((total, b) => total + b.issues.length, 0)
       };
-      $("project").textContent = `${documentState.project_name} · ${documentState.review_status}`;
+      const reviewStatusLabel = {
+        prepared: "검수 준비됨",
+        current: "최신 상태",
+        stale: "업데이트 필요",
+        approved: "승인 완료"
+      }[documentState.review_status] || "상태 확인 필요";
+      $("project").textContent = `${documentState.project_name} · ${reviewStatusLabel}`;
       $("summary").textContent = `전체 ${s.blocks} · 제외 ${s.excluded} · 수동 ${s.manual} · 수정 ${s.changed} · AI 정렬 누락 ${s.layoutWarnings} · 기타 추출 경고 ${s.warnings - s.layoutWarnings} · QA ${s.issues}`;
       const filter = $("layoutWarningFilter");
       filter.classList.toggle("hidden", !s.layoutWarnings);

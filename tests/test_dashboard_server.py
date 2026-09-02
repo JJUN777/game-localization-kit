@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 import errno
 from io import BytesIO
+from http import HTTPStatus
 import json
 import os
 import tempfile
@@ -267,7 +268,16 @@ class DashboardServerTests(unittest.TestCase):
         status, html = self._request("/", authorized=False)
         self.assertEqual(status, 200)
         self.assertIn("Game Localization Kit Dashboard", html)
-        self.assertIn("MAX_SOURCE_UPLOAD_BYTES = 500 * 1024 * 1024", html)
+        self.assertIn('/assets/dashboard.js', html)
+        status, script = self._request("/assets/dashboard.js")
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertIsInstance(script, str)
+        self.assertIn("MAX_SOURCE_UPLOAD_BYTES = 500 * 1024 * 1024", script)
+        status, tokens = self._request("/assets/tokens.css")
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertIn("prefers-color-scheme: dark", tokens)
+        self.assertIn("--on-solid: #0f1216;", tokens)
+        html = f"{html}\n{script}"
         self.assertIn("선택 파일 한도는 500 MiB", html)
         self.assertIn("data-create-project", html)
         self.assertIn("data-delete-project", html)

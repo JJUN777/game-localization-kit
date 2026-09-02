@@ -35,7 +35,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"glk.web" = ["*.html"]
+"glk.web" = ["*.html", "*.css", "*.js"]
 "glk.templates" = ["*.txt"]
 "glk.data" = ["*.json"]
 

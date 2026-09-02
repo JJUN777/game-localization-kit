@@ -75,6 +75,8 @@ class LocalHttpFoundationTests(unittest.TestCase):
         for headers in (standard, source_review):
             self.assertEqual(headers["Cache-Control"], "no-store")
             self.assertEqual(headers["X-Frame-Options"], "DENY")
+            self.assertIn("script-src 'self'", headers["Content-Security-Policy"])
+            self.assertIn("style-src 'self'", headers["Content-Security-Policy"])
 
     def test_all_handlers_secure_unsupported_method_responses(self) -> None:
         handler_types = (

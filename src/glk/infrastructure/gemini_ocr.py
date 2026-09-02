@@ -31,11 +31,13 @@ class GeminiImageOcrProvider(GeminiProviderBase):
 
         def request() -> dict[str, Any]:
             contents: list[types.PartUnionDict] = [prompt, image]
+            self.usage.begin_request()
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=contents,
                 config=config,
             )
+            self.usage.record_gemini(response)
             if not response.text:
                 raise GeminiEmptyResponseError(
                     "Gemini returned an empty OCR response."
