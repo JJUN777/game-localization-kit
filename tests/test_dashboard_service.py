@@ -12,6 +12,7 @@ from glk.application.dashboard_service import (
     DashboardOutputError,
     get_dashboard_document,
     get_project_dashboard_output,
+    get_project_dashboard_source_output,
 )
 from glk.application.project_service import create_project
 from glk.application.source_registration_service import (
@@ -23,6 +24,10 @@ from glk.application.translation_review_service import (
     run_project_translation_qa,
 )
 from glk.application.translation_service import translate_project
+from tests.test_glossary_service import (
+    create_approved_project,
+    sample_blocks as glossary_sample_blocks,
+)
 from tests.test_translation_service import (
     SequenceProvider,
     create_translation_project,
@@ -231,6 +236,56 @@ class DashboardServiceTests(unittest.TestCase):
                 get_project_dashboard_output(
                     project_id="translation_project",
                     output_path="05_output/rulebook_kor.txt",
+                    workspace_root=workspace_root,
+                )
+
+    def test_lists_and_resolves_only_the_current_approved_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace_root = Path(temporary) / "workspaces"
+            blocks = glossary_sample_blocks()
+            blocks[-1] = replace(blocks[-1], page=2)
+            project_path = create_approved_project(
+                workspace_root,
+                blocks,
+            )
+
+            project = get_dashboard_document(workspace_root)["projects"][0]
+
+            source_output = project["source_output"]
+            self.assertIsInstance(source_output, dict)
+            self.assertEqual(source_output["path"], "02_source/final.txt")
+            self.assertEqual(source_output["name"], "final.txt")
+            self.assertEqual(
+                source_output["download_name"],
+                "glossary_project_source.txt",
+            )
+            self.assertGreater(source_output["size_bytes"], 0)
+            self.assertEqual(len(source_output["sha256"]), 64)
+            output = get_project_dashboard_source_output(
+                project_id="glossary_project",
+                workspace_root=workspace_root,
+            )
+            self.assertEqual(output.download_name, "glossary_project_source.txt")
+            text = output.data.decode("utf-8")
+            self.assertEqual(text.count("[PAGE 1]"), 1)
+            self.assertEqual(text.count("[PAGE 2]"), 1)
+            self.assertNotIn("[BLOCK ", text)
+            self.assertNotIn("[[GLK_", text)
+            self.assertIn("Furwing", text)
+            self.assertIn("Resolve the Primal Attack", text)
+
+            (project_path / ".glk/segments/approved_source.jsonl").write_text(
+                "tampered",
+                encoding="utf-8",
+            )
+            changed = get_dashboard_document(workspace_root)["projects"][0]
+            self.assertIsNone(changed["source_output"])
+            with self.assertRaisesRegex(
+                DashboardOutputError,
+                "현재 승인된",
+            ):
+                get_project_dashboard_source_output(
+                    project_id="glossary_project",
                     workspace_root=workspace_root,
                 )
 

@@ -328,8 +328,9 @@ version을 state와 cache key에 포함해 제공자를 바꾼 결과가 섞이�
 - 번역 prompt 저장은 현재 SHA-256을 요구하고 background job 중 변경 차단
 - 전체 재번역은 명시적 `force`와 revisions snapshot 완료 후에만 실행
 - 용어 후보 생성은 최종 승인된 원문만 허용하고 stale TSV는 자동 덮어쓰기 차단
-- 결과 다운로드는 workspace 바로 아래 프로젝트의 승인된 `05_output` 경로만
-  허용하고 승인 SHA-256과 전송 직전 파일 hash를 다시 확인
+- 원문 다운로드는 검수 승인 상태와 `approved_source.jsonl` SHA-256이 현재일 때
+  승인 block 본문을 페이지별 TXT로 렌더링하며 block marker를 제외하고, 결과
+  다운로드는 승인된 `05_output` 경로만 허용해 전송 직전 파일 hash를 다시 확인
 - 이미지별 결과 ZIP은 승인된 개별 TXT를 전송 시 메모리에서 묶고
   `combined_kor.txt`를 제외하며 원본의 상대 폴더 구조를 유지
 - 일부 원본 실패와 전체 원본 실패를 구분하고 provider 오류는 모델·인증·권한·
