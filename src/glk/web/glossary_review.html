@@ -3,36 +3,39 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GLK Glossary Review</title>
+  <title>GLK 용어 검수</title>
   <style>
     :root {
-      --ink: #182033;
-      --muted: #667085;
-      --paper: #f7f6f2;
+      --ink: #24292f;
+      --ink-soft: #32383f;
+      --muted: #66707a;
+      --paper: #f6f7f8;
       --surface: #fff;
-      --line: #dedbd3;
-      --navy: #23395b;
-      --accent: #e8623c;
-      --accent-dark: #b93e20;
-      --success: #157347;
-      --success-bg: #e9f7ef;
-      --review: #956300;
-      --review-bg: #fff7dc;
-      --keep: #3859a6;
-      --keep-bg: #edf2ff;
-      --rejected: #69707d;
-      --rejected-bg: #f0f1f3;
-      --error: #bd2c27;
-      --error-bg: #fff0ef;
-      --shadow: 0 12px 32px rgba(31, 41, 55, .08);
+      --soft: #f3f4f6;
+      --line: #e1e4e8;
+      --line-strong: #c7cdd3;
+      --navy: #32383f;
+      --accent: #d85c41;
+      --accent-dark: #a9402e;
+      --success: #557565;
+      --success-bg: #eef3f0;
+      --review: #a9402e;
+      --review-bg: #fbefeb;
+      --keep: #66707a;
+      --keep-bg: #f3f4f6;
+      --rejected: #66707a;
+      --rejected-bg: #f3f4f6;
+      --error: #a9402e;
+      --error-bg: #fbefeb;
+      --warning-bg: #fbefeb;
+      --focus: #0969da;
+      --shadow: 0 1px 2px rgb(36 41 47 / 5%);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       color: var(--ink);
-      background:
-        radial-gradient(circle at 3% -25%, #f4d8cb 0, transparent 34rem),
-        var(--paper);
+      background: var(--paper);
       font: 14px/1.5 Inter, Pretendard, -apple-system, BlinkMacSystemFont,
         "Segoe UI", sans-serif;
     }
@@ -47,15 +50,16 @@
       gap: 18px;
       min-height: 72px;
       padding: 11px 22px;
-      color: white;
-      background: rgba(25, 39, 63, .97);
-      box-shadow: 0 4px 18px rgba(15, 23, 42, .18);
+      color: var(--ink);
+      border-bottom: 1px solid var(--line);
+      background: rgb(255 255 255 / 96%);
+      box-shadow: none;
     }
     .brand { min-width: 230px; }
     .eyebrow {
-      color: #f5a68f;
+      color: var(--muted);
       font-size: 10px;
-      font-weight: 850;
+      font-weight: 700;
       letter-spacing: .17em;
       text-transform: uppercase;
     }
@@ -65,28 +69,31 @@
       min-width: 69px;
       padding: 6px 9px;
       border: 1px solid rgba(255,255,255,.13);
-      border-radius: 9px;
-      background: rgba(255,255,255,.06);
+      border-radius: 0;
+      border-width: 0 1px 0 0;
+      border-color: var(--line);
+      background: transparent;
     }
     .metric strong { display: block; font-size: 15px; }
-    .metric span { color: #bec9da; font-size: 10px; white-space: nowrap; }
+    .metric span { color: var(--muted); font-size: 10px; white-space: nowrap; }
     .actions { display: flex; gap: 7px; }
     .button {
       border: 1px solid transparent;
       border-radius: 8px;
       padding: 8px 12px;
-      font-weight: 750;
+      font-weight: 700;
       white-space: nowrap;
     }
     .button:disabled { cursor: not-allowed; opacity: .45; }
     .button-secondary {
-      color: white;
-      border-color: rgba(255,255,255,.2);
-      background: rgba(255,255,255,.08);
+      color: var(--ink);
+      border-color: var(--line);
+      background: #fff;
     }
-    .button-primary { color: white; background: var(--accent); }
-    .button-primary:hover { background: var(--accent-dark); }
-    .button-success { color: white; background: var(--success); }
+    .button-primary,
+    .button-success { color: white; border-color: var(--ink); background: var(--ink); }
+    .button-primary:hover,
+    .button-success:hover { background: var(--ink-soft); }
     main { padding: 20px 22px 72px; }
     .intro {
       display: flex;
@@ -99,11 +106,11 @@
     .intro p { margin: 0; color: var(--muted); }
     .file-state {
       padding: 6px 10px;
-      color: var(--navy);
+      color: var(--ink-soft);
       border-radius: 999px;
-      background: #e8edf5;
+      background: var(--soft);
       font-size: 12px;
-      font-weight: 750;
+      font-weight: 600;
       white-space: nowrap;
     }
     .toolbar {
@@ -117,10 +124,10 @@
       padding: 10px;
       margin-bottom: 12px;
       border: 1px solid var(--line);
-      border-radius: 11px;
-      background: rgba(255,255,255,.94);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(12px);
+      border-radius: 8px;
+      background: rgb(255 255 255 / 96%);
+      box-shadow: none;
+      backdrop-filter: none;
     }
     .toolbar-row {
       display: flex;
@@ -139,7 +146,7 @@
       outline: none;
       background: white;
     }
-    .control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #e8623c1c; }
+    .control:focus { border-color: var(--line-strong); box-shadow: none; }
     .search {
       flex: 1 1 220px;
       width: auto;
@@ -167,9 +174,9 @@
     .button-table:hover { border-color: #aab4c5; background: #f8fafc; }
     .table-shell {
       border: 1px solid var(--line);
-      border-radius: 12px;
+      border-radius: 8px;
       background: var(--surface);
-      box-shadow: var(--shadow);
+      box-shadow: none;
       overflow: auto;
     }
     table {
@@ -183,23 +190,23 @@
       top: 0;
       z-index: 10;
       padding: 10px 8px;
-      color: #4c5668;
+      color: var(--muted);
       border-bottom: 1px solid var(--line);
-      background: #f2f0eb;
+      background: var(--soft);
       text-align: left;
       font-size: 11px;
-      font-weight: 850;
+      font-weight: 700;
       letter-spacing: .04em;
       white-space: nowrap;
     }
     td {
       padding: 8px;
-      border-bottom: 1px solid #ece9e2;
+      border-bottom: 1px solid var(--line);
       vertical-align: top;
       background: white;
     }
     tbody tr:last-child td { border-bottom: 0; }
-    tbody tr:hover td { background: #fffefa; }
+    tbody tr:hover td { background: #fafbfc; }
     tbody tr.status-review td:first-child { box-shadow: inset 4px 0 var(--review); }
     tbody tr.status-approved td:first-child { box-shadow: inset 4px 0 var(--success); }
     tbody tr.status-keep td:first-child { box-shadow: inset 4px 0 var(--keep); }
@@ -209,14 +216,14 @@
       width: 100%;
       padding: 7px 8px;
       color: var(--ink);
-      border: 1px solid #d8d4cb;
-      border-radius: 7px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
       outline: none;
-      background: #fffefa;
+      background: #fff;
     }
     .cell-input:focus, .cell-select:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 2px #e8623c1c;
+      border-color: var(--line-strong);
+      box-shadow: none;
     }
     .cell-input:disabled {
       color: #7b818d;
@@ -225,16 +232,16 @@
     }
     .source {
       min-width: 180px;
-      font-weight: 760;
+      font-weight: 700;
       overflow-wrap: anywhere;
     }
     .source .manual-label {
       display: inline-block;
       margin-top: 4px;
       padding: 2px 6px;
-      color: #765000;
+      color: var(--ink-soft);
       border-radius: 999px;
-      background: var(--review-bg);
+      background: var(--soft);
       font-size: 10px;
     }
     .translation { min-width: 190px; }
@@ -247,13 +254,13 @@
       white-space: nowrap;
     }
     details { margin-top: 5px; color: var(--muted); font-size: 12px; }
-    summary { cursor: pointer; color: var(--navy); font-weight: 700; }
+    summary { cursor: pointer; color: var(--ink-soft); font-weight: 700; }
     .example {
       max-height: 130px;
       margin: 6px 0 0;
       padding: 7px;
-      border-radius: 7px;
-      background: #f7f6f2;
+      border-radius: 6px;
+      background: var(--soft);
       white-space: pre-wrap;
       overflow: auto;
     }
@@ -261,7 +268,7 @@
       padding: 5px 7px;
       color: var(--error);
       border: 1px solid #efc3c0;
-      border-radius: 7px;
+      border-radius: 6px;
       background: white;
       font-size: 11px;
     }
@@ -276,10 +283,10 @@
       gap: 10px;
       margin: 0 0 12px;
       padding: 10px 12px;
-      color: var(--ink);
-      border: 1px solid #ead9a5;
-      border-radius: 10px;
-      background: var(--warning-bg);
+      color: var(--accent-dark);
+      border: 1px solid rgb(216 92 65 / 28%);
+      border-radius: 8px;
+      background: var(--error-bg);
       font-size: 13px;
     }
     .option-line input { flex: 0 0 auto; }
@@ -290,17 +297,17 @@
       padding: 24px;
       color: var(--ink);
       border: 1px solid var(--line);
-      border-radius: 14px;
+      border-radius: 8px;
       background: var(--surface);
       box-shadow: 0 24px 80px rgba(31, 41, 55, .24);
     }
-    dialog::backdrop { background: rgba(24, 32, 51, .62); }
+    dialog::backdrop { background: rgb(31 35 40 / 48%); }
     dialog h2 { margin: 0 0 10px; font-size: 21px; }
     dialog p { margin: 0; color: var(--muted); }
     dialog .button-secondary {
       color: var(--ink);
       border-color: var(--line);
-      background: #f8f7f3;
+      background: #fff;
     }
     .dialog-actions {
       display: flex;
@@ -318,8 +325,8 @@
       max-width: 480px;
       padding: 12px 15px;
       color: white;
-      border-radius: 10px;
-      background: var(--navy);
+      border-radius: 8px;
+      background: var(--ink);
       box-shadow: var(--shadow);
       opacity: 0;
       transform: translateY(12px);
@@ -329,6 +336,19 @@
     }
     .toast.show { opacity: 1; transform: translateY(0); }
     .toast.error { background: var(--error); }
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    summary:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+    }
+    .control:focus-visible,
+    .cell-input:focus-visible,
+    .cell-select:focus-visible {
+      border-color: var(--focus);
+    }
     @media (max-width: 960px) {
       .header { flex-wrap: wrap; }
       .brand { min-width: 0; flex: 1; }
@@ -344,7 +364,7 @@
   <header class="header">
     <div class="brand">
       <div class="eyebrow">Game Localization Kit</div>
-      <h1 id="project-name">Glossary Review</h1>
+      <h1 id="project-name">용어 검수</h1>
     </div>
     <div class="metrics" id="metrics"></div>
     <div class="actions">
@@ -529,6 +549,15 @@
       return node;
     }
 
+    function termbaseStatusLabel(status) {
+      return {
+        current: "최신 상태",
+        not_built: "미생성",
+        stale: "업데이트 필요",
+        not_ready: "준비 전",
+      }[status] || "상태 확인 필요";
+    }
+
     function summary() {
       const result = {
         rows: state.document.rows.length,
@@ -555,7 +584,8 @@
         metric(value.rejected, "제외")
       );
       $("#file-state").textContent =
-        `${state.document.termbase_status}${state.dirty ? " · 저장 안 됨" : ""}`;
+        `${termbaseStatusLabel(state.document.termbase_status)}` +
+        (state.dirty ? " · 저장 안 됨" : "");
       $("#selection-count").textContent = `${state.selected.size}개 선택`;
       $("#save-button").disabled = state.busy || !state.dirty;
       $("#import-button").disabled = state.busy;

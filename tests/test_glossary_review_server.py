@@ -104,6 +104,10 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertIn("실패 항목: ${payload.detail}", html)
         self.assertIn("원문에 없는 수동 용어라면 화면 상단의", html)
         self.assertIn("승인 원문에 없는 수동 용어 허용", html)
+        self.assertIn('current: "최신 상태"', html)
+        self.assertIn('not_built: "미생성"', html)
+        self.assertIn('stale: "업데이트 필요"', html)
+        self.assertIn('not_ready: "준비 전"', html)
         self.assertLess(
             html.index('id="allow-missing"'),
             html.index('class="toolbar-row search-row"'),

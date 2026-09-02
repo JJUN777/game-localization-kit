@@ -6,31 +6,39 @@
   <title>GLK 원문 검수</title>
   <style>
     :root {
-      color-scheme: dark;
-      --bg: #111317;
-      --panel: #1a1e25;
-      --panel2: #222832;
-      --line: #353d49;
-      --text: #edf2f7;
-      --muted: #9ba8b8;
-      --accent: #63d2b4;
-      --warn: #f7c873;
-      --danger: #ff7d8b;
-      --blue: #69a7ff;
+      color-scheme: light;
+      --bg: #f6f7f8;
+      --panel: #ffffff;
+      --panel2: #f3f4f6;
+      --line: #e1e4e8;
+      --line-strong: #c7cdd3;
+      --text: #24292f;
+      --muted: #66707a;
+      --accent: #32383f;
+      --accent-soft: #f3f4f6;
+      --success: #557565;
+      --success-soft: #eef3f0;
+      --warn: #a9402e;
+      --danger: #a9402e;
+      --danger-soft: #fbefeb;
+      --focus: #0969da;
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
     button, textarea, input { font: inherit; }
     button {
-      border: 1px solid var(--line); border-radius: 8px; background: var(--panel2);
+      border: 1px solid var(--line); border-radius: 6px; background: #fff;
       color: var(--text); padding: 8px 11px; cursor: pointer;
     }
-    button:hover { border-color: var(--accent); }
-    button.primary { background: #176b5a; border-color: var(--accent); }
+    button:hover { border-color: var(--line-strong); background: var(--panel2); }
+    button.primary {
+      color: #fff; border-color: var(--text); background: var(--text); font-weight: 700;
+    }
+    button.primary:hover { border-color: var(--accent); background: var(--accent); }
     button.danger { color: var(--danger); }
     header {
       height: 62px; display: flex; align-items: center; gap: 12px; padding: 0 16px;
-      border-bottom: 1px solid var(--line); background: #15181e; position: sticky; top: 0; z-index: 20;
+      border-bottom: 1px solid var(--line); background: #fff; position: sticky; top: 0; z-index: 20;
     }
     header h1 { font-size: 18px; margin: 0; }
     .grow { flex: 1; }
@@ -38,22 +46,22 @@
     .layout { display: grid; grid-template-columns: 210px minmax(400px, 1fr) minmax(420px, 0.9fr); height: calc(100vh - 62px); }
     aside, main, section.editor { min-height: 0; overflow: auto; }
     aside {
-      border-right: 1px solid var(--line); padding: 12px; background: #15181e;
+      border-right: 1px solid var(--line); padding: 12px; background: var(--panel2);
       display: flex; flex-direction: column; overflow: hidden;
     }
     #groups { min-height: 0; overflow: auto; }
     .unresolved-panel {
-      flex: none; margin-bottom: 12px; padding: 11px; border: 1px solid #705d34;
-      border-radius: 10px; background: #282317;
+      flex: none; margin-bottom: 12px; padding: 11px; border: 1px solid rgb(216 92 65 / 28%);
+      border-radius: 8px; background: var(--danger-soft);
     }
-    .unresolved-panel.complete { border-color: #2f695c; background: #172823; }
+    .unresolved-panel.complete { border-color: #dbe5df; background: var(--success-soft); }
     .unresolved-head {
       display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
       margin-bottom: 8px;
     }
-    .unresolved-head h2 { margin: 0; font-size: 13px; font-weight: 650; }
+    .unresolved-head h2 { margin: 0; font-size: 13px; font-weight: 600; }
     .unresolved-total { color: var(--warn); font-size: 20px; line-height: 1; }
-    .unresolved-panel.complete .unresolved-total { color: var(--accent); }
+    .unresolved-panel.complete .unresolved-total { color: var(--success); }
     .unresolved-counts {
       display: grid; grid-template-columns: 1fr auto; gap: 4px 8px;
       color: var(--muted); font-size: 12px;
@@ -61,8 +69,8 @@
     .unresolved-counts strong { color: var(--text); font-weight: 600; }
     .unresolved-panel .filter-button { margin: 10px 0 0; }
     .unresolved-panel .override-button {
-      width: 100%; margin-top: 7px; border-color: #846c37; color: var(--warn);
-      background: #332a18;
+      width: 100%; margin-top: 7px; border-color: rgb(216 92 65 / 28%); color: var(--danger);
+      background: var(--danger-soft);
     }
     .unresolved-panel .override-button:hover { border-color: var(--warn); }
     .group {
@@ -71,62 +79,62 @@
     .group span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .group-meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
     .group-meta.warning { color: var(--warn); }
-    .group.active { border-color: var(--accent); background: #1c3a35; }
+    .group.active { color: var(--text); border-color: var(--text); background: var(--accent-soft); }
     .filter-button { width: 100%; margin-bottom: 12px; }
-    .filter-button.active { border-color: var(--warn); color: var(--warn); background: #282317; }
+    .filter-button.active { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
     main { padding: 14px; border-right: 1px solid var(--line); }
     .viewer-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
     .canvas { position: relative; margin: auto; width: 100%; max-width: none; user-select: none; }
     .canvas img { display: block; width: 100%; max-width: none; height: auto; border-radius: 4px; }
     .overlay { position: absolute; inset: 0; cursor: crosshair; }
     .box {
-      position: absolute; border: 2px solid rgba(99,210,180,.75); background: rgba(99,210,180,.10);
+      position: absolute; border: 2px solid rgb(50 56 63 / 72%); background: rgb(50 56 63 / 10%);
       cursor: pointer; min-width: 3px; min-height: 3px;
     }
-    .box.selected { border-color: var(--warn); background: rgba(247,200,115,.22); z-index: 3; }
+    .box.selected { border-color: var(--text); background: rgb(50 56 63 / 18%); z-index: 3; }
     .box.excluded { border-color: #7d8794; background: rgba(90,98,110,.16); opacity: .55; }
     .box.warning { box-shadow: 0 0 0 2px var(--warn); }
     .box.issue { box-shadow: 0 0 0 2px var(--danger); }
     .box.warning.issue { box-shadow: 0 0 0 2px var(--danger), 0 0 0 4px var(--warn); }
     .overlay.drawing .box { pointer-events: none; }
-    .draw-box { position: absolute; border: 2px dashed var(--blue); background: rgba(105,167,255,.18); pointer-events: none; }
-    #addMissing.active { border-color: var(--blue); color: var(--blue); background: #1b2b42; }
+    .draw-box { position: absolute; border: 2px dashed var(--text); background: rgb(50 56 63 / 14%); pointer-events: none; }
+    #addMissing.active { border-color: var(--text); color: var(--text); background: var(--accent-soft); }
     section.editor { padding: 14px; background: var(--panel); }
     .summary { color: var(--muted); margin-bottom: 10px; }
     .card {
-      border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 10px;
-      background: #171b21;
+      border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 10px;
+      background: #fff;
     }
-    .card.selected { border-color: var(--warn); box-shadow: 0 0 0 1px var(--warn); }
+    .card.selected { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
     .card.excluded { opacity: .6; }
     .card-head { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
     .card-id { color: var(--muted); font: 11px ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .tag { border-radius: 12px; padding: 2px 7px; font-size: 11px; background: #26303b; white-space: nowrap; }
-    .tag.manual { color: var(--blue); }
+    .tag { border-radius: 999px; padding: 2px 7px; font-size: 11px; background: var(--panel2); white-space: nowrap; }
+    .tag.manual { color: var(--muted); }
     .tag.warning { color: var(--warn); }
     .tag.issue { color: var(--danger); }
     .source-warning {
-      margin-top: 8px; padding: 8px 10px; border: 1px solid #705d34;
-      border-radius: 7px; color: var(--warn); background: #282317;
+      margin-top: 8px; padding: 8px 10px; border: 1px solid rgb(216 92 65 / 28%);
+      border-radius: 6px; color: var(--danger); background: var(--danger-soft);
       white-space: pre-wrap;
     }
     textarea {
       width: 100%; min-height: 100px; resize: vertical; border: 1px solid var(--line);
-      background: #101319; color: var(--text); border-radius: 7px; padding: 9px;
+      background: #fff; color: var(--text); border-radius: 6px; padding: 9px;
     }
-    textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    textarea:focus { outline: none; border-color: var(--line-strong); }
     .mini { padding: 4px 7px; font-size: 12px; }
     .notice {
       position: fixed; right: 18px; bottom: 18px; max-width: 460px; padding: 12px 15px;
-      border-radius: 9px; background: #26303b; border: 1px solid var(--line); z-index: 30;
+      border-radius: 8px; color: #fff; background: var(--text); border: 1px solid var(--line); z-index: 30;
     }
-    .notice.error { border-color: var(--danger); color: #ffd4d8; }
+    .notice.error { border-color: var(--danger); color: #fff; background: var(--danger); }
     dialog {
       width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line);
-      border-radius: 14px; background: var(--panel); color: var(--text);
+      border-radius: 8px; background: #fff; color: var(--text);
       padding: 24px; box-shadow: 0 24px 80px rgba(0,0,0,.55);
     }
-    dialog::backdrop { background: rgba(5,8,12,.76); }
+    dialog::backdrop { background: rgb(31 35 40 / 48%); }
     dialog h2 { margin: 0 0 10px; font-size: 21px; }
     dialog p { margin: 0; color: var(--muted); }
     .dialog-actions {
@@ -138,6 +146,13 @@
     .token-confirm-copy { display: flex; flex-direction: column; line-height: 1.25; }
     .token-confirm-copy span { color: var(--text); font-size: 12px; }
     .token-confirm-copy small { color: var(--muted); font-size: 10px; }
+    button:focus-visible,
+    textarea:focus-visible,
+    input:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+    }
+    textarea:focus-visible { border-color: var(--focus); }
     @media (max-width: 1050px) {
       .layout { grid-template-columns: 150px 1fr; }
       section.editor { grid-column: 1 / -1; height: 55vh; border-top: 1px solid var(--line); }
