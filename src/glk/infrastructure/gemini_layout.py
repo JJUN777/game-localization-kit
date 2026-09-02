@@ -21,6 +21,7 @@ from glk.infrastructure.gemini_common import (
     GeminiResponseError,
     load_gemini_environment,
     resolve_model_name,
+    structured_generation_config,
 )
 
 
@@ -39,11 +40,7 @@ class GeminiLayoutProvider(GeminiProviderBase):
     def reconstruct(
         self, page_number: int, fragments: list[dict[str, Any]], page_image: Image.Image
     ) -> dict[str, Any]:
-        config = types.GenerateContentConfig(
-            temperature=0,
-            response_mime_type="application/json",
-            response_json_schema=RESPONSE_SCHEMA,
-        )
+        config = structured_generation_config(RESPONSE_SCHEMA)
         prompt = build_layout_prompt(page_number, fragments)
 
         def request() -> dict[str, Any]:

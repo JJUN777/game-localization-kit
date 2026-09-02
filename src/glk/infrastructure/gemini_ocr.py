@@ -17,6 +17,7 @@ from glk.infrastructure.gemini_common import (
     GeminiEmptyResponseError,
     GeminiProviderBase,
     GeminiResponseError,
+    structured_generation_config,
 )
 
 
@@ -26,11 +27,7 @@ class GeminiImageOcrProvider(GeminiProviderBase):
     prompt_version = OCR_PROMPT_VERSION
 
     def transcribe(self, prompt: str, image: Image.Image) -> dict[str, Any]:
-        config = types.GenerateContentConfig(
-            temperature=0,
-            response_mime_type="application/json",
-            response_json_schema=OCR_RESPONSE_SCHEMA,
-        )
+        config = structured_generation_config(OCR_RESPONSE_SCHEMA)
 
         def request() -> dict[str, Any]:
             contents: list[types.PartUnionDict] = [prompt, image]

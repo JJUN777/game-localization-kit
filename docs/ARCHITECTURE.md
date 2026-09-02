@@ -205,11 +205,14 @@ Gemini 또는 OpenAI layout·OCR·translation adapter를 생성합니다.
 
 JSON에는 공식 문서 확인일인 `last_verified`, 문서 주소인 `source_url`, API에
 그대로 전달하는 `models[].id`, 화면 설명인 `description_ko`, 기본 권장 여부인
-`recommended`를 기록합니다. 2026-07-24에 확인한 초기 목록은 다음과 같습니다.
+`recommended`를 기록합니다. 2026-09-02에 확인한 목록은 다음과 같습니다.
 
 | API 모델 ID | 용도 |
 |---|---|
+| `gemini-3.7-flash` | 코딩과 에이전트 작업까지 지원하는 최신 안정 Flash 모델 |
+| `gemini-3.6-flash` | 속도와 지능의 균형이 좋은 안정 멀티모달 모델 |
 | `gemini-3.5-flash` | 복잡한 문서와 멀티모달 작업을 위한 안정 Flash 모델 |
+| `gemini-3.5-flash-lite` | 고처리량 자동화를 위한 빠르고 경제적인 안정 모델 |
 | `gemini-3.1-flash-lite` | 대량 추출과 저비용 처리를 위한 3.x 안정 모델 |
 | `gemini-2.5-flash` | 속도와 품질의 균형이 좋은 기본 모델 |
 | `gemini-2.5-pro` | 복잡한 문서와 추론 작업에 적합한 고성능 모델 |
