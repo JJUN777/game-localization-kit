@@ -9,28 +9,45 @@
     :root {
       --accent: var(--ink-soft);
       --accent-soft: var(--soft);
+      --block-number: #e85d35;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --block-number: #ff8a65; }
     }
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
+    body {
+      height: 100vh; margin: 0; overflow: hidden; display: flex; flex-direction: column;
+      background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif;
+    }
     button, textarea, input { font: inherit; }
     button {
       border: 1px solid var(--line); border-radius: 6px; background: var(--surface);
       color: var(--text); padding: 8px 11px; cursor: pointer;
     }
     button:hover { border-color: var(--line-strong); background: var(--panel2); }
+    button:disabled { cursor: not-allowed; opacity: .5; }
     button.primary {
       color: var(--on-solid); border-color: var(--text); background: var(--text); font-weight: 700;
     }
     button.primary:hover { border-color: var(--accent); background: var(--accent); }
     button.danger { color: var(--danger); }
     header {
-      height: 62px; display: flex; align-items: center; gap: 12px; padding: 0 16px;
-      border-bottom: 1px solid var(--line); background: var(--surface); position: sticky; top: 0; z-index: 20;
+      flex: none; border-bottom: 1px solid var(--line); background: var(--surface);
+      position: relative; z-index: 20;
+    }
+    .header-main, .header-workflow { display: flex; align-items: center; gap: 12px; padding: 0 16px; }
+    .header-main { min-height: 58px; }
+    .header-workflow {
+      min-height: 47px; justify-content: flex-end; border-top: 1px solid var(--line);
+      background: var(--panel2);
     }
     header h1 { font-size: 18px; margin: 0; }
     .grow { flex: 1; }
     .status { color: var(--muted); white-space: nowrap; }
-    .layout { display: grid; grid-template-columns: 210px minmax(400px, 1fr) minmax(420px, 0.9fr); height: calc(100vh - 62px); }
+    .layout {
+      flex: 1; min-height: 0; display: grid;
+      grid-template-columns: 210px minmax(400px, 1fr) minmax(420px, 0.9fr);
+    }
     aside, main, section.editor { min-height: 0; overflow: auto; }
     aside {
       border-right: 1px solid var(--line); padding: 12px; background: var(--panel2);
@@ -71,6 +88,7 @@
     .filter-button.active { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
     main { padding: 14px; border-right: 1px solid var(--line); }
     .viewer-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+    .viewer-tools-spacer { flex: 1; }
     .canvas { position: relative; margin: auto; width: 100%; max-width: none; user-select: none; }
     .canvas img { display: block; width: 100%; max-width: none; height: auto; border-radius: 4px; }
     .overlay { position: absolute; inset: 0; cursor: crosshair; }
@@ -78,7 +96,16 @@
       position: absolute; border: 2px solid rgb(50 56 63 / 72%); background: rgb(50 56 63 / 10%);
       cursor: pointer; min-width: 3px; min-height: 3px;
     }
+    .box-number {
+      position: absolute; top: 50%; right: calc(100% + 4px); transform: translateY(-50%);
+      color: var(--block-number); font-size: 14px; font-weight: 800; line-height: 1;
+      pointer-events: none;
+    }
     .box.selected { border-color: var(--text); background: rgb(50 56 63 / 18%); z-index: 3; }
+    .box.bulk-selected {
+      border-color: var(--text); background: color-mix(in srgb, var(--text) 22%, transparent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--text) 38%, transparent); z-index: 4;
+    }
     .box.icon-selected {
       border-color: var(--focus); background: color-mix(in srgb, var(--focus) 18%, transparent);
       box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 34%, transparent); z-index: 4;
@@ -93,14 +120,26 @@
     section.editor { padding: 14px; background: var(--panel); }
     .summary { color: var(--muted); margin-bottom: 10px; }
     .card {
-      border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 10px;
+      position: relative; border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 10px;
       background: var(--surface);
     }
     .card.selected { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+    .card.bulk-selected {
+      border-color: var(--text); box-shadow: 0 0 0 2px var(--text);
+      background: color-mix(in srgb, var(--text) 5%, var(--surface));
+    }
+    .card.bulk-select-mode textarea { cursor: pointer; caret-color: transparent; }
     .card.icon-selected { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
     .card.excluded { opacity: .6; }
+    .card.dragging { opacity: .42; }
+    .card.drop-before::before, .card.drop-after::after {
+      content: ""; position: absolute; left: 0; right: 0; height: 3px;
+      border-radius: 999px; background: var(--text); z-index: 5;
+    }
+    .card.drop-before::before { top: -7px; }
+    .card.drop-after::after { bottom: -7px; }
     .card-head { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
-    .card-id { color: var(--muted); font: 11px ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .card-number { color: var(--text); font-size: 12px; font-weight: 700; white-space: nowrap; }
     .tag { border-radius: 999px; padding: 2px 7px; font-size: 11px; background: var(--panel2); white-space: nowrap; }
     .tag.manual { color: var(--muted); }
     .tag.warning { color: var(--warn); }
@@ -116,7 +155,35 @@
     }
     textarea:focus { outline: none; border-color: var(--line-strong); }
     .mini { padding: 4px 7px; font-size: 12px; }
+    .drag-handle {
+      display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px;
+      border: 1px solid transparent; border-radius: 5px; color: var(--muted); cursor: grab;
+      font-size: 17px; line-height: 1; user-select: none;
+    }
+    .drag-handle:hover { border-color: var(--line); color: var(--text); background: var(--panel2); }
+    .drag-handle:active { cursor: grabbing; }
     .icon-audit-select { color: var(--text); font-size: 12px; font-weight: 600; }
+    .review-mode-switch {
+      display: inline-flex; padding: 3px; border: 1px solid var(--line);
+      border-radius: 8px; background: var(--panel2);
+    }
+    .review-mode-switch button {
+      padding: 5px 9px; border: 0; background: transparent; color: var(--muted);
+    }
+    .review-mode-switch button:hover { background: var(--surface-hover); }
+    .review-mode-switch button.active {
+      color: var(--text); background: var(--surface); box-shadow: var(--shadow); font-weight: 600;
+    }
+    .bulk-actions {
+      position: fixed; left: 50%; bottom: 18px; z-index: 25; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 8px; min-width: min(480px, calc(100vw - 32px));
+      padding: 9px 10px 9px 14px; border: 1px solid var(--line-strong); border-radius: 8px;
+      background: var(--surface-raised); box-shadow: var(--shadow-dialog);
+    }
+    .bulk-actions strong { margin-right: auto; font-size: 13px; white-space: nowrap; }
+    .bulk-actions button { padding: 7px 10px; }
+    .bulk-actions .bulk-exclude { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 42%, var(--line)); }
+    .bulk-actions .bulk-exclude:hover { background: var(--danger-soft); border-color: var(--danger); }
     .notice {
       position: fixed; right: 18px; bottom: 18px; max-width: 460px; padding: 12px 15px;
       border-radius: 8px; color: var(--toast-text); background: var(--toast-bg); border: 1px solid var(--toast-border); z-index: 30;
@@ -181,14 +248,23 @@
 </head>
 <body>
   <header>
-    <h1>원문 이미지 · 추출문 검수</h1>
-    <span id="project" class="status"></span>
-    <div class="grow"></div>
-    <button id="iconAuditMode" class="hidden" type="button">PDF 아이콘 확인</button>
-    <button id="iconAuditRun" class="hidden" type="button" disabled>선택 블록 AI 검사 (0)</button>
-    <button id="save">저장</button>
-    <button id="validate">검증</button>
-    <button id="finalize" class="primary">최종 승인</button>
+    <div class="header-main">
+      <h1>원문 이미지 · 추출문 검수</h1>
+      <span id="project" class="status"></span>
+      <div class="review-mode-switch" aria-label="검수 모드">
+        <button id="editMode" class="active" type="button">텍스트 편집</button>
+        <button id="selectMode" type="button">블록 편집</button>
+      </div>
+      <div class="grow"></div>
+      <button id="addMissing" class="hidden" type="button">누락 문단 추가</button>
+      <button id="iconAuditMode" class="hidden" type="button">아이콘 검사(AI)</button>
+      <button id="iconAuditRun" class="primary hidden" type="button" disabled>선택한 블록 검사 (0)</button>
+    </div>
+    <div class="header-workflow">
+      <button id="save">저장</button>
+      <button id="validate">검증</button>
+      <button id="finalize" class="primary">최종 승인</button>
+    </div>
   </header>
   <div class="layout">
     <aside>
@@ -211,11 +287,13 @@
     </aside>
     <main>
       <div class="viewer-tools">
-        <button id="addMissing">누락 문단 추가</button>
-        <button id="selectPageIcons" class="hidden" type="button">현재 페이지 전체 선택</button>
         <button id="openPdf" class="hidden">원본 PDF 열기</button>
         <label>확대 <input id="zoom" type="range" min="50" max="180" value="100"></label>
+        <span id="bulkSelectHint" class="status hidden">블록을 클릭하세요. Shift+클릭으로 범위를 선택할 수 있습니다.</span>
+        <span id="iconAuditHint" class="status hidden">검사할 블록을 클릭하세요. Shift+클릭으로 범위를 선택할 수 있습니다.</span>
         <span id="drawHint" class="status hidden">원본에서 누락 영역을 드래그하세요.</span>
+        <span class="viewer-tools-spacer"></span>
+        <button id="selectPageIcons" class="hidden" type="button">현재 페이지 전체 선택</button>
       </div>
       <div id="canvas" class="canvas">
         <img id="sourceImage" alt="원본 페이지">
@@ -227,12 +305,18 @@
       <div id="cards"></div>
     </section>
   </div>
+  <div id="bulkActions" class="bulk-actions hidden" aria-live="polite">
+    <strong id="bulkSelectionCount">0개 선택됨</strong>
+    <button id="bulkExclude" class="bulk-exclude" type="button">선택 제외</button>
+    <button id="bulkRestore" type="button">선택 복원</button>
+    <button id="bulkClear" type="button">선택 취소</button>
+  </div>
   <dialog id="iconAuditDialog" class="icon-audit-dialog" aria-labelledby="iconAuditTitle">
-    <h2 id="iconAuditTitle">PDF 아이콘 검사 결과</h2>
+    <h2 id="iconAuditTitle">아이콘 검사 결과</h2>
     <p id="iconAuditSummary"></p>
     <div id="iconAuditResults" class="icon-audit-results"></div>
     <div class="dialog-actions">
-      <button id="iconAuditClose" type="button">결과 닫기</button>
+      <button id="iconAuditClose" type="button">닫기</button>
     </div>
   </dialog>
   <dialog id="approvalCompleteDialog" aria-labelledby="approvalCompleteTitle">
@@ -261,9 +345,14 @@
     let newCounter = 0;
     let layoutWarningsOnly = false;
     let unresolvedOnly = false;
+    let bulkSelectMode = false;
+    let bulkSelection = new Set();
+    let bulkSelectionAnchorId = null;
+    let draggedBlockIds = [];
     let iconAuditMode = false;
     let iconAuditBusy = false;
     let iconAuditSelection = new Set();
+    let iconAuditSelectionAnchorId = null;
     let iconAuditResults = [];
     let iconAuditRunSummary = "";
 
@@ -301,37 +390,158 @@
     const unresolvedBlocks = () => documentState.blocks.filter(isUnresolved);
     const allGroupBlocks = () => documentState.blocks.filter((b) => b.group_id === currentGroup);
     const groupBlocks = () => allGroupBlocks().filter(
-      (b) => (!layoutWarningsOnly || b.layout_warnings) && (!unresolvedOnly || isUnresolved(b))
+      (b) => (!iconAuditMode || !b.excluded) &&
+        (!layoutWarningsOnly || b.layout_warnings) &&
+        (!unresolvedOnly || isUnresolved(b))
     );
     const groupById = () => documentState.groups.find((g) => g.id === currentGroup);
     const iconAuditEligible = (block) => (
       documentState.source_type === "pdf" && block.source_type === "pdf" &&
       !block.manual && !block.excluded && Array.isArray(block.bbox)
     );
+    const bulkSelectable = (block) => !block.manual;
+    const blockDisplayNumber = (block) => (
+      documentState.blocks.filter((item) => item.group_id === block.group_id)
+        .findIndex((item) => item.id === block.id) + 1
+    );
 
-    function toggleIconAuditBlock(block) {
-      if (!iconAuditEligible(block) || iconAuditBusy) return;
-      if (iconAuditSelection.has(block.id)) iconAuditSelection.delete(block.id);
-      else if (iconAuditSelection.size < MAX_ICON_AUDIT_BLOCKS) {
-        iconAuditSelection.add(block.id);
+    function pruneBulkSelection() {
+      const available = new Set(
+        documentState.blocks.filter(bulkSelectable).map((block) => block.id)
+      );
+      for (const id of bulkSelection) {
+        if (!available.has(id)) bulkSelection.delete(id);
+      }
+      if (!available.has(bulkSelectionAnchorId)) bulkSelectionAnchorId = null;
+    }
+
+    function renderBulkControls() {
+      if (!documentState) return;
+      pruneBulkSelection();
+      $("editMode").classList.toggle("active", !bulkSelectMode);
+      $("selectMode").classList.toggle("active", bulkSelectMode);
+      $("bulkSelectHint").classList.toggle(
+        "hidden",
+        !bulkSelectMode || iconAuditMode || drawMode,
+      );
+      const selected = documentState.blocks.filter(
+        (block) => bulkSelection.has(block.id) && bulkSelectable(block)
+      );
+      $("bulkActions").classList.toggle("hidden", !selected.length);
+      $("bulkSelectionCount").textContent = `${selected.length}개 선택됨`;
+      $("bulkExclude").disabled = !selected.some((block) => !block.excluded);
+      $("bulkRestore").disabled = !selected.some((block) => block.excluded);
+    }
+
+    function setBulkBlockSelection(
+      block,
+      selected,
+      extendRange = false,
+      scrollToCard = false,
+    ) {
+      if (!bulkSelectMode || !bulkSelectable(block)) return;
+      const visible = groupBlocks().filter(bulkSelectable);
+      const anchorIndex = visible.findIndex(
+        (item) => item.id === bulkSelectionAnchorId
+      );
+      const blockIndex = visible.findIndex((item) => item.id === block.id);
+      if (extendRange && anchorIndex >= 0 && blockIndex >= 0) {
+        const start = Math.min(anchorIndex, blockIndex);
+        const end = Math.max(anchorIndex, blockIndex);
+        for (const item of visible.slice(start, end + 1)) {
+          if (selected) bulkSelection.add(item.id);
+          else bulkSelection.delete(item.id);
+        }
+      } else if (selected) {
+        bulkSelection.add(block.id);
       } else {
+        bulkSelection.delete(block.id);
+      }
+      bulkSelectionAnchorId = block.id;
+      renderCards();
+      renderOverlay();
+      renderBulkControls();
+      if (scrollToCard) {
+        document.querySelector(`[data-card="${CSS.escape(block.id)}"]`)
+          ?.scrollIntoView({block: "center", behavior: "smooth"});
+      }
+    }
+
+    function toggleBulkBlock(block, extendRange = false, scrollToCard = false) {
+      setBulkBlockSelection(
+        block,
+        extendRange ? true : !bulkSelection.has(block.id),
+        extendRange,
+        scrollToCard,
+      );
+    }
+
+    function applyBulkExcluded(excluded) {
+      const selected = documentState.blocks.filter(
+        (block) => bulkSelection.has(block.id) && bulkSelectable(block)
+      );
+      if (!selected.length) return;
+      for (const block of selected) {
+        block.excluded = excluded;
+        if (excluded) iconAuditSelection.delete(block.id);
+      }
+      render();
+      notice(`${selected.length}개 블록을 ${excluded ? "제외" : "복원"}했습니다.`);
+    }
+
+    function setIconAuditBlockSelection(block, selected, extendRange = false) {
+      if (!iconAuditEligible(block) || iconAuditBusy) return;
+      const visible = groupBlocks().filter(iconAuditEligible);
+      const anchorIndex = visible.findIndex(
+        (item) => item.id === iconAuditSelectionAnchorId
+      );
+      const blockIndex = visible.findIndex((item) => item.id === block.id);
+      const targets = extendRange && anchorIndex >= 0 && blockIndex >= 0
+        ? visible.slice(
+            Math.min(anchorIndex, blockIndex),
+            Math.max(anchorIndex, blockIndex) + 1,
+          )
+        : [block];
+      let limitReached = false;
+      for (const target of targets) {
+        if (!selected) {
+          iconAuditSelection.delete(target.id);
+        } else if (
+          iconAuditSelection.has(target.id)
+          || iconAuditSelection.size < MAX_ICON_AUDIT_BLOCKS
+        ) {
+          iconAuditSelection.add(target.id);
+        } else {
+          limitReached = true;
+        }
+      }
+      iconAuditSelectionAnchorId = block.id;
+      if (limitReached) {
         notice(`한 번에 최대 ${MAX_ICON_AUDIT_BLOCKS}개 블록을 검사할 수 있습니다.`, true);
       }
       renderCards(); renderOverlay(); renderIconAuditControls();
     }
 
+    function toggleIconAuditBlock(block, extendRange = false) {
+      setIconAuditBlockSelection(
+        block,
+        extendRange ? true : !iconAuditSelection.has(block.id),
+        extendRange,
+      );
+    }
+
     function renderIconAuditControls() {
-      const available = documentState?.source_type === "pdf";
+      const available = documentState?.source_type === "pdf" && bulkSelectMode;
       const mode = $("iconAuditMode");
       mode.classList.toggle("hidden", !available);
-      mode.textContent = iconAuditMode ? "아이콘 선택 취소" : "PDF 아이콘 확인";
+      mode.textContent = iconAuditMode ? "아이콘 검사 종료" : "아이콘 검사(AI)";
       mode.disabled = iconAuditBusy;
       const run = $("iconAuditRun");
       run.classList.toggle("hidden", !available || !iconAuditMode);
       run.disabled = iconAuditBusy || !iconAuditSelection.size;
       run.textContent = iconAuditBusy
-        ? "선택 블록 검사 중…"
-        : `선택 블록 AI 검사 (${iconAuditSelection.size})`;
+        ? "아이콘 검사 중…"
+        : `선택한 블록 검사 (${iconAuditSelection.size})`;
       const page = $("selectPageIcons");
       page.classList.toggle("hidden", !available || !iconAuditMode);
       const eligible = allGroupBlocks().filter(iconAuditEligible);
@@ -340,6 +550,7 @@
       );
       page.disabled = iconAuditBusy || !eligible.length;
       page.textContent = pageHasSelection ? "현재 페이지 선택 해제" : "현재 페이지 전체 선택";
+      $("iconAuditHint").classList.toggle("hidden", !iconAuditMode);
     }
 
     function renderGroups() {
@@ -365,7 +576,12 @@
             ? `${count} · 누락 ${group.layout_warnings}`
             : count;
         button.append(label, total);
-        button.onclick = () => { currentGroup = group.id; selectedId = null; render(); };
+        button.onclick = () => {
+          currentGroup = group.id;
+          selectedId = null;
+          bulkSelectionAnchorId = null;
+          render();
+        };
         $("groups").appendChild(button);
       }
     }
@@ -387,13 +603,18 @@
         if (!block.bbox) continue;
         const [x0,y0,x1,y1] = block.bbox;
         const box = document.createElement("div");
-        box.className = `box${selectedId === block.id ? " selected" : ""}${iconAuditSelection.has(block.id) ? " icon-selected" : ""}${block.excluded ? " excluded" : ""}${block.warnings.length ? " warning" : ""}${block.issues.length ? " issue" : ""}`;
+        box.className = `box${selectedId === block.id ? " selected" : ""}${bulkSelection.has(block.id) ? " bulk-selected" : ""}${iconAuditSelection.has(block.id) ? " icon-selected" : ""}${block.excluded ? " excluded" : ""}${block.warnings.length ? " warning" : ""}${block.issues.length ? " issue" : ""}`;
         box.style.left = `${x0/10}%`; box.style.top = `${y0/10}%`;
         box.style.width = `${(x1-x0)/10}%`; box.style.height = `${(y1-y0)/10}%`;
         box.title = block.text.slice(0, 100);
+        const number = document.createElement("span");
+        number.className = "box-number";
+        number.textContent = blockDisplayNumber(block);
+        box.appendChild(number);
         box.onclick = (event) => {
           event.stopPropagation();
-          if (iconAuditMode) toggleIconAuditBlock(block);
+          if (iconAuditMode) toggleIconAuditBlock(block, event.shiftKey);
+          else if (bulkSelectMode) toggleBulkBlock(block, event.shiftKey, true);
           else selectBlock(block.id);
         };
         overlay.appendChild(box);
@@ -410,8 +631,82 @@
       render();
     }
 
+    function clearBlockDropIndicators() {
+      document.querySelectorAll(".card.drop-before, .card.drop-after").forEach(
+        (card) => card.classList.remove("drop-before", "drop-after")
+      );
+    }
+
+    function draggedBlocksFor(block) {
+      if (!bulkSelection.has(block.id)) return [block.id];
+      return allGroupBlocks()
+        .filter((item) => bulkSelection.has(item.id))
+        .map((item) => item.id);
+    }
+
+    function startBlockDrag(event, block, card) {
+      draggedBlockIds = draggedBlocksFor(block);
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", block.id);
+      card.classList.add("dragging");
+    }
+
+    function autoScrollEditor(event) {
+      const editor = document.querySelector("section.editor");
+      const rect = editor.getBoundingClientRect();
+      const edge = 64;
+      if (event.clientY < rect.top + edge) {
+        editor.scrollTop -= Math.ceil((rect.top + edge - event.clientY) / 5);
+      } else if (event.clientY > rect.bottom - edge) {
+        editor.scrollTop += Math.ceil((event.clientY - (rect.bottom - edge)) / 5);
+      }
+    }
+
+    function showBlockDropTarget(event, block, card) {
+      if (
+        !draggedBlockIds.length
+        || draggedBlockIds.includes(block.id)
+        || block.group_id !== currentGroup
+      ) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      clearBlockDropIndicators();
+      const rect = card.getBoundingClientRect();
+      card.classList.add(
+        event.clientY < rect.top + rect.height / 2 ? "drop-before" : "drop-after"
+      );
+      autoScrollEditor(event);
+    }
+
+    function reorderDraggedBlocks(targetId, insertAfter) {
+      if (!draggedBlockIds.length || draggedBlockIds.includes(targetId)) return;
+      const target = documentState.blocks.find((block) => block.id === targetId);
+      if (!target || target.group_id !== currentGroup) return;
+      const movingIds = new Set(draggedBlockIds);
+      const moving = documentState.blocks.filter((block) => movingIds.has(block.id));
+      if (!moving.length || moving.some((block) => block.group_id !== currentGroup)) return;
+      const remaining = documentState.blocks.filter((block) => !movingIds.has(block.id));
+      const targetIndex = remaining.findIndex((block) => block.id === targetId);
+      if (targetIndex < 0) return;
+      remaining.splice(targetIndex + Number(insertAfter), 0, ...moving);
+      documentState.blocks = remaining;
+      const count = moving.length;
+      draggedBlockIds = [];
+      render();
+      notice(`${count}개 블록의 순서를 변경했습니다.`);
+    }
+
+    function finishBlockDrag() {
+      draggedBlockIds = [];
+      clearBlockDropIndicators();
+      document.querySelectorAll(".card.dragging").forEach(
+        (card) => card.classList.remove("dragging")
+      );
+    }
+
     function deleteManual(id) {
       documentState.blocks = documentState.blocks.filter((b) => b.id !== id);
+      bulkSelection.delete(id);
       if (selectedId === id) selectedId = null;
       render();
     }
@@ -422,11 +717,11 @@
       for (const block of groupBlocks()) {
         const card = document.createElement("div");
         card.dataset.card = block.id;
-        card.className = `card${selectedId === block.id ? " selected" : ""}${iconAuditSelection.has(block.id) ? " icon-selected" : ""}${block.excluded ? " excluded" : ""}`;
+        card.className = `card${selectedId === block.id ? " selected" : ""}${bulkSelectMode ? " bulk-select-mode" : ""}${bulkSelection.has(block.id) ? " bulk-selected" : ""}${iconAuditSelection.has(block.id) ? " icon-selected" : ""}${block.excluded ? " excluded" : ""}`;
         const head = document.createElement("div");
         head.className = "card-head";
         head.innerHTML = `
-          <span class="card-id" title="${block.id}">${block.id}</span>
+          <span class="card-number" title="${block.id}">블록 ${blockDisplayNumber(block)}</span>
           ${block.manual ? '<span class="tag manual">수동 추가</span>' : ""}
           ${block.block_type === "unresolved_page" ? '<span class="tag issue">원문 직접 입력 필요</span>' : ""}
           ${block.layout_warnings ? `<span class="tag warning">AI 정렬 누락 ${block.layout_warnings}</span>` : ""}
@@ -441,38 +736,98 @@
           auditCheck.type = "checkbox";
           auditCheck.checked = iconAuditSelection.has(block.id);
           auditCheck.disabled = !iconAuditEligible(block) || iconAuditBusy;
-          auditCheck.onchange = () => toggleIconAuditBlock(block);
+          auditCheck.onclick = (event) => {
+            event.stopPropagation();
+            setIconAuditBlockSelection(
+              block,
+              auditCheck.checked,
+              event.shiftKey,
+            );
+          };
           auditLabel.append(auditCheck, document.createTextNode(" 아이콘 검사"));
           head.appendChild(auditLabel);
         }
-        const up = document.createElement("button"); up.className = "mini"; up.textContent = "↑";
-        up.onclick = () => moveBlock(block.id, -1);
-        const down = document.createElement("button"); down.className = "mini"; down.textContent = "↓";
-        down.onclick = () => moveBlock(block.id, 1);
-        head.append(up, down);
-        if (block.manual) {
-          const del = document.createElement("button"); del.className = "mini danger"; del.textContent = "삭제";
-          del.onclick = () => deleteManual(block.id); head.appendChild(del);
-        } else {
-          const label = document.createElement("label"); label.className = "check";
-          const check = document.createElement("input"); check.type = "checkbox"; check.checked = block.excluded;
-          check.onchange = () => {
-            block.excluded = check.checked;
-            if (block.excluded) iconAuditSelection.delete(block.id);
-            render();
-          };
-          label.append(check, document.createTextNode(" 제외")); head.appendChild(label);
+        if (bulkSelectMode && !iconAuditMode) {
+          const handle = document.createElement("span");
+          handle.className = "drag-handle";
+          handle.textContent = "⠿";
+          handle.title = bulkSelection.has(block.id)
+            ? "선택한 블록을 함께 끌어 순서를 변경합니다."
+            : "끌어서 블록 순서를 변경합니다.";
+          handle.setAttribute("aria-hidden", "true");
+          handle.draggable = true;
+          handle.onclick = (event) => event.stopPropagation();
+          handle.ondragstart = (event) => startBlockDrag(event, block, card);
+          handle.ondragend = finishBlockDrag;
+          head.appendChild(handle);
+          const up = document.createElement("button"); up.className = "mini"; up.textContent = "↑";
+          up.onclick = () => moveBlock(block.id, -1);
+          const down = document.createElement("button"); down.className = "mini"; down.textContent = "↓";
+          down.onclick = () => moveBlock(block.id, 1);
+          head.append(up, down);
+          if (block.manual) {
+            const del = document.createElement("button"); del.className = "mini danger"; del.textContent = "삭제";
+            del.onclick = () => deleteManual(block.id); head.appendChild(del);
+          } else {
+            const label = document.createElement("label"); label.className = "check";
+            const check = document.createElement("input"); check.type = "checkbox"; check.checked = block.excluded;
+            check.onchange = () => {
+              block.excluded = check.checked;
+              if (block.excluded) iconAuditSelection.delete(block.id);
+              render();
+            };
+            label.append(check, document.createTextNode(" 제외")); head.appendChild(label);
+          }
         }
         const area = document.createElement("textarea");
         area.value = block.text;
-        area.disabled = block.excluded;
-        area.onfocus = () => selectBlock(block.id);
+        area.disabled = block.excluded && !bulkSelectMode;
+        area.readOnly = bulkSelectMode || block.excluded;
+        area.title = iconAuditMode
+          ? "아이콘 검사할 블록을 선택하거나 해제합니다."
+          : bulkSelectMode
+            ? "블록 편집: 클릭하여 작업 대상에 추가하거나 해제합니다."
+            : "";
+        area.onfocus = () => {
+          if (!bulkSelectMode) selectBlock(block.id);
+        };
+        area.onclick = (event) => {
+          if (iconAuditMode) {
+            event.stopPropagation();
+            toggleIconAuditBlock(block, event.shiftKey);
+            return;
+          }
+          if (!bulkSelectMode || !bulkSelectable(block)) return;
+          event.stopPropagation();
+          toggleBulkBlock(block, event.shiftKey);
+        };
         area.oninput = () => {
           block.text = area.value;
           renderUnresolvedStatus();
           if (unresolvedOnly) renderGroups();
         };
-        card.onclick = () => selectBlock(block.id);
+        card.onclick = (event) => {
+          if (event.target.closest("button, input, textarea, label, .drag-handle")) return;
+          if (iconAuditMode) {
+            toggleIconAuditBlock(block, event.shiftKey);
+          } else if (bulkSelectMode && bulkSelectable(block)) {
+            toggleBulkBlock(block, event.shiftKey);
+          } else {
+            selectBlock(block.id);
+          }
+        };
+        card.ondragover = (event) => showBlockDropTarget(event, block, card);
+        card.ondragleave = (event) => {
+          if (!card.contains(event.relatedTarget)) {
+            card.classList.remove("drop-before", "drop-after");
+          }
+        };
+        card.ondrop = (event) => {
+          if (!draggedBlockIds.length || draggedBlockIds.includes(block.id)) return;
+          event.preventDefault();
+          const insertAfter = card.classList.contains("drop-after");
+          reorderDraggedBlocks(block.id, insertAfter);
+        };
         card.append(head, area);
         if (block.warnings.length) {
           const warning = document.createElement("div");
@@ -558,7 +913,14 @@
 
     function render() {
       renderGroups(); renderSource(); renderCards(); renderOverlay(); renderSummary();
-      renderIconAuditControls();
+      renderIconAuditControls(); renderBulkControls();
+      const addMissing = $("addMissing");
+      addMissing.classList.toggle(
+        "hidden",
+        !bulkSelectMode || iconAuditMode,
+      );
+      addMissing.disabled = false;
+      addMissing.title = "원본 이미지에서 누락된 문단 영역을 추가합니다.";
     }
 
     function normalizedPoint(event) {
@@ -578,6 +940,10 @@
       }
       $("overlay").classList.toggle("drawing", active);
       $("drawHint").classList.toggle("hidden", !active);
+      $("bulkSelectHint").classList.toggle(
+        "hidden",
+        !bulkSelectMode || active || iconAuditMode,
+      );
       $("addMissing").classList.toggle("active", active);
       $("addMissing").textContent = active ? "추가 취소" : "누락 문단 추가";
     }
@@ -591,6 +957,11 @@
       }
       layoutWarningsOnly = false;
       unresolvedOnly = false;
+      bulkSelection.clear();
+      bulkSelectionAnchorId = null;
+      iconAuditMode = false;
+      iconAuditSelection.clear();
+      iconAuditSelectionAnchorId = null;
       render();
       setDrawMode(true);
       notice("원본 이미지에서 누락된 문단 영역을 드래그하세요.");
@@ -629,6 +1000,7 @@
         ? documentState.blocks.lastIndexOf(lastGroupBlock) + 1
         : documentState.blocks.length;
       documentState.blocks.splice(anchor >= 0 ? anchor + 1 : fallback, 0, block);
+      bulkSelectMode = false;
       selectedId = block.id; render();
       setTimeout(() => document.querySelector(`[data-card="${CSS.escape(block.id)}"] textarea`)?.focus(), 0);
     };
@@ -668,7 +1040,6 @@
       }
       block.text = result.suggested_text;
       result.applied = true;
-      result.ignored = false;
       card.classList.add("applied");
       render();
       renderIconAuditResults();
@@ -680,12 +1051,16 @@
       const host = $("iconAuditResults");
       host.replaceChildren();
       for (const result of iconAuditResults) {
+        const sourceBlock = documentState.blocks.find(
+          (block) => block.id === result.block_id
+        );
+        const displayNumber = sourceBlock ? blockDisplayNumber(sourceBlock) : "?";
         const card = document.createElement("article");
         card.className = `icon-audit-result${result.applied ? " applied" : ""}`;
         const crop = document.createElement("div");
         crop.className = "icon-audit-crop";
         const image = document.createElement("img");
-        image.alt = `PAGE ${result.page} ${result.block_id} 원본 영역`;
+        image.alt = `PAGE ${result.page} 블록 ${displayNumber} 원본 영역`;
         image.src = `${result.crop_url}&token=${encodeURIComponent(TOKEN)}`;
         crop.appendChild(image);
 
@@ -694,13 +1069,11 @@
         const head = document.createElement("div");
         head.className = "icon-audit-head";
         const title = document.createElement("strong");
-        title.textContent = `PAGE ${result.page} · ${result.block_id}`;
+        title.textContent = `PAGE ${result.page} · 블록 ${displayNumber}`;
         const state = document.createElement("span");
         state.className = "tag";
         state.textContent = result.applied
           ? "적용됨"
-          : result.ignored
-          ? "무시됨"
           : result.cached
           ? result.icons.length
             ? `저장된 결과 · 아이콘 ${result.icons.length}개`
@@ -738,21 +1111,13 @@
           detail.appendChild(icons);
           const actions = document.createElement("div");
           actions.className = "icon-audit-item-actions";
-          const ignore = document.createElement("button");
-          ignore.type = "button";
-          ignore.textContent = "무시";
-          ignore.disabled = result.applied || result.ignored;
-          ignore.onclick = () => {
-            result.ignored = true;
-            renderIconAuditResults();
-          };
           const apply = document.createElement("button");
           apply.type = "button";
           apply.className = "primary";
-          apply.textContent = "제안 적용";
-          apply.disabled = result.applied || result.ignored;
+          apply.textContent = "적용";
+          apply.disabled = result.applied;
           apply.onclick = () => applyIconAuditResult(result, card);
-          actions.append(ignore, apply);
+          actions.appendChild(apply);
           detail.appendChild(actions);
         } else {
           const empty = document.createElement("p");
@@ -807,6 +1172,7 @@
         iconAuditRunSummary = `${result.inspected_blocks}개 블록 검사 · 아이콘 ${result.detected_icons}개 감지${cacheLabel}${usageLabel}${costLabel}`;
         iconAuditMode = false;
         iconAuditSelection.clear();
+        iconAuditSelectionAnchorId = null;
         render();
         renderIconAuditResults();
         $("iconAuditDialog").showModal();
@@ -821,12 +1187,58 @@
     $("iconAuditMode").onclick = () => {
       iconAuditMode = !iconAuditMode;
       iconAuditSelection.clear();
+      iconAuditSelectionAnchorId = null;
       if (iconAuditMode) {
+        bulkSelection.clear();
+        bulkSelectionAnchorId = null;
         layoutWarningsOnly = false;
         unresolvedOnly = false;
         setDrawMode(false);
       }
       render();
+    };
+    function setReviewMode(mode) {
+      const selecting = mode === "select";
+      if (bulkSelectMode === selecting && !iconAuditMode && !drawMode) return;
+      const selectedBlocks = documentState.blocks.filter(
+        (block) => bulkSelection.has(block.id)
+      );
+      bulkSelectMode = selecting;
+      bulkSelection.clear();
+      bulkSelectionAnchorId = null;
+      iconAuditMode = false;
+      iconAuditSelection.clear();
+      iconAuditSelectionAnchorId = null;
+      setDrawMode(false);
+      if (selecting) {
+        selectedId = null;
+        layoutWarningsOnly = false;
+        unresolvedOnly = false;
+      } else if (selectedBlocks.length === 1) {
+        currentGroup = selectedBlocks[0].group_id;
+        selectedId = selectedBlocks[0].id;
+      } else {
+        selectedId = null;
+      }
+      render();
+      if (!selecting && selectedBlocks.length === 1) {
+        const area = document.querySelector(
+          `[data-card="${CSS.escape(selectedBlocks[0].id)}"] textarea`
+        );
+        area?.scrollIntoView({block: "center", behavior: "smooth"});
+        if (!area?.disabled) area?.focus({preventScroll: true});
+      }
+    }
+    $("editMode").onclick = () => setReviewMode("edit");
+    $("selectMode").onclick = () => setReviewMode("select");
+    $("bulkExclude").onclick = () => applyBulkExcluded(true);
+    $("bulkRestore").onclick = () => applyBulkExcluded(false);
+    $("bulkClear").onclick = () => {
+      bulkSelection.clear();
+      bulkSelectionAnchorId = null;
+      renderCards();
+      renderOverlay();
+      renderBulkControls();
     };
     $("iconAuditRun").onclick = runPdfIconAudit;
     $("selectPageIcons").onclick = () => {
@@ -840,6 +1252,7 @@
           iconAuditSelection.add(block.id);
         }
       }
+      iconAuditSelectionAnchorId = null;
       if (!pageHasSelection && eligible.some((block) => !iconAuditSelection.has(block.id))) {
         notice(`현재 페이지에서 최대 ${MAX_ICON_AUDIT_BLOCKS}개 블록을 선택했습니다.`);
       }
