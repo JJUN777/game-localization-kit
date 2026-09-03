@@ -92,7 +92,7 @@ def sample_blocks() -> list[SourceBlock]:
         make_block(2, "Each Hunter gains 2 Stamina."),
         make_block(3, "Hunters may spend Stamina to perform an Action."),
         make_block(4, "PRIMAL ATTACK", block_type="heading"),
-        make_block(5, "Resolve the Primal Attack. The Hunter loses Stamina and gains {HP}."),
+        make_block(5, "Resolve the Primal Attack. The Hunter loses Stamina and gains [HP]."),
     ]
 
 
@@ -560,7 +560,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
         cases = (
             ("approved", "", "term", "Hunter", "translation is empty"),
             ("rejected", "", "unknown", "Hunter", "invalid category"),
-            ("approved", "체력", "term", "{HP}", "protected token"),
+            ("approved", "체력", "term", "[HP]", "protected token"),
         )
         for status, translation, category, source_term, message in cases:
             with self.subTest(message=message), tempfile.TemporaryDirectory() as temporary_directory:
@@ -576,7 +576,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
                 rows[0]["translation"] = translation
                 rows[0]["category"] = category
                 rows[0]["source_term"] = source_term
-                if source_term == "{HP}":
+                if source_term == "[HP]":
                     rows[0]["candidate_id"] = ""
                 write_review_rows(review_path, rows)
                 with self.assertRaisesRegex(GlossaryImportError, message):

@@ -16,5 +16,8 @@ dist/
 *.tmp
 *.meta.json
 
+# Local render and inspection artifacts
+/tmp/
+
 # Project workspaces
 workspaces/

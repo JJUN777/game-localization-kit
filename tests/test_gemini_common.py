@@ -88,7 +88,7 @@ class GeminiCommonPolicyTests(unittest.TestCase):
             system_instruction="Follow the schema.",
         )
 
-        self.assertEqual(config.temperature, 0)
+        self.assertIsNone(config.temperature)
         self.assertEqual(config.response_mime_type, "application/json")
         self.assertEqual(config.response_json_schema, {"type": "object"})
         self.assertEqual(config.system_instruction, "Follow the schema.")

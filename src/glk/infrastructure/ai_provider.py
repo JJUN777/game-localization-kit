@@ -12,6 +12,7 @@ from glk.config import resolve_settings_root
 from glk.infrastructure.gemini_common import gemini_failure_code, resolve_model_name
 from glk.infrastructure.gemini_layout import GeminiLayoutProvider
 from glk.infrastructure.gemini_ocr import GeminiImageOcrProvider
+from glk.infrastructure.gemini_pdf_icon_audit import GeminiPdfIconAuditProvider
 from glk.infrastructure.gemini_translation import GeminiTranslationProvider
 from glk.infrastructure.openai_common import (
     openai_failure_code,
@@ -19,6 +20,7 @@ from glk.infrastructure.openai_common import (
 )
 from glk.infrastructure.openai_layout import OpenAILayoutProvider
 from glk.infrastructure.openai_ocr import OpenAIImageOcrProvider
+from glk.infrastructure.openai_pdf_icon_audit import OpenAIPdfIconAuditProvider
 from glk.infrastructure.openai_translation import OpenAITranslationProvider
 
 
@@ -94,6 +96,22 @@ def create_image_ocr_provider(
             settings_root=settings_root,
         )
     return GeminiImageOcrProvider.from_environment(
+        model_name,
+        settings_root=settings_root,
+    )
+
+
+def create_pdf_icon_audit_provider(
+    model_name: str | None = None,
+    *,
+    settings_root: str | os.PathLike[str] | None = None,
+):
+    if resolve_ai_provider_name(settings_root) == "openai":
+        return OpenAIPdfIconAuditProvider.from_environment(
+            model_name,
+            settings_root=settings_root,
+        )
+    return GeminiPdfIconAuditProvider.from_environment(
         model_name,
         settings_root=settings_root,
     )

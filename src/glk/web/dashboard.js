@@ -329,9 +329,81 @@ function formatTokenCount(value) {
   return new Intl.NumberFormat("ko-KR", {notation: "compact"}).format(value);
 }
 
-function jobElapsedLabel(job) {
+function formatEstimatedUsd(value) {
+  if (!Number.isFinite(value) || value < 0) return null;
+  return `$${value < 0.0001 ? value.toFixed(6) : value.toFixed(4)}`;
+}
+
+function cumulativeUsageCost(usage) {
+  if (!usage || !Number.isInteger(usage.requests) || usage.requests <= 0) {
+    return null;
+  }
+  const priced = formatEstimatedUsd(usage.estimated_cost_usd);
+  return usage.pricing_complete
+    ? priced
+    : priced && usage.estimated_cost_usd > 0
+      ? `${priced} + 일부 단가 미등록`
+      : "단가 미등록";
+}
+
+function cumulativeUsageTitle(usage) {
+  if (!usage || usage.requests <= 0) return "기록된 API 호출이 없습니다.";
+  const models = Array.isArray(usage.models) ? usage.models.join(", ") : "";
+  const exactTokens = (value) => Number(value || 0).toLocaleString("ko-KR");
+  return [
+    models,
+    `API 요청 ${usage.requests}회`,
+    `입력 ${exactTokens(usage.input_tokens)} 토큰`,
+    `출력 ${exactTokens(usage.output_tokens)} 토큰`,
+    usage.thinking_tokens > 0
+      ? `추론 ${exactTokens(usage.thinking_tokens)} 토큰`
+      : "",
+    usage.cached_input_tokens > 0
+      ? `캐시 입력 ${exactTokens(usage.cached_input_tokens)} 토큰`
+      : "",
+  ].filter(Boolean).join(" / ");
+}
+
+function emptyStageCost(project, key) {
+  if (["review", "glossary", "translation_review"].includes(key)) return "$0";
+  const translationStarted = !["not_ready", "not_run"].includes(
+    project.pipeline.translation_status,
+  );
+  if (key === "source") {
+    return project.pipeline.source_processing_started ? "기록 없음" : "—";
+  }
+  if (key === "translation") return translationStarted ? "기록 없음" : "—";
+  return "—";
+}
+
+function pipelineUsage(project, key) {
+  const usageKey = {
+    source: "source_extraction",
+    review: "source_review",
+    glossary: "glossary",
+    translation: "translation",
+    translation_review: "translation_review",
+  }[key];
+  return project.ai_usage?.stages?.[usageKey];
+}
+
+function pipelineTotal(project) {
+  const total = project.ai_usage?.total;
+  const totalCost = cumulativeUsageCost(total) || "$0";
+  const detail = total?.requests > 0
+    ? ` tabindex="0" data-usage-detail="${escapeHtml(cumulativeUsageTitle(total))}"`
+    : "";
+  return `<div class="pipeline-total"${detail}>
+    <span>누적 AI 비용</span><strong>${escapeHtml(totalCost)}</strong>
+  </div>`;
+}
+
+function jobElapsedLabel(job, now = Date.now()) {
   const started = Date.parse(job.started_at || "");
-  const ended = Date.parse(job.finished_at || job.updated_at || "");
+  const active = ["queued", "running"].includes(job.status);
+  const ended = active
+    ? now
+    : Date.parse(job.finished_at || job.updated_at || "");
   if (!Number.isFinite(started) || !Number.isFinite(ended)) return "";
   const seconds = Math.max(0, Math.round((ended - started) / 1000));
   if (seconds < 60) return `${seconds}초`;
@@ -372,7 +444,7 @@ function jobDetailMeta(job) {
   const values = jobDetailValues(job);
   return `<div class="job-meta" data-job-meta${values.length ? "" : " hidden"}>
     ${values.map(
-      (value) => `<span>${escapeHtml(value)}</span>`,
+      (value) => `<span${value.startsWith("소요 ") ? " data-job-elapsed" : ""}>${escapeHtml(value)}</span>`,
     ).join("")}
   </div>`;
 }
@@ -401,6 +473,37 @@ function jobFailureDetail(job) {
       <span>${escapeHtml(detail.message || "처리하지 못했습니다.")}</span>
     </li>`).join("")}</ul>
   </details>`;
+}
+
+function partialSourceReviewPages(job) {
+  const failures = job?.result?.acquisition?.failures;
+  if (job?.status !== "partial" || job?.source_type !== "pdf" || !Array.isArray(failures)) {
+    return [];
+  }
+  return [...new Set(
+    failures.map((failure) => failure?.page).filter(Number.isInteger),
+  )].sort((left, right) => left - right);
+}
+
+function partialSourceRecoveryActions(project, job) {
+  if (!partialSourceReviewPages(job).length) return "";
+  const replace = project.source_replacement?.allowed
+    ? `<button class="job-replace-source-button" type="button"
+        data-register-source="${escapeHtml(project.project_id)}"
+        data-project-name="${escapeHtml(project.name)}"
+        data-source-type="${escapeHtml(project.source_type)}"
+        data-replace-source="true"
+        title="${escapeHtml(project.source_replacement.reason)}">
+        PDF 교체
+      </button>`
+    : "";
+  return `<div class="job-status-actions">
+    ${replace}
+    <button class="job-continue-review-button" type="button"
+      data-continue-partial-source="${escapeHtml(job.project_id)}">
+      검수에서 직접 수정
+    </button>
+  </div>`;
 }
 
 function sourceJobStatusLabel(status) {
@@ -437,6 +540,7 @@ function sourceJobStatus(project) {
     ${jobDetailMeta(job)}
     ${error}
     ${jobFailureDetail(job)}
+    ${partialSourceRecoveryActions(project, job)}
   </div>`;
 }
 
@@ -462,6 +566,7 @@ function sourceJobButton(project) {
     </button>`;
   }
   const previous = sourceJobFor(project.project_id);
+  const canContinuePartial = partialSourceReviewPages(previous).length > 0;
   const retry = (
     project.pipeline.source_processing_started
     || ["partial", "failed", "interrupted"].includes(previous?.status)
@@ -469,7 +574,10 @@ function sourceJobButton(project) {
   const action = project.source_type === "pdf"
     ? "PDF 원문 준비"
     : "이미지 OCR 및 원문 준비";
-  return `<button class="${actionClass(project, "source-job", "source-job-button")}" type="button"
+  const buttonClass = canContinuePartial
+    ? "source-job-button"
+    : actionClass(project, "source-job", "source-job-button");
+  return `<button class="${buttonClass}" type="button"
     data-start-source-job="${escapeHtml(project.project_id)}">
     ${action}${retry ? " 다시 실행" : " 시작"}
   </button>`;
@@ -706,10 +814,30 @@ function updateJobDisplay(kind, job) {
     meta.replaceChildren(...values.map((value) => {
       const item = document.createElement("span");
       item.textContent = value;
+      if (value.startsWith("소요 ")) item.dataset.jobElapsed = "";
       return item;
     }));
     meta.hidden = values.length === 0;
   }
+}
+
+function updateActiveJobElapsed() {
+  const jobsByKind = {
+    source: sourceJobs,
+    glossary: glossaryJobs,
+    translation: translationJobs,
+  };
+  const now = Date.now();
+  document.querySelectorAll("[data-job-status]").forEach((status) => {
+    const card = status.closest(".project-card[data-project-id]");
+    const job = jobsByKind[status.dataset.jobStatus]?.get(
+      card?.dataset.projectId,
+    );
+    if (!job || !["queued", "running"].includes(job.status)) return;
+    const elapsed = status.querySelector("[data-job-elapsed]");
+    const label = jobElapsedLabel(job, now);
+    if (elapsed && label) elapsed.textContent = `소요 ${label}`;
+  });
 }
 
 function updateActiveJobDisplays() {
@@ -729,6 +857,24 @@ function scheduleSourceJobPoll() {
   sourceJobPollTimer = null;
   if (activeBackgroundJob()) {
     sourceJobPollTimer = window.setTimeout(pollSourceJobs, 1000);
+  }
+}
+
+async function continuePartialSourceReview(job) {
+  const pages = partialSourceReviewPages(job);
+  if (!pages.length) return false;
+  try {
+    const result = await api("/api/jobs/source/continue", {
+      method: "POST",
+      body: JSON.stringify({project_id: job.project_id}),
+    });
+    sourceJobs.set(result.job.project_id, result.job);
+    showToast("실패한 페이지를 원문 검수에 포함했습니다.");
+    await openReview(job.project_id, "source");
+    return true;
+  } catch (error) {
+    showToast(error.message, true);
+    return false;
   }
 }
 
@@ -1036,7 +1182,7 @@ function stepState(project, key) {
     : currentAction.startsWith("glossary-")
     ? "glossary"
     : currentAction.startsWith("translation-")
-    ? "translation"
+    ? (currentAction === "translation-review" ? "translation_review" : "translation")
     : "";
   if (key === "source") {
     if (p.review_source_ready || p.final_source_approved) return "done";
@@ -1047,20 +1193,33 @@ function stepState(project, key) {
   if (key === "glossary") {
     if (p.termbase_status === "current") return "done";
   }
-  if (key === "translation" && p.final_translation_approved) return "done";
+  if (key === "translation") {
+    if (p.translation_status === "current" || p.final_translation_approved) {
+      return "done";
+    }
+  }
+  if (key === "translation_review" && p.final_translation_approved) return "done";
   return key === currentStep ? "current" : "";
 }
 
 function pipelineStep(project, key, label) {
   const state = stepState(project, key);
+  const usage = pipelineUsage(project, key);
+  const cost = cumulativeUsageCost(usage) || emptyStageCost(project, key);
+  const detail = usage?.requests > 0
+    ? ` tabindex="0" data-usage-detail="${escapeHtml(cumulativeUsageTitle(usage))}"`
+    : "";
   const stateLabel = state === "done"
     ? "완료"
     : state === "current"
     ? "현재"
     : "대기";
-  return `<span class="pipeline-step ${state}">
+  return `<span class="pipeline-step ${state}"${detail}>
     <span>${label}</span>
-    <span class="pipeline-step-state">${stateLabel}</span>
+    <span class="pipeline-step-meta">
+      <span class="pipeline-step-state">${stateLabel}</span>
+      <strong class="pipeline-step-cost">${escapeHtml(cost)}</strong>
+    </span>
   </span>`;
 }
 
@@ -1120,6 +1279,8 @@ function sourceRegistrationButton(project) {
   if (sourceJobIsActive(project.project_id)) return "";
   if (project.source_type) {
     if (!project.source_replacement?.allowed) return "";
+    const sourceJob = sourceJobFor(project.project_id);
+    if (partialSourceReviewPages(sourceJob).length) return "";
     return `<button class="source-register-button replace" type="button"
       data-register-source="${escapeHtml(project.project_id)}"
       data-project-name="${escapeHtml(project.name)}"
@@ -1316,7 +1477,9 @@ function projectCard(project) {
         ${pipelineStep(project, "source", "원문 추출")}
         ${pipelineStep(project, "review", "원문 검수")}
         ${pipelineStep(project, "glossary", "용어 정리")}
-        ${pipelineStep(project, "translation", "번역 검수")}
+        ${pipelineStep(project, "translation", "번역")}
+        ${pipelineStep(project, "translation_review", "번역 검수")}
+        ${pipelineTotal(project)}
       </div>
     </div>
     <div class="project-work">
@@ -2175,6 +2338,14 @@ document.querySelector(".filters").addEventListener("click", (event) => {
   render();
 });
 byId("projectGrid").addEventListener("click", (event) => {
+  const partialSourceButton = event.target.closest(
+    "[data-continue-partial-source]",
+  );
+  if (partialSourceButton) {
+    const job = sourceJobFor(partialSourceButton.dataset.continuePartialSource);
+    if (job) continuePartialSourceReview(job);
+    return;
+  }
   const sourceDownload = event.target.closest(
     "[data-download-source]",
   );
@@ -2273,3 +2444,4 @@ byId("projectGrid").addEventListener("click", (event) => {
 
 refresh(true);
 loadAiSettings(true).catch(() => {});
+window.setInterval(updateActiveJobElapsed, 1000);

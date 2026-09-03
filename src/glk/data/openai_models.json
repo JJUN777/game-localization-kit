@@ -1,18 +1,18 @@
 {
   "schema_version": 1,
   "provider": "openai",
-  "last_verified": "2026-08-09",
+  "last_verified": "2026-09-03",
   "source_url": "https://developers.openai.com/api/docs/guides/latest-model",
   "models": [
-    {
-      "id": "gpt-5.6-terra",
-      "description_ko": "성능과 비용의 균형이 좋아 일반 번역·OCR 작업에 권장합니다.",
-      "recommended": true
-    },
     {
       "id": "gpt-5.6-sol",
       "description_ko": "가장 높은 성능이 필요한 복잡한 규칙서 작업에 적합합니다.",
       "recommended": false
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "description_ko": "성능과 비용의 균형이 좋아 일반 번역·OCR 작업에 권장합니다.",
+      "recommended": true
     },
     {
       "id": "gpt-5.6-luna",

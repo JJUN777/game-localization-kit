@@ -12,12 +12,16 @@ from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from glk.application._hashing import FileHashCache, sha256_file_if_exists
+from glk.application.ai_usage_ledger import summarize_project_ai_usage
 from glk.application.project_service import (
     inspect_project,
     load_workspace_project_id,
     scan_projects,
 )
-from glk.application.source_registration_service import discover_source_images
+from glk.application.source_registration_service import (
+    discover_source_images,
+    project_source_recovery_replacement_allowed,
+)
 from glk.application.translation_prompt_service import (
     TranslationPromptError,
     load_translation_prompt_document,
@@ -498,11 +502,24 @@ def _project_document(
             )
         except DashboardOutputError:
             source_output = None
+    recovery_replacement_allowed = bool(
+        summary.source_type
+        and project_source_recovery_replacement_allowed(
+            load_workspace_project_id(summary.project_id, Path(summary.path).parent)
+        )
+    )
     replacement_allowed = bool(
         summary.source_type
-        and not pipeline["source_processing_started"]
+        and (
+            not pipeline["source_processing_started"]
+            or recovery_replacement_allowed
+        )
     )
-    if replacement_allowed:
+    if recovery_replacement_allowed:
+        replacement_reason = (
+            "처리에 실패한 원본을 교체할 수 있습니다. 아직 검수 내용은 없습니다."
+        )
+    elif replacement_allowed:
         replacement_reason = "원문 추출·OCR 시작 전까지 원본을 교체할 수 있습니다."
     elif summary.source_type:
         replacement_reason = "원문 추출·OCR이 시작되어 원본을 교체할 수 없습니다."
@@ -530,6 +547,7 @@ def _project_document(
             source_output.to_dict() if source_output is not None else None
         ),
         "outputs": [output.to_dict() for output in outputs],
+        "ai_usage": summarize_project_ai_usage(Path(summary.path)),
         "stage": summary.stage,
         "stage_label": _STAGE_LABELS.get(summary.stage, summary.stage),
         "progress": _STAGE_PROGRESS.get(summary.stage, 0),

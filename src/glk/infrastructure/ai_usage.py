@@ -7,12 +7,16 @@ from typing import Any
 
 
 _PRICES_USD_PER_MILLION: dict[str, tuple[float, float, float | None]] = {
-    # Gemini standard paid tier. Gemini 3.7/3.6 introductory rates expire
+    # Gemini standard paid tier. Gemini 3.8/3.7/3.6 introductory rates expire
     # after 2026-12-31; keep this table date-stamped in docs/COSTS.md.
+    "gemini-3.8-flash": (0.75, 3.75, 0.075),
     "gemini-3.7-flash": (0.75, 3.75, 0.075),
     "gemini-3.6-flash": (0.75, 3.75, 0.075),
     "gemini-3.5-flash": (1.50, 9.00, 0.15),
+    "gemini-3.5-flash-lite": (0.30, 2.50, 0.03),
     "gemini-3.1-flash-lite": (0.25, 1.50, 0.025),
+    # Retain legacy prices so existing workspaces keep meaningful cost totals
+    # after the Gemini 2.x models leave the recommended UI catalog.
     "gemini-2.5-flash": (0.30, 2.50, 0.03),
     "gemini-2.5-pro": (1.25, 10.00, 0.125),
     "gemini-2.5-flash-lite": (0.10, 0.40, 0.01),

@@ -6,7 +6,7 @@ from glk.infrastructure.ai_usage import AiUsageAccumulator
 
 class AiUsageAccumulatorTests(unittest.TestCase):
     def test_accumulates_gemini_usage_and_estimates_cost(self) -> None:
-        usage = AiUsageAccumulator("gemini", "gemini-2.5-flash")
+        usage = AiUsageAccumulator("gemini", "gemini-3.8-flash")
 
         usage.begin_request()
         usage.record_gemini(
@@ -27,7 +27,7 @@ class AiUsageAccumulatorTests(unittest.TestCase):
         self.assertEqual(result["thinking_tokens"], 100)
         self.assertEqual(result["total_tokens"], 1_500)
         self.assertTrue(result["pricing_available"])
-        self.assertAlmostEqual(result["estimated_cost_usd"], 0.001496)
+        self.assertAlmostEqual(result["estimated_cost_usd"], 0.00249)
 
     def test_accumulates_openai_cached_and_reasoning_tokens(self) -> None:
         usage = AiUsageAccumulator("openai", "gpt-5.6-terra")

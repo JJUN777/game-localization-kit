@@ -19,11 +19,12 @@ from glk.infrastructure.source_review_server import (
     SourceReviewHttpServer,
     create_source_review_server,
 )
+from glk.infrastructure.ai_usage import AiUsageAccumulator
 from tests.test_source_review_service import make_block, write_blocks
 
 
 def make_image_block(source_file: str) -> SourceBlock:
-    text = "Gain 10 {HP}."
+    text = "Gain 10 [HP]."
 
     return SourceBlock(
         schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
@@ -43,6 +44,32 @@ def make_image_block(source_file: str) -> SourceBlock:
         source_refs=("card.png",),
         source_hash="sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest(),
     )
+
+
+class FakePdfIconAuditProvider:
+    model_name = "test-icon-model"
+
+    def __init__(self) -> None:
+        self.usage = AiUsageAccumulator("gemini", self.model_name)
+        self.prompts: list[str] = []
+
+    def inspect(self, prompt: str, image: Image.Image) -> dict[str, object]:
+        self.prompts.append(prompt)
+        self.usage.begin_request()
+        self.usage.input_tokens += 120
+        self.usage.output_tokens += 20
+        self.last_image_size = image.size
+        return {
+            "icons": [
+                {
+                    "marker": "[DAMAGE]",
+                    "description": "orange diamond",
+                    "after_unit_id": "U001",
+                    "confidence": "high",
+                }
+            ],
+            "summary": "One meaningful icon found.",
+        }
 
 
 class SourceReviewServerTests(unittest.TestCase):
@@ -119,8 +146,31 @@ class SourceReviewServerTests(unittest.TestCase):
         self.assertIn("검증 전 미해결", html)
         self.assertIn('id="unresolvedFilter"', html)
         self.assertIn('id="approveUnresolvedIcons"', html)
-        self.assertIn("아이콘 표기를 직접 바꿨습니다", html)
-        self.assertIn("[ICON: 주황 마름모] → {DAMAGE}", html)
+        self.assertNotIn('id="allowTokens"', html)
+        self.assertIn("아이콘 token이 변경된 블록", html)
+        self.assertIn('id="iconAuditMode"', html)
+        self.assertIn('id="iconAuditRun"', html)
+        self.assertIn('id="editMode"', html)
+        self.assertIn('id="selectMode"', html)
+        self.assertIn('class="header-workflow"', html)
+        self.assertIn('id="bulkActions"', html)
+        self.assertIn("Shift+클릭으로 범위를 선택", html)
+        self.assertIn("function setBulkBlockSelection", html)
+        self.assertIn("function applyBulkExcluded", html)
+        self.assertIn("selectedBlocks.length === 1", html)
+        self.assertIn("scrollToCard = false", html)
+        self.assertIn("function reorderDraggedBlocks", html)
+        self.assertIn('className = "drag-handle"', html)
+        self.assertIn("const blockDisplayNumber", html)
+        self.assertIn('className = "box-number"', html)
+        self.assertIn("아이콘 검사(AI)", html)
+        self.assertIn("선택한 블록 검사", html)
+        self.assertIn("function setIconAuditBlockSelection", html)
+        self.assertIn("검사할 블록을 클릭하세요. Shift+클릭", html)
+        self.assertIn("AI 제안", html)
+        self.assertIn("저장된 결과", html)
+        self.assertIn("예상 비용", html)
+        self.assertIn("copy.textContent = value", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
         self.assertNotIn("__GLK_RETURN_URL_JSON__", html)
         self.assertIn("const RETURN_URL = null;", html)
@@ -157,6 +207,111 @@ class SourceReviewServerTests(unittest.TestCase):
         with urlopen(request, timeout=3) as response:
             self.assertEqual(response.status, 206)
             self.assertEqual(response.read(), b"%PDF-1.4")
+
+    def test_audits_selected_pdf_block_and_serves_its_crop(self) -> None:
+        prompt_path = self.project_path / "01_input/images/ocr_prompt.txt"
+        prompt_path.write_text(
+            "- [DAMAGE]: orange diamond with no inner mark.\n",
+            encoding="utf-8",
+        )
+        provider = FakePdfIconAuditProvider()
+        self.server.icon_audit_provider = provider
+        status, document = self._request("/api/review")
+        self.assertEqual(status, 200)
+        block = document["blocks"][0]
+
+        status, result = self._request(
+            "/api/icon-audit",
+            method="POST",
+            payload={
+                "review_sha256": document["review_sha256"],
+                "blocks": [{"id": block["id"], "text": block["text"]}],
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(result["inspected_blocks"], 1)
+        self.assertEqual(result["detected_icons"], 1)
+        self.assertEqual(result["usage"]["requests"], 1)
+        audited = result["results"][0]
+        self.assertEqual(audited["current_text"], "First text.")
+        self.assertEqual(audited["suggested_text"], "First [DAMAGE] text.")
+        self.assertFalse(audited["cached"])
+        self.assertIn("Never rewrite", provider.prompts[0])
+        self.assertTrue(
+            (self.project_path / ".glk/state/pdf_icon_audit.json").is_file()
+        )
+
+        status, cached_result = self._request(
+            "/api/icon-audit",
+            method="POST",
+            payload={
+                "review_sha256": document["review_sha256"],
+                "blocks": [{"id": block["id"], "text": block["text"]}],
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(cached_result["cached_blocks"], 1)
+        self.assertTrue(cached_result["results"][0]["cached"])
+        self.assertEqual(cached_result["usage"]["requests"], 0)
+        self.assertEqual(len(provider.prompts), 1)
+
+        status, changed_result = self._request(
+            "/api/icon-audit",
+            method="POST",
+            payload={
+                "review_sha256": document["review_sha256"],
+                "blocks": [{"id": block["id"], "text": "Changed text."}],
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(changed_result["cached_blocks"], 0)
+        self.assertEqual(changed_result["usage"]["requests"], 1)
+        self.assertEqual(len(provider.prompts), 2)
+        ledger_lines = (
+            self.project_path / ".glk/state/ai_usage.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(ledger_lines), 2)
+        ledger_events = [json.loads(line) for line in ledger_lines]
+        self.assertTrue(
+            all(event["stage"] == "source_review" for event in ledger_events)
+        )
+        self.assertTrue(
+            all(event["usage"]["requests"] == 1 for event in ledger_events)
+        )
+
+        crop_url = (
+            self.server.origin
+            + audited["crop_url"]
+            + "&token="
+            + quote(self.server.auth_token)
+        )
+        with urlopen(crop_url, timeout=3) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers.get_content_type(), "image/png")
+            self.assertTrue(response.read().startswith(b"\x89PNG"))
+
+    def test_icon_audit_requires_current_review_hash(self) -> None:
+        self.server.icon_audit_provider = FakePdfIconAuditProvider()
+        status, document = self._request("/api/review")
+        self.assertEqual(status, 200)
+
+        status, response = self._request(
+            "/api/icon-audit",
+            method="POST",
+            payload={
+                "review_sha256": "sha256:stale",
+                "blocks": [
+                    {
+                        "id": document["blocks"][0]["id"],
+                        "text": document["blocks"][0]["text"],
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(response["code"], "PDF_ICON_AUDIT_FAILED")
 
     def test_save_validate_finalize_and_conflict(self) -> None:
         status, document = self._request("/api/review")

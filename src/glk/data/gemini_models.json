@@ -1,12 +1,17 @@
 {
   "schema_version": 1,
   "provider": "gemini",
-  "last_verified": "2026-09-02",
+  "last_verified": "2026-09-03",
   "source_url": "https://ai.google.dev/gemini-api/docs/models",
   "models": [
     {
+      "id": "gemini-3.8-flash",
+      "description_ko": "PDF·이미지와 구조화 출력을 지원하는 최신 안정 Flash 모델",
+      "recommended": true
+    },
+    {
       "id": "gemini-3.7-flash",
-      "description_ko": "코딩과 에이전트 작업까지 지원하는 최신 안정 Flash 모델",
+      "description_ko": "복잡한 작업과 멀티모달 입력을 지원하는 안정 Flash 모델",
       "recommended": false
     },
     {
@@ -27,21 +32,6 @@
     {
       "id": "gemini-3.1-flash-lite",
       "description_ko": "대량 추출과 저비용 처리를 위한 3.x 안정 모델",
-      "recommended": false
-    },
-    {
-      "id": "gemini-2.5-flash",
-      "description_ko": "속도와 품질의 균형이 좋은 기본 모델",
-      "recommended": true
-    },
-    {
-      "id": "gemini-2.5-pro",
-      "description_ko": "복잡한 문서와 추론 작업에 적합한 고성능 모델",
-      "recommended": false
-    },
-    {
-      "id": "gemini-2.5-flash-lite",
-      "description_ko": "단순 추출과 대량 처리에 적합한 저비용 모델",
       "recommended": false
     }
   ]

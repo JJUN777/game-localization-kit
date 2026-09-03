@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -8,6 +9,7 @@ from pathlib import Path
 
 from glk.application import project_service
 from glk.application import _hashing
+from glk.application.ai_usage_ledger import append_ai_usage_event
 from glk.application.dashboard_service import (
     DashboardOutputError,
     get_dashboard_document,
@@ -128,6 +130,35 @@ class DashboardServiceTests(unittest.TestCase):
                 project["translation_prompt"]["value"],
             )
 
+    def test_includes_cumulative_icon_audit_usage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace_root = Path(temporary) / "workspaces"
+            location = create_project(
+                name="Cost Dashboard",
+                workspace_root=workspace_root,
+            )
+            append_ai_usage_event(
+                location.path,
+                stage="icon_audit",
+                operation="pdf_block_inspection",
+                usage={
+                    "model": "gemini-3.8-flash",
+                    "requests": 2,
+                    "input_tokens": 1_000,
+                    "output_tokens": 200,
+                    "thinking_tokens": 50,
+                    "cached_input_tokens": 0,
+                    "estimated_cost_usd": 0.0008,
+                },
+            )
+
+            project = get_dashboard_document(workspace_root)["projects"][0]
+            usage = project["ai_usage"]["stages"]["source_review"]
+
+            self.assertEqual(usage["requests"], 2)
+            self.assertEqual(usage["total_tokens"], 1_200)
+            self.assertEqual(usage["estimated_cost_usd"], 0.0008)
+
     def test_source_replacement_is_hidden_after_processing_starts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -155,6 +186,41 @@ class DashboardServiceTests(unittest.TestCase):
             after = get_dashboard_document(workspace_root)["projects"][0]
             self.assertFalse(after["source_replacement"]["allowed"])
             self.assertIn("시작되어", after["source_replacement"]["reason"])
+
+    def test_source_replacement_is_available_after_partial_acquisition(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace_root = root / "workspaces"
+            source_pdf = root / "rulebook.pdf"
+            source_pdf.write_bytes(b"%PDF-1.4\nsource\n")
+            location = create_project(
+                name="Partial Source",
+                workspace_root=workspace_root,
+            )
+            register_project_pdf(
+                project="partial_source",
+                file=source_pdf,
+                workspace_root=workspace_root,
+            )
+            (location.path / ".glk/state/pdf_acquisition.json").write_text(
+                json.dumps({
+                    "status": "partial",
+                    "failures": [{"page": 3, "code": "SOURCE_PROCESSING_FAILED"}],
+                }),
+                encoding="utf-8",
+            )
+
+            project = get_dashboard_document(workspace_root)["projects"][0]
+
+            self.assertTrue(project["source_replacement"]["allowed"])
+            self.assertIn("처리에 실패한 원본", project["source_replacement"]["reason"])
+
+            (location.path / ".glk/segments/source.jsonl").write_text(
+                "{}\n",
+                encoding="utf-8",
+            )
+            protected = get_dashboard_document(workspace_root)["projects"][0]
+            self.assertFalse(protected["source_replacement"]["allowed"])
 
     def test_image_source_files_use_relative_paths_and_natural_order(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

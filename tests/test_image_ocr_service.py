@@ -34,7 +34,7 @@ class FakeImageOcrProvider:
             "blocks": [
                 {
                     "type": "body",
-                    "text": "Deal 1{DMGR}.",
+                    "text": "Deal 1[DMGR].",
                     "bbox": [10, 20, 900, 800],
                     "legibility": "clear",
                 }
@@ -144,7 +144,7 @@ class ImageOcrServiceTests(unittest.TestCase):
             image_folder.mkdir()
             Image.new("RGB", (20, 10), "white").save(image_folder / "card-1.png")
             (image_folder / "ocr_prompt.txt").write_text(
-                "Eight-point burst is {DMGR}.\nKeep line order.\n",
+                "- [DMGR]: eight-point burst.\nKeep line order.\n",
                 encoding="utf-8",
             )
             (image_folder / "card-1.png.prompt.txt").write_text(
@@ -161,7 +161,7 @@ class ImageOcrServiceTests(unittest.TestCase):
             )
             self.assertTrue(first.ok)
             self.assertEqual(provider.calls, 1)
-            self.assertIn("Eight-point burst is {DMGR}.", provider.prompts[0])
+            self.assertIn("- [DMGR]: eight-point burst.", provider.prompts[0])
             self.assertIn("Read the footer.", provider.prompts[0])
             project_path = workspace_root / "card_set"
             self.assertEqual(
@@ -172,11 +172,11 @@ class ImageOcrServiceTests(unittest.TestCase):
             self.assertFalse((project_path / "02_source/assets").exists())
             self.assertEqual(
                 (project_path / "02_source/ocr/individual/card-1.txt").read_text().strip(),
-                "Deal 1{DMGR}.",
+                "Deal 1[DMGR].",
             )
             self.assertEqual(
                 (project_path / "02_source/ocr/combined.txt").read_text().strip(),
-                "[card-1.txt]\nDeal 1{DMGR}.\n\n======================",
+                "[card-1.txt]\nDeal 1[DMGR].\n\n======================",
             )
             prompt_path = project_path / "01_input/images/ocr_prompt.txt"
             prompt_path.write_bytes(
@@ -230,7 +230,7 @@ class ImageOcrServiceTests(unittest.TestCase):
             self.assertEqual(individual_path.read_bytes(), previous_individual)
             self.assertEqual(combined_path.read_bytes(), previous_combined)
             self.assertIn(
-                "Deal 1{DMGR}.",
+                "Deal 1[DMGR].",
                 (project_path / "02_source/ocr/combined.partial.txt").read_text(
                     encoding="utf-8"
                 ),

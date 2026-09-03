@@ -1387,7 +1387,7 @@ def build_parser() -> argparse.ArgumentParser:
     review_finalize_parser.add_argument(
         "--allow-token-changes",
         action="store_true",
-        help="Explicitly permit changes to {ICON} token counts",
+        help="Explicitly permit changes to [ICON_TOKEN] counts",
     )
     review_finalize_parser.add_argument(
         "--allow-unresolved-icons",

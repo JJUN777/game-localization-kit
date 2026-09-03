@@ -11,6 +11,8 @@ import threading
 from typing import Any
 from uuid import uuid4
 
+from glk.application.ai_usage_ledger import append_ai_usage_event
+from glk.application.project_service import load_project
 from glk.application.translation_review_service import (
     TranslationReviewConflictError,
 )
@@ -296,6 +298,21 @@ class TranslationRetryJobManager:
             result_payload = result.to_dict()
             status = "succeeded"
             error = None
+
+        usage = result_payload.get("usage") if result_payload else None
+        try:
+            location = load_project(self.project, self.workspace_root)
+            append_ai_usage_event(
+                location.path,
+                stage="translation_review",
+                operation="selective_retry",
+                status=status,
+                usage=usage if isinstance(usage, dict) else None,
+                context={"job_id": job_id},
+                event_id=f"translation-review:selective-retry:{job_id}",
+            )
+        except (OSError, UnicodeError, ValueError):
+            pass
 
         with self._lock:
             current_job = self._job

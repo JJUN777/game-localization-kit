@@ -394,6 +394,13 @@ class TranslationReviewServerTests(unittest.TestCase):
             warning_count=0,
             review_file=str(self.project_path / "04_translation/review.txt"),
             revision_file=str(self.project_path / "04_translation/revisions/retry.json"),
+            usage={
+                "model": "test-model",
+                "requests": 1,
+                "input_tokens": 800,
+                "output_tokens": 200,
+                "estimated_cost_usd": 0.002,
+            },
         )
         started = threading.Event()
         release = threading.Event()
@@ -479,6 +486,14 @@ class TranslationReviewServerTests(unittest.TestCase):
                 encoding="utf-8"
             ),
         )
+        ledger_events = [
+            json.loads(line)
+            for line in (self.project_path / ".glk/state/ai_usage.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        self.assertEqual(ledger_events[-1]["stage"], "translation_review")
+        self.assertEqual(ledger_events[-1]["usage"]["requests"], 1)
 
     def test_failed_retry_job_exposes_reason_and_can_be_retried(self) -> None:
         _, document, _ = self._request("/api/review")

@@ -156,6 +156,13 @@ GUI는 같은 등록·실행 규칙을 application service로 재사용합니다
 AI 설정, background job과 재시도 화면의 구체적인 동작은
 [GUI 사용 가이드](GUI.md)를 참고합니다.
 
+GUI에서 PDF 일부 페이지만 처리하지 못한 경우 성공한 결과와 모든 페이지
+이미지를 보존합니다. 검수 작업물이 생기기 전에는 `PDF 교체` 또는 재시도를
+선택할 수 있고, `검수에서 직접 수정`을 선택하면 실패한 페이지를
+`[ILLEGIBLE]` 임시 block으로 원문 검수에 넘깁니다. 이 block은 원본 이미지를
+보고 직접 입력하거나 제외한 뒤에만 최종 승인할 수 있습니다. 이미 검수 block이나
+후속 작업물이 있으면 사람의 작업을 보호하기 위해 원본 교체를 허용하지 않습니다.
+
 원본을 등록한 뒤에는 입력 경로를 생략할 수 있습니다.
 
 ```bash
@@ -198,8 +205,8 @@ card_images/
 아이콘은 참조 이미지를 매 요청마다 보내지 않고 공통 prompt에 시각적 특징과 출력 token을 설명합니다.
 
 ```text
-- {DEFENSE}: 속이 빈 방패 외곽선. 중앙에는 다른 문양이 없음.
-- {HEALTH}: 위쪽이 두 갈래로 둥글고 아래쪽이 뾰족한 하트 실루엣.
+- [DEFENSE]: 속이 빈 방패 외곽선. 중앙에는 다른 문양이 없음.
+- [HEALTH]: 위쪽이 두 갈래로 둥글고 아래쪽이 뾰족한 하트 실루엣.
 정의하지 않은 아이콘은 [ICON: concise visible description]으로 표시한다.
 ```
 
@@ -220,7 +227,7 @@ card_images/
 QA는 LLM을 호출하거나 원문을 자동 수정하지 않습니다. 현재 검사 범위:
 
 - `[ILLEGIBLE]`, 미확정 `[ICON: ...]`, replacement character
-- `{HP}` 같은 token의 괄호 손상과 허용되지 않은 token
+- `[HP]` 같은 icon token의 괄호 손상과 허용되지 않은 token
 - 숫자와 같은 문자열에 섞인 `O/0`, `I/l/1` 혼동 후보
 - identifier 형식·중복과 source hash 불일치
 - OCR provider가 남긴 warning과 불확실한 legibility
@@ -231,15 +238,46 @@ QA는 LLM을 호출하거나 원문을 자동 수정하지 않습니다. 현재 
 glk review source --project sample_rulebook
 ```
 
-PDF는 추출 단계에서 렌더링한 페이지 이미지가 표시되며, 이미지 OCR 프로젝트는 `01_input/images/`의 실제 이미지가 표시됩니다. 화면에서 다음 작업을 할 수 있습니다.
+PDF는 추출 단계에서 렌더링한 페이지 이미지가 표시되며, 이미지 OCR 프로젝트는
+`01_input/images/`의 실제 이미지가 표시됩니다. 화면은 작업 목적에 따라 다음
+두 모드로 나뉩니다.
 
-- 추출문 수정
-- 같은 PDF 페이지 또는 같은 이미지 안에서 block 순서 변경
-- 불필요하거나 잘못 잡힌 block 제외
-- 누락된 영역을 원본 위에서 드래그하고 새 block 추가
-- QA 확인, 저장, 검사와 최종 승인
+- `텍스트 편집`: block 본문만 수정합니다.
+- `블록 편집`: 본문을 잠그고 block 선택, 제외·복원, 읽기 순서 변경, 누락 문단
+  추가와 PDF 아이콘 검사를 수행합니다.
+
+`블록 편집`에서는 카드·본문·원본 영역·체크 상자를 눌러 block을 선택합니다.
+Shift+클릭으로 범위를 선택하고 화면 아래 작업 막대에서 선택한 block을 일괄
+제외하거나 복원할 수 있습니다. `⠿` 손잡이로 같은 페이지 안에서 한 개 또는
+선택 묶음을 끌어 순서를 바꾸며, `↑`·`↓` 버튼도 그대로 지원합니다. 페이지를
+넘어서는 순서 이동은 허용하지 않습니다.
+
+원본 영역과 오른쪽 카드는 페이지마다 1부터 다시 시작하는 같은 작업 번호를
+표시합니다. PDF block을 누르면 오른쪽 카드가 해당 위치로 스크롤됩니다. block
+하나를 선택하고 `텍스트 편집`으로 전환하면 같은 입력란으로 이동해 바로 수정할
+수 있습니다.
+
+`누락 문단 추가`는 `블록 편집`의 상단 도구로 표시됩니다. 원본 위에서 영역을
+그리면 새 block을 만들고 `텍스트 편집`으로 전환합니다. 화면의 둘째 작업 줄에서
+QA 확인, 저장, 검증과 최종 승인을 실행합니다.
 
 수동 block은 현재 원본의 0~1000 정규화 bbox를 보존합니다. PDF 페이지나 이미지 파일 자체의 순서를 바꾸는 것은 허용하지 않습니다.
+
+### PDF 아이콘 검사
+
+PDF 프로젝트의 `블록 편집`에서 `아이콘 검사(AI)`를 선택하면 아이콘이 들어간
+block만 골라 AI에 확인을 요청할 수 있습니다. 제외된 block은 숨기고, Shift+클릭
+범위 선택과 페이지 전체 선택을 지원하며, 한 번에 최대 24개를 검사합니다.
+`아이콘 검사 결과`에는 원본 crop, 현재 원문, AI 제안과 이번 실행의 요청 수,
+입력·출력 token, 예상 비용이 표시됩니다. 각 제안은 사용자가 `적용`해야 원문에
+반영됩니다.
+
+검사 prompt는 내부에 고정되어 있습니다. `ocr_prompt.txt`에 정의된 아이콘은
+`[TOKEN]`, 확정할 수 없는 아이콘은 `[ICON: visible description]` 형식으로
+제안합니다. block별 결과는 `.glk/state/pdf_icon_audit.json`에 저장하며 원문,
+bbox, 페이지 이미지, 아이콘 정의, provider·model과 prompt version이 같으면 API를
+다시 호출하지 않습니다. 실제 호출의 사용량과 예상 비용은
+`.glk/state/ai_usage.jsonl`의 `source_review` 단계에 누적합니다.
 
 ### 텍스트 편집기 사용
 
@@ -260,7 +298,7 @@ Increase your HP by 10.
 
 ## 5. 최종 원문 승인
 
-브라우저의 `검사`와 `최종 승인` 버튼을 사용하거나, CLI에서 실행합니다.
+브라우저의 `검증`과 `최종 승인` 버튼을 사용하거나, CLI에서 실행합니다.
 
 ```bash
 glk review finalize --project sample_rulebook --dry-run   # 파일을 쓰지 않는 검사
@@ -269,7 +307,7 @@ glk review finalize --project sample_rulebook             # 최종화
 
 검사 항목: marker, block 순서, 빈 본문, 미해결 OCR 표시, token 구조와 stale 상태
 
-`{HP}` 같은 token 변경을 의도했다면 원본을 확인한 뒤에만 사용합니다.
+`[HP]` 같은 icon token 변경을 의도했다면 원본을 확인한 뒤에만 사용합니다.
 
 ```bash
 glk review finalize --project sample_rulebook --allow-token-changes
@@ -389,7 +427,7 @@ GUI의 prompt 편집, background job, 이어하기와 전체 재번역 화면은
 glk translate \
   --project sample_rulebook \
   --prompt prompts/primal_translation.txt \
-  --model gemini-2.5-flash
+  --model gemini-3.8-flash
 ```
 
 ### Prompt 우선순위
@@ -606,6 +644,9 @@ workspaces/<project_id>/
     ├── cache/
     ├── segments/
     ├── state/
+    │   ├── ai_usage.jsonl            # 단계별 AI 사용량 원장
+    │   ├── pdf_icon_audit.json       # PDF 아이콘 검사 cache
+    │   └── ...
     └── reports/
 ```
 

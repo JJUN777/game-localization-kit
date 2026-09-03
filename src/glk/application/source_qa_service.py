@@ -22,8 +22,15 @@ from glk.domain.workspace import WorkspacePaths
 from glk.domain.source_qa import SOURCE_QA_SCHEMA_VERSION, SourceQaIssue
 
 
-SOURCE_QA_VERSION = "source-qa-local-v5"
-_TOKEN_PATTERN = re.compile(r"\{([A-Za-z][A-Za-z0-9_]*)\}")
+SOURCE_QA_VERSION = "source-qa-local-v6"
+_TOKEN_PATTERN = re.compile(r"\[(?!(?:ICON|ILLEGIBLE)\])([A-Z][A-Z0-9_]*)\]")
+_TOKEN_DEFINITION_PATTERN = re.compile(
+    r"^\s*-\s*\[([A-Z][A-Z0-9_]*)\]\s*:\s*\S.*$",
+    re.MULTILINE,
+)
+_MALFORMED_TOKEN_PATTERN = re.compile(
+    r"\[(?!(?:ICON\s*:|ILLEGIBLE(?:\]|$)))[A-Z][A-Z0-9_]*(?:[^A-Z0-9_\]]|$)",
+)
 _UNRESOLVED_ICON_PATTERN = re.compile(r"\[ICON:\s*[^\]]+\]", re.IGNORECASE)
 _WORD_PATTERN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9]+(?:[/-][A-Za-z0-9]+)*(?![A-Za-z0-9])")
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9]+(?:[._/-][A-Za-z0-9]+)*$")
@@ -105,7 +112,7 @@ def _load_allowed_tokens(project_path: Path) -> tuple[tuple[str, ...], bytes]:
         raise SourceQaError(f"OCR prompt is not valid UTF-8: {prompt_path}") from error
     normalized = normalize_text_newlines(text)
     return (
-        tuple(sorted(set(_TOKEN_PATTERN.findall(normalized)))),
+        tuple(sorted(set(_TOKEN_DEFINITION_PATTERN.findall(normalized)))),
         normalized.encode("utf-8"),
     )
 
@@ -205,12 +212,8 @@ def _block_issues(block: SourceBlock, allowed_tokens: set[str]) -> list[SourceQa
             "원문에 깨진 문자를 나타내는 Unicode 대체 문자(�)가 있습니다.",
         )
 
-    valid_token_spans = [match.span() for match in _TOKEN_PATTERN.finditer(text)]
-    token_stripped = text
-    for start, end in reversed(valid_token_spans):
-        token_stripped = token_stripped[:start] + token_stripped[end:]
-    if "{" in token_stripped or "}" in token_stripped:
-        add("error", "TOKEN_MALFORMED", "중괄호 token 형식이 올바르지 않습니다.")
+    if _MALFORMED_TOKEN_PATTERN.search(text):
+        add("error", "TOKEN_MALFORMED", "대괄호 icon token 형식이 올바르지 않습니다.")
 
     tokens = _TOKEN_PATTERN.findall(text)
     if allowed_tokens:
@@ -218,14 +221,14 @@ def _block_issues(block: SourceBlock, allowed_tokens: set[str]) -> list[SourceQa
             add(
                 "warning",
                 "TOKEN_UNKNOWN",
-                f"Token {{{token}}}이 OCR prompt에 정의되어 있지 않습니다.",
-                f"{{{token}}}",
+                f"Token [{token}]이 OCR prompt에 정의되어 있지 않습니다.",
+                f"[{token}]",
             )
     for filename_token in _IMAGE_FILENAME_PATTERN.findall(text):
         add(
             "warning",
             "ICON_FILENAME_LITERAL",
-            "아이콘이 중괄호 token 대신 이미지 파일명으로 인식되었습니다.",
+            "아이콘이 대괄호 token 대신 이미지 파일명으로 인식되었습니다.",
             filename_token,
         )
 

@@ -12,7 +12,12 @@ from uuid import uuid4
 
 from glk.application._cache import read_json_object
 from glk.application._io import write_bytes_atomic, write_json_atomic
-from glk.application.extraction_service import ExtractionResult, extract_project_pdf
+from glk.application.ai_usage_ledger import append_ai_usage_event
+from glk.application.extraction_service import (
+    ExtractionResult,
+    ensure_project_pdf_page_image,
+    extract_project_pdf,
+)
 from glk.application.glossary_service import (
     GlossaryBuildError,
     GlossaryReviewStaleError,
@@ -395,13 +400,32 @@ def _acquisition_failure_message(
         for item in failure_items
         if isinstance(item, dict) and item.get("code")
     ]
-    detail = _safe_provider_error(codes, model)
+    detail = _acquisition_failure_hint(failure_items, codes=codes, model=model)
     if all_failed:
         return detail
     failed_count = len(failure_items)
     if total > 0 and failed_count > 0:
         return f"전체 {total}개 중 {failed_count}개 처리에 실패했습니다. {detail}"
     return f"일부 원본 처리에 실패했습니다. {detail}"
+
+
+def _acquisition_failure_hint(
+    failures: list[Any],
+    *,
+    codes: list[str],
+    model: str,
+) -> str:
+    if any(
+        isinstance(item, dict)
+        and "No embedded text fragments were found"
+        in str(item.get("error") or "")
+        for item in failures
+    ):
+        return (
+            "PDF 페이지에서 추출 가능한 텍스트를 찾지 못했습니다. "
+            "검수에서 직접 입력하거나 텍스트가 포함된 PDF로 교체하세요."
+        )
+    return _safe_provider_error(codes, model)
 
 
 def _acquisition_failure_details(
@@ -424,9 +448,14 @@ def _acquisition_failure_details(
             if source_type == "pdf"
             else str(identifier or "이미지")
         )
-        details.append(
-            {"item": item, "message": _safe_provider_error([code], model)}
-        )
+        details.append({
+            "item": item,
+            "message": _acquisition_failure_hint(
+                [failure],
+                codes=[code],
+                model=model,
+            ),
+        })
     return details
 
 
@@ -933,6 +962,48 @@ class DashboardJobManager:
         )
         self._glossary_jobs.load()
         self._translation_jobs.load()
+        self._backfill_saved_job_usage()
+
+    def _record_job_usage(
+        self,
+        *,
+        project_id: str,
+        job_id: str,
+        stage: str,
+        operation: str,
+        status: str,
+        result: dict[str, Any] | None,
+    ) -> None:
+        usage = result.get("usage") if isinstance(result, dict) else None
+        try:
+            location = load_workspace_project_id(project_id, self.workspace_root)
+            append_ai_usage_event(
+                location.path,
+                stage=stage,
+                operation=operation,
+                status=status,
+                usage=usage if isinstance(usage, dict) else None,
+                context={"job_id": job_id},
+                event_id=f"dashboard:{operation}:{job_id}",
+            )
+        except (OSError, UnicodeError, ValueError):
+            return
+
+    def _backfill_saved_job_usage(self) -> None:
+        for stage, operation, store in (
+            ("source_extraction", "source_pipeline", self._source_jobs),
+            ("translation", "initial_translation", self._translation_jobs),
+        ):
+            for project_id, job in store.records.items():
+                if job.status in TERMINAL_JOB_STATUSES:
+                    self._record_job_usage(
+                        project_id=project_id,
+                        job_id=job.job_id,
+                        stage=stage,
+                        operation=operation,
+                        status=job.status,
+                        result=job.result,
+                    )
 
     def _upgrade_acquisition_failure(
         self,
@@ -969,6 +1040,11 @@ class DashboardJobManager:
             total=len(selected),
             all_failed=all_failed,
         )
+        failure_details = _acquisition_failure_details(
+            acquisition,
+            source_type=job.source_type,
+            model=job.model,
+        )
         progress_message = (
             "원문 준비 작업에 실패했습니다."
             if all_failed
@@ -978,11 +1054,13 @@ class DashboardJobManager:
             job.status == status
             and job.error == error
             and job.progress_message == progress_message
+            and job.result.get("failure_details") == failure_details
         ):
             return False
         job.status = status
         job.result["status"] = status
         job.result["error"] = error
+        job.result["failure_details"] = failure_details
         job.error = error
         job.progress_message = progress_message
         job.updated_at = _utc_now()
@@ -1009,6 +1087,17 @@ class DashboardJobManager:
                 and job.status in ACTIVE_JOB_STATUSES
                 for store in self._stores
             )
+
+    def clear_source_job(self, project_id: str) -> None:
+        """Forget a terminal source job after its original is replaced."""
+        with self._lock:
+            job = self._source_jobs.records.get(project_id)
+            if job is not None and job.status in ACTIVE_JOB_STATUSES:
+                raise DashboardJobConflict(
+                    "This project already has a source job running."
+                )
+            self._source_jobs.records.pop(project_id, None)
+            self._source_jobs.path_for(project_id).unlink(missing_ok=True)
 
     def _ensure_start_allowed(self, project_id: str) -> None:
         if self._closed:
@@ -1097,6 +1186,94 @@ class DashboardJobManager:
                 target=self._execute_source,
                 thread_name=f"glk-source-job-{project_id}",
             )
+
+    def continue_partial_source_review(
+        self,
+        *,
+        project_id: str,
+    ) -> dict[str, Any]:
+        """Prepare manual review from a partially extracted PDF after confirmation."""
+        with self._lock:
+            self._ensure_start_allowed(project_id)
+            job = self._source_jobs.records.get(project_id)
+            if job is None or job.status != "partial" or job.source_type != "pdf":
+                raise DashboardJobError(
+                    "Only a partially processed PDF can continue to manual review."
+                )
+            acquisition = (
+                job.result.get("acquisition")
+                if isinstance(job.result, dict)
+                else None
+            )
+            failures = (
+                acquisition.get("failures")
+                if isinstance(acquisition, dict)
+                else None
+            )
+            failed_page_values: set[int] = set()
+            for failure in failures or []:
+                page_value = (
+                    failure.get("page")
+                    if isinstance(failure, dict)
+                    else None
+                )
+                if (
+                    isinstance(page_value, int)
+                    and not isinstance(page_value, bool)
+                    and page_value > 0
+                ):
+                    failed_page_values.add(page_value)
+            failed_pages = sorted(failed_page_values)
+            if not failed_pages:
+                raise DashboardJobError(
+                    "The partial PDF job has no reviewable failed pages."
+                )
+            job_id = job.job_id
+
+        for page in failed_pages:
+            ensure_project_pdf_page_image(
+                project=project_id,
+                page_number=page,
+                workspace_root=self.workspace_root,
+            )
+        segmentation = segment_project_source(
+            project=project_id,
+            workspace_root=self.workspace_root,
+            force=True,
+            allow_partial=True,
+        )
+        qa = run_project_source_qa(
+            project=project_id,
+            workspace_root=self.workspace_root,
+        )
+
+        with self._lock:
+            current = self._source_jobs.matching(project_id, job_id)
+            if current is None or current.status != "partial":
+                raise DashboardJobConflict(
+                    "The source job changed while manual review was being prepared."
+                )
+            result = dict(current.result or {})
+            result.update(
+                {
+                    "ok": True,
+                    "status": "succeeded",
+                    "forced_partial_review": True,
+                    "manual_review_pages": failed_pages,
+                    "segmentation": segmentation.to_dict(),
+                    "qa": qa.to_dict(),
+                }
+            )
+            result.pop("error", None)
+            current.status = "succeeded"
+            current.progress_message = (
+                "추출하지 못한 페이지를 원문 검수에 포함했습니다."
+            )
+            current.result = result
+            current.error = None
+            current.updated_at = _utc_now()
+            self._source_jobs.persist(current)
+            return current.to_dict()
 
     def start_glossary_job(
         self,
@@ -1278,6 +1455,8 @@ class DashboardJobManager:
             str,
         ],
         complete_progress_on_success: bool = False,
+        usage_stage: str | None = None,
+        usage_operation: str | None = None,
     ) -> None:
         with self._lock:
             job = store.matching(project_id, job_id)
@@ -1336,6 +1515,15 @@ class DashboardJobManager:
             if complete_progress_on_success and status == "succeeded":
                 current_job.progress_current = current_job.progress_total
             store.persist(current_job)
+        if usage_stage and usage_operation:
+            self._record_job_usage(
+                project_id=project_id,
+                job_id=job_id,
+                stage=usage_stage,
+                operation=usage_operation,
+                status=status,
+                result=result,
+            )
 
     def _execute_source(self, job_id: str, project_id: str) -> None:
         def run(
@@ -1396,6 +1584,8 @@ class DashboardJobManager:
                 job.model,
             ),
             completion_message=completion_message,
+            usage_stage="source_extraction",
+            usage_operation="source_pipeline",
         )
 
     def _execute_glossary(self, job_id: str, project_id: str) -> None:
@@ -1515,6 +1705,8 @@ class DashboardJobManager:
             ),
             completion_message=completion_message,
             complete_progress_on_success=True,
+            usage_stage="translation",
+            usage_operation="initial_translation",
         )
 
     def close(self) -> None:

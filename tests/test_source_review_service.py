@@ -247,16 +247,16 @@ class SourceReviewServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
             project_path = self.create_source(
-                workspace_root, [make_block(1, "Gain {HP}.")]
+                workspace_root, [make_block(1, "Gain [HP].")]
             )
             (project_path / "01_input/images/ocr_prompt.txt").write_text(
-                "Heart: {HP}\nShield: {DEF}\n", encoding="utf-8"
+                "- [HP]: heart.\n- [DEF]: shield.\n", encoding="utf-8"
             )
             prepare_project_source_review(
                 project="review_project", workspace_root=workspace_root
             )
             review_path = project_path / "02_source/review.txt"
-            edited = review_path.read_text(encoding="utf-8").replace("{HP}", "{DEF}")
+            edited = review_path.read_text(encoding="utf-8").replace("[HP]", "[DEF]")
             review_path.write_bytes(edited.replace("\n", "\r\n").encode("utf-8"))
 
             with self.assertRaises(SourceReviewError):
@@ -270,7 +270,7 @@ class SourceReviewServiceTests(unittest.TestCase):
             )
             self.assertEqual(result.changed_blocks, 1)
             approved = read_blocks(project_path / ".glk/segments/approved_source.jsonl")
-            self.assertEqual(approved[0].corrected_text, "Gain {DEF}.")
+            self.assertEqual(approved[0].corrected_text, "Gain [DEF].")
 
     def test_browser_document_exposes_source_warnings_without_qa(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

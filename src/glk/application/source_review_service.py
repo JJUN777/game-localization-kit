@@ -34,7 +34,14 @@ _REVIEW_HEADER = f"[[GLK_REVIEW version={SOURCE_REVIEW_FORMAT_VERSION}]]"
 _SUPPORTED_HEADERS = {"[[GLK_REVIEW version=1]]", _REVIEW_HEADER}
 _SEPARATOR = "======================"
 _BLOCK_PATTERN = re.compile(r"^\[BLOCK ([a-z0-9][a-z0-9._-]*)\]$")
-_TOKEN_PATTERN = re.compile(r"\{([A-Za-z][A-Za-z0-9_]*)\}")
+_TOKEN_PATTERN = re.compile(r"\[(?!(?:ICON|ILLEGIBLE)\])([A-Z][A-Z0-9_]*)\]")
+_TOKEN_DEFINITION_PATTERN = re.compile(
+    r"^\s*-\s*\[([A-Z][A-Z0-9_]*)\]\s*:\s*\S.*$",
+    re.MULTILINE,
+)
+_MALFORMED_TOKEN_PATTERN = re.compile(
+    r"\[(?!(?:ICON\s*:|ILLEGIBLE(?:\]|$)))[A-Z][A-Z0-9_]*(?:[^A-Z0-9_\]]|$)",
+)
 _UNRESOLVED_ICON_PATTERN = re.compile(r"\[ICON:\s*[^\]]+\]", re.IGNORECASE)
 
 
@@ -408,7 +415,7 @@ def _load_allowed_tokens(project_path: Path) -> set[str]:
         prompt = prompt_path.read_text(encoding="utf-8")
     except UnicodeDecodeError as error:
         raise SourceReviewError(f"OCR prompt is not valid UTF-8: {prompt_path}") from error
-    return set(_TOKEN_PATTERN.findall(prompt))
+    return set(_TOKEN_DEFINITION_PATTERN.findall(prompt))
 
 
 def _validate_reviewed_text(
@@ -435,14 +442,13 @@ def _validate_reviewed_text(
                 f"Block {block.id} still contains an unresolved icon."
             )
         tokens = _TOKEN_PATTERN.findall(text)
-        token_stripped = _TOKEN_PATTERN.sub("", text)
-        if "{" in token_stripped or "}" in token_stripped:
+        if _MALFORMED_TOKEN_PATTERN.search(text):
             raise SourceReviewTokenError(
-                f"Block {block.id} contains malformed token braces."
+                f"Block {block.id} contains a malformed square-bracket icon token."
             )
         unknown_tokens = sorted(set(tokens) - allowed_tokens) if allowed_tokens else []
         if unknown_tokens:
-            formatted = ", ".join(f"{{{token}}}" for token in unknown_tokens)
+            formatted = ", ".join(f"[{token}]" for token in unknown_tokens)
             raise SourceReviewTokenError(
                 f"Block {block.id} contains tokens not defined in the OCR prompt: {formatted}."
             )

@@ -19,7 +19,7 @@ from glk.config import resolve_settings_root
 from glk.infrastructure.ai_usage import AiUsageAccumulator
 
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.8-flash"
 DEFAULT_REQUEST_TIMEOUT_MS = 180_000
 DEFAULT_RATE_LIMIT_DELAY_SECONDS = 60.0
 MAX_RETRY_DELAY_SECONDS = 300.0
@@ -149,7 +149,6 @@ def structured_generation_config(
 ) -> types.GenerateContentConfig:
     """Build JSON generation options without SDK automatic function calling."""
     return types.GenerateContentConfig(
-        temperature=0,
         system_instruction=system_instruction,
         response_mime_type="application/json",
         response_json_schema=response_json_schema,

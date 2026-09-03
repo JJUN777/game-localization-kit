@@ -22,7 +22,7 @@ from glk.domain.workspace import IMAGE_SOURCE_ROOT, WorkspacePaths, is_pdf_sourc
 from glk.extraction.layout import join_fragment_texts_with_warnings
 
 
-SEGMENTATION_VERSION = "source-block-v4"
+SEGMENTATION_VERSION = "source-block-v5"
 _VOLATILE_ACQUISITION_FIELDS = {"updated_at", "cached_pages", "cached_images"}
 
 
@@ -184,8 +184,19 @@ def _union_pdf_bbox(
     )
 
 
-def _validate_complete_run(metadata: dict[str, Any], path: Path) -> None:
-    if metadata.get("status") != "complete" or metadata.get("failures"):
+def _validate_complete_run(
+    metadata: dict[str, Any],
+    path: Path,
+    *,
+    allow_partial: bool = False,
+) -> None:
+    status = metadata.get("status")
+    failures = metadata.get("failures")
+    if status == "complete" and not failures:
+        return
+    if allow_partial and status == "partial" and isinstance(failures, list):
+        return
+    if status != "complete" or failures:
         raise SegmentationError(
             f"Source acquisition is not complete according to {path}; "
             "resolve failures before segmentation."
@@ -222,16 +233,78 @@ def _pdf_block_warnings(
     return tuple(dict.fromkeys(combined))
 
 
+def _partial_pdf_page_block(
+    *,
+    source_file: str,
+    page: int,
+    source_order: int,
+) -> SourceBlock:
+    raw_text = "[ILLEGIBLE]"
+    block = SourceBlock(
+        schema_version=SOURCE_BLOCK_SCHEMA_VERSION,
+        id=_block_id(
+            source_type="pdf",
+            source_file=source_file,
+            page=page,
+            block_order=1,
+        ),
+        source_type="pdf",
+        source_file=source_file,
+        page=page,
+        source_order=source_order,
+        block_order=1,
+        block_type="unresolved_page",
+        raw_text=raw_text,
+        corrected_text=None,
+        bbox=None,
+        legibility="uncertain",
+        status="flagged",
+        warnings=(
+            "이 페이지에서 내장 텍스트를 추출하지 못했습니다. "
+            "원본 이미지를 보고 원문을 직접 입력하거나, 번역 대상이 없으면 "
+            "이 블록을 제외하세요.",
+        ),
+        source_refs=("manual-review-required",),
+        source_hash=_source_hash(raw_text),
+    )
+    block.validate()
+    return block
+
+
 def _build_pdf_blocks(
-    project_path: Path, source_file: str
+    project_path: Path,
+    source_file: str,
+    *,
+    allow_partial: bool = False,
 ) -> tuple[list[SourceBlock], list[Path]]:
     paths = WorkspacePaths(project_path)
     document_path = paths.pdf_acquisition_state
     document = _read_json(document_path)
-    _validate_complete_run(document, document_path)
-    pages = document.get("successful_pages")
-    if not isinstance(pages, list) or not pages:
+    _validate_complete_run(
+        document,
+        document_path,
+        allow_partial=allow_partial,
+    )
+    successful_pages = document.get("successful_pages")
+    if not isinstance(successful_pages, list) or not successful_pages:
         raise SegmentationError("PDF document metadata has no successful pages.")
+    failed_pages: set[int] = set()
+    for failure in document.get("failures", []):
+        page_value = failure.get("page") if isinstance(failure, dict) else None
+        if (
+            isinstance(page_value, int)
+            and not isinstance(page_value, bool)
+            and page_value > 0
+        ):
+            failed_pages.add(page_value)
+    pages = (
+        document.get("selected_pages")
+        if allow_partial and failed_pages
+        else successful_pages
+    )
+    if not isinstance(pages, list) or not pages:
+        raise SegmentationError("PDF document metadata has no selected pages.")
+    successful_page_set = set(successful_pages)
     blocks: list[SourceBlock] = []
     input_paths = [document_path]
     source_order = 0
@@ -239,6 +312,25 @@ def _build_pdf_blocks(
         if not isinstance(page_value, int) or isinstance(page_value, bool) or page_value <= 0:
             raise SegmentationError(f"Invalid successful page number: {page_value!r}")
         page = page_value
+        if page in failed_pages:
+            page_image = paths.pdf_pages / f"page_{page:03d}.png"
+            if not page_image.is_file():
+                raise SegmentationError(
+                    f"Rendered PDF page is missing for manual review: {page_image}"
+                )
+            source_order += 1
+            blocks.append(
+                _partial_pdf_page_block(
+                    source_file=source_file,
+                    page=page,
+                    source_order=source_order,
+                )
+            )
+            continue
+        if page not in successful_page_set:
+            raise SegmentationError(
+                f"PDF page {page} is neither successful nor failed."
+            )
         stem = f"page_{page:03d}"
         layout_path = paths.pdf_layouts / f"{stem}.json"
         fragment_path = paths.pdf_fragments / f"{stem}.json"
@@ -447,13 +539,16 @@ def segment_project_source(
     workspace_root: str | Path = "workspaces",
     force: bool = False,
     dry_run: bool = False,
+    allow_partial: bool = False,
 ) -> SegmentationResult:
     location = load_project(project, workspace_root)
     paths = WorkspacePaths(location.path)
     if is_pdf_source_file(location.manifest.source_file):
         source_type = "pdf"
         blocks, input_paths = _build_pdf_blocks(
-            location.path, str(location.manifest.source_file)
+            location.path,
+            str(location.manifest.source_file),
+            allow_partial=allow_partial,
         )
     elif location.manifest.source_file == IMAGE_SOURCE_ROOT:
         source_type = "image"
