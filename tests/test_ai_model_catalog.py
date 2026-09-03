@@ -25,14 +25,12 @@ class GeminiModelCatalogTests(unittest.TestCase):
         self.assertEqual(
             model_ids,
             [
+                "gemini-3.8-flash",
                 "gemini-3.7-flash",
                 "gemini-3.6-flash",
                 "gemini-3.5-flash",
                 "gemini-3.5-flash-lite",
                 "gemini-3.1-flash-lite",
-                "gemini-2.5-flash",
-                "gemini-2.5-pro",
-                "gemini-2.5-flash-lite",
             ],
         )
         self.assertEqual(
@@ -47,6 +45,10 @@ class GeminiModelCatalogTests(unittest.TestCase):
         self.assertEqual(catalog["provider"], "openai")
         self.assertIn(DEFAULT_OPENAI_MODEL, model_ids)
         self.assertEqual(len(model_ids), len(set(model_ids)))
+        self.assertEqual(
+            model_ids,
+            ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+        )
         self.assertEqual(
             sum(model["recommended"] for model in catalog["models"]),
             1,

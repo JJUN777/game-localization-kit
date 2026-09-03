@@ -401,7 +401,7 @@ class DashboardServerTests(unittest.TestCase):
         status, initial = self._request("/api/settings/ai")
         self.assertEqual(status, 200)
         self.assertFalse(initial["settings"]["api_key_configured"])
-        self.assertEqual(initial["settings"]["model"], "gemini-2.5-flash")
+        self.assertEqual(initial["settings"]["model"], "gemini-3.8-flash")
         self.assertNotIn("api_key", initial["settings"])
         self.assertEqual(
             [
@@ -409,14 +409,12 @@ class DashboardServerTests(unittest.TestCase):
                 for model in initial["model_catalog"]["models"]
             ],
             [
+                "gemini-3.8-flash",
                 "gemini-3.7-flash",
                 "gemini-3.6-flash",
                 "gemini-3.5-flash",
                 "gemini-3.5-flash-lite",
                 "gemini-3.1-flash-lite",
-                "gemini-2.5-flash",
-                "gemini-2.5-pro",
-                "gemini-2.5-flash-lite",
             ],
         )
         self.assertEqual(
@@ -433,18 +431,18 @@ class DashboardServerTests(unittest.TestCase):
             method="PUT",
             payload={
                 "api_key": "dashboard-secret-key",
-                "model": "gemini-2.5-pro",
+                "model": "gemini-3.6-flash",
             },
         )
         self.assertEqual(status, 200)
         self.assertTrue(saved["settings"]["api_key_configured"])
-        self.assertEqual(saved["settings"]["model"], "gemini-2.5-pro")
+        self.assertEqual(saved["settings"]["model"], "gemini-3.6-flash")
         self.assertNotIn("dashboard-secret-key", json.dumps(saved))
 
         env_path = self.settings_root / ".env"
         env_text = env_path.read_text(encoding="utf-8")
         self.assertIn('GEMINI_API_KEY="dashboard-secret-key"', env_text)
-        self.assertIn('GEMINI_MODEL="gemini-2.5-pro"', env_text)
+        self.assertIn('GEMINI_MODEL="gemini-3.6-flash"', env_text)
 
         status, changed_model = self._request(
             "/api/settings/ai",

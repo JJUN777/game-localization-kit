@@ -298,7 +298,7 @@ Increase your HP by 10.
 
 ## 5. 최종 원문 승인
 
-브라우저의 `검사`와 `최종 승인` 버튼을 사용하거나, CLI에서 실행합니다.
+브라우저의 `검증`과 `최종 승인` 버튼을 사용하거나, CLI에서 실행합니다.
 
 ```bash
 glk review finalize --project sample_rulebook --dry-run   # 파일을 쓰지 않는 검사
@@ -427,7 +427,7 @@ GUI의 prompt 편집, background job, 이어하기와 전체 재번역 화면은
 glk translate \
   --project sample_rulebook \
   --prompt prompts/primal_translation.txt \
-  --model gemini-2.5-flash
+  --model gemini-3.8-flash
 ```
 
 ### Prompt 우선순위
@@ -644,6 +644,9 @@ workspaces/<project_id>/
     ├── cache/
     ├── segments/
     ├── state/
+    │   ├── ai_usage.jsonl            # 단계별 AI 사용량 원장
+    │   ├── pdf_icon_audit.json       # PDF 아이콘 검사 cache
+    │   └── ...
     └── reports/
 ```
 

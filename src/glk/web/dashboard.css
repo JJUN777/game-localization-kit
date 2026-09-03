@@ -9,7 +9,10 @@ body {
     sans-serif;
 }
 
-button, input { font: inherit; }
+button,
+input,
+select,
+textarea { font: inherit; }
 button { cursor: pointer; }
 
 button:focus-visible,
@@ -1096,6 +1099,11 @@ dialog::backdrop {
 .field label {
   font-size: 13px;
   font-weight: 700;
+}
+
+.field input,
+.field select {
+  height: 46px;
 }
 
 .field input,

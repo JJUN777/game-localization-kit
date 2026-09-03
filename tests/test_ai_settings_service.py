@@ -48,16 +48,16 @@ class AiSettingsServiceTests(unittest.TestCase):
         service = AiSettingsService(self.settings_root)
         status = service.save(
             api_key="test-secret-key",
-            model="gemini-2.5-pro",
+            model="gemini-3.6-flash",
         )
 
         env_path = self.settings_root / ".env"
         text = env_path.read_text(encoding="utf-8")
         self.assertIn('GEMINI_API_KEY="test-secret-key"', text)
-        self.assertIn('GEMINI_MODEL="gemini-2.5-pro"', text)
+        self.assertIn('GEMINI_MODEL="gemini-3.6-flash"', text)
         self.assertTrue(status.api_key_configured)
         self.assertEqual(status.api_key_source, "env_file")
-        self.assertEqual(status.model, "gemini-2.5-pro")
+        self.assertEqual(status.model, "gemini-3.6-flash")
         self.assertNotIn("test-secret-key", repr(status.to_dict()))
         self.assertEqual(os.environ["GEMINI_API_KEY"], "")
         self.assertEqual(os.environ["GEMINI_MODEL"], "")
@@ -119,7 +119,7 @@ class AiSettingsServiceTests(unittest.TestCase):
         service = AiSettingsService(self.settings_root)
 
         with self.assertRaises(AiSettingsError):
-            service.save(api_key="bad key", model="gemini-2.5-flash")
+            service.save(api_key="bad key", model="gemini-3.8-flash")
         self.assertEqual(
             env_path.read_text(encoding="utf-8"),
             "UNRELATED=value\n",

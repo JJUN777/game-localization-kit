@@ -142,7 +142,7 @@ class DashboardServiceTests(unittest.TestCase):
                 stage="icon_audit",
                 operation="pdf_block_inspection",
                 usage={
-                    "model": "gemini-2.5-flash",
+                    "model": "gemini-3.8-flash",
                     "requests": 2,
                     "input_tokens": 1_000,
                     "output_tokens": 200,

@@ -39,10 +39,10 @@ flowchart LR
 | 계층 | 책임 | 주요 모듈 |
 |---|---|---|
 | CLI | 인자, 대화형 입력, 사람이 읽는 출력, 종료 코드 | `cli.py` |
-| Application | 프로젝트 단위 use case, 캐시, 원자적 출력, 단계 연결 | 각 `*_service`, `ai_model_catalog`, 공통 `_io`, `_hashing`, `_translation_context`, `translation_types` |
+| Application | 프로젝트 단위 use case, 캐시, 원자적 출력, 단계 연결 | 각 `*_service`, `ai_model_catalog`, `ai_usage_ledger`, 공통 `_io`, `_hashing`, `_translation_context`, `translation_types` |
 | Domain | 외부 SDK와 파일 포맷에 독립적인 모델·검증 | `project.py`, `source_block.py`, `source_qa.py`, `translation_segment.py`, `translation_qa.py`, `approved_translation.py` |
 | Extraction | PDF layout, 이미지 OCR과 PDF 아이콘 검사 결과 처리 계약 | `layout.py`, `image_ocr.py`, `pdf_icon_audit.py` |
-| Infrastructure | 외부 모델 adapter와 로컬 대시보드·검수 서버 | `ai_provider.py`, `gemini_*`, `openai_*`, `dashboard_server.py`, `source_review_server.py`, `glossary_review_server.py`, `translation_review_server.py` |
+| Infrastructure | 외부 모델 adapter와 로컬 대시보드·검수 서버 | `ai_provider.py`, `ai_usage.py`, `gemini_*`, `openai_*`, `dashboard_server.py`, `dashboard_routes.py`, `source_review_server.py`, `glossary_review_server.py`, `translation_review_server.py` |
 
 CLI의 통합 명령(`glk run`)과 개별 명령은 application service를 공유합니다. `glk run`은 별도 추출 구현을 갖지 않고 PDF의 `extract_project_pdf()` 또는 이미지의 `ocr_project_images()`를 호출한 뒤 segmentation과 QA service를 연결합니다.
 
@@ -210,18 +210,24 @@ Gemini 또는 OpenAI layout·OCR·translation adapter를 생성합니다.
 
 JSON에는 공식 문서 확인일인 `last_verified`, 문서 주소인 `source_url`, API에
 그대로 전달하는 `models[].id`, 화면 설명인 `description_ko`, 기본 권장 여부인
-`recommended`를 기록합니다. 2026-09-02에 확인한 목록은 다음과 같습니다.
+`recommended`를 기록합니다. 2026-09-03에 확인한 목록은 다음과 같습니다.
 
 | API 모델 ID | 용도 |
 |---|---|
-| `gemini-3.7-flash` | 코딩과 에이전트 작업까지 지원하는 최신 안정 Flash 모델 |
+| `gemini-3.8-flash` | PDF·이미지와 구조화 출력을 지원하는 최신 권장 Flash 모델 |
+| `gemini-3.7-flash` | 복잡한 작업과 멀티모달 입력을 지원하는 안정 Flash 모델 |
 | `gemini-3.6-flash` | 속도와 지능의 균형이 좋은 안정 멀티모달 모델 |
 | `gemini-3.5-flash` | 복잡한 문서와 멀티모달 작업을 위한 안정 Flash 모델 |
 | `gemini-3.5-flash-lite` | 고처리량 자동화를 위한 빠르고 경제적인 안정 모델 |
 | `gemini-3.1-flash-lite` | 대량 추출과 저비용 처리를 위한 3.x 안정 모델 |
-| `gemini-2.5-flash` | 속도와 품질의 균형이 좋은 기본 모델 |
-| `gemini-2.5-pro` | 복잡한 문서와 추론 작업에 적합한 고성능 모델 |
-| `gemini-2.5-flash-lite` | 단순 추출과 대량 처리에 적합한 저비용 모델 |
+
+Gemini 2.x 모델은 새 프로젝트용 드롭다운에서 제외합니다. 기존 `.env`나
+workspace가 2.x 모델 ID를 명시하고 있으면 사용자 지정 모델로 계속 읽으며,
+저장된 과거 사용량의 비용 계산도 유지합니다.
+
+OpenAI 목록은 공식 GPT-5.6 위계에 따라 flagship `gpt-5.6-sol`, 균형형
+`gpt-5.6-terra`, 대량 처리형 `gpt-5.6-luna` 순서로 표시합니다. 기본 권장값은
+비용과 성능의 균형을 위한 `gpt-5.6-terra`입니다.
 
 목록을 갱신할 때는 공식 모델·지원 중단 문서에서 `generateContent`, 이미지·PDF
 입력, 구조화 출력과 생성 옵션 지원 여부를 확인한 뒤 안정 모델만 JSON에
@@ -366,7 +372,9 @@ version을 state와 cache key에 포함해 제공자를 바꾼 결과가 섞이�
 - PDF 아이콘 검사는 현재 원문 hash, 선택 block ID, 최대 24개 제한과 crop 범위를
   검증하고 cache 적중 시 외부 요청 생략
 - 외부 CDN, font, script 미사용
-- CSP 헤더 적용
+- 공통 디자인 token과 대시보드 CSS·JS는 패키지에 포함된 `/assets/*`에서만 제공
+- CSP는 `default-src 'self'`, `script-src 'self' 'unsafe-inline'`과
+  `style-src 'self' 'unsafe-inline'`을 적용하고 외부 origin 차단
 - 서버는 명시적인 원문 준비, PDF 아이콘 검사, 초벌 번역과 선택 재번역 요청에서만
   선택한 AI API 호출
 
@@ -375,6 +383,11 @@ version을 state와 cache key에 포함해 제공자를 바꾼 결과가 섞이�
 `LocalHttpRequestHandler`는 Host·Origin·token 인증, CSP를 포함한 공통 보안
 헤더와 JSON 요청·응답 처리를 제공합니다. 원문 검수만 화면에서 생성한 blob
 이미지를 표시해야 하므로 `img-src`의 `blob:` 허용을 명시적으로 추가합니다.
+`/assets/*`는 API와 달리 session token을 요구하지 않지만 Host가 localhost인지
+먼저 확인하고, 미리 등록한 `tokens.css`·`dashboard.css`·`dashboard.js`만
+패키지에서 읽어 제공합니다. 임의 파일 경로나 등록되지 않은 asset은 제공하지
+않습니다. 검수 화면에 inline script와 style이 남아 있으므로 현재 공통 CSP에는
+`'unsafe-inline'`이 필요합니다.
 네 server factory는 공통 port 검증을 거쳐 bool과 0~65535 범위 밖 값을
 동일하게 거부합니다.
 
