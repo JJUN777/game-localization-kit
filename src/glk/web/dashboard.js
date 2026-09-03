@@ -340,7 +340,7 @@ function jobElapsedLabel(job) {
   return remainder ? `${minutes}분 ${remainder}초` : `${minutes}분`;
 }
 
-function jobDetailMeta(job) {
+function jobDetailValues(job) {
   const values = [];
   if (
     Number.isInteger(job.progress_current)
@@ -365,11 +365,30 @@ function jobDetailMeta(job) {
       values.push("예상 비용 단가 미등록");
     }
   }
-  return values.length
-    ? `<div class="job-meta">${values.map(
-        (value) => `<span>${escapeHtml(value)}</span>`,
-      ).join("")}</div>`
-    : "";
+  return values;
+}
+
+function jobDetailMeta(job) {
+  const values = jobDetailValues(job);
+  return `<div class="job-meta" data-job-meta${values.length ? "" : " hidden"}>
+    ${values.map(
+      (value) => `<span>${escapeHtml(value)}</span>`,
+    ).join("")}
+  </div>`;
+}
+
+function jobProgress(job) {
+  const available = (
+    Number.isInteger(job.progress_current)
+    && Number.isInteger(job.progress_total)
+    && job.progress_total > 0
+  );
+  if (!available) {
+    return '<progress class="job-progress" data-job-progress hidden></progress>';
+  }
+  return `<progress class="job-progress" data-job-progress
+    value="${Math.min(job.progress_current, job.progress_total)}"
+    max="${job.progress_total}"></progress>`;
 }
 
 function jobFailureDetail(job) {
@@ -403,25 +422,16 @@ function sourceJobStatus(project) {
     job.status,
   );
   if (!active && !failed && job.status !== "succeeded") return "";
-  const progress = (
-    Number.isInteger(job.progress_current)
-    && Number.isInteger(job.progress_total)
-    && job.progress_total > 0
-  )
-    ? `<progress class="job-progress"
-        value="${Math.min(job.progress_current, job.progress_total)}"
-        max="${job.progress_total}"></progress>`
-    : "";
   const error = job.error
     ? `<p class="job-error">${escapeHtml(job.error)}</p>`
     : "";
-  return `<div class="job-status${failed ? " failed" : ""}">
+  return `<div class="job-status${failed ? " failed" : ""}" data-job-status="source">
     <div class="job-status-head">
-      <span>${sourceJobStatusLabel(job.status)}</span>
-      <span>${escapeHtml(job.model)}</span>
+      <span data-job-status-label>${sourceJobStatusLabel(job.status)}</span>
+      <span data-job-model>${escapeHtml(job.model)}</span>
     </div>
-    ${progress}
-    <p class="job-status-message">
+    ${jobProgress(job)}
+    <p class="job-status-message" data-job-status-message>
       ${escapeHtml(job.progress_message || "")}
     </p>
     ${jobDetailMeta(job)}
@@ -471,37 +481,32 @@ function glossaryJobStatus(project) {
   const active = ["queued", "running"].includes(job.status);
   const failed = ["failed", "interrupted"].includes(job.status);
   if (!active && !failed) return "";
-  const progress = (
-    Number.isInteger(job.progress_current)
-    && Number.isInteger(job.progress_total)
-    && job.progress_total > 0
-  )
-    ? `<progress class="job-progress"
-        value="${Math.min(job.progress_current, job.progress_total)}"
-        max="${job.progress_total}"></progress>`
-    : "";
   const error = job.error
     ? `<p class="job-error">${escapeHtml(job.error)}</p>`
     : "";
-  const label = {
-    queued: "용어 후보 생성 대기",
-    running: "용어 후보 생성 중",
-    failed: "용어 후보 생성 실패",
-    interrupted: "용어 후보 생성 중단",
-  }[job.status] || "상태 확인 필요";
-  return `<div class="job-status${failed ? " failed" : ""}">
+  const label = glossaryJobStatusLabel(job.status);
+  return `<div class="job-status${failed ? " failed" : ""}" data-job-status="glossary">
     <div class="job-status-head">
-      <span>${label}</span>
-      <span>로컬 작업</span>
+      <span data-job-status-label>${label}</span>
+      <span data-job-model>로컬 작업</span>
     </div>
-    ${progress}
-    <p class="job-status-message">
+    ${jobProgress(job)}
+    <p class="job-status-message" data-job-status-message>
       ${escapeHtml(job.progress_message || "")}
     </p>
     ${jobDetailMeta(job)}
     ${error}
     ${jobFailureDetail(job)}
   </div>`;
+}
+
+function glossaryJobStatusLabel(status) {
+  return {
+    queued: "용어 후보 생성 대기",
+    running: "용어 후보 생성 중",
+    failed: "용어 후보 생성 실패",
+    interrupted: "용어 후보 생성 중단",
+  }[status] || "상태 확인 필요";
 }
 
 function glossaryJobButton(project) {
@@ -555,38 +560,33 @@ function translationJobStatus(project) {
   const active = ["queued", "running"].includes(job.status);
   const failed = ["failed", "interrupted"].includes(job.status);
   if (!active && !failed && job.status !== "succeeded") return "";
-  const progress = (
-    Number.isInteger(job.progress_current)
-    && Number.isInteger(job.progress_total)
-    && job.progress_total > 0
-  )
-    ? `<progress class="job-progress"
-        value="${Math.min(job.progress_current, job.progress_total)}"
-        max="${job.progress_total}"></progress>`
-    : "";
   const error = job.error
     ? `<p class="job-error">${escapeHtml(job.error)}</p>`
     : "";
-  const label = {
-    queued: "초벌 번역 대기",
-    running: "초벌 번역 중",
-    succeeded: "초벌 번역 완료",
-    failed: "초벌 번역 실패",
-    interrupted: "초벌 번역 중단",
-  }[job.status] || "상태 확인 필요";
-  return `<div class="job-status${failed ? " failed" : ""}">
+  const label = translationJobStatusLabel(job.status);
+  return `<div class="job-status${failed ? " failed" : ""}" data-job-status="translation">
     <div class="job-status-head">
-      <span>${label}</span>
-      <span>${escapeHtml(job.model)}</span>
+      <span data-job-status-label>${label}</span>
+      <span data-job-model>${escapeHtml(job.model)}</span>
     </div>
-    ${progress}
-    <p class="job-status-message">
+    ${jobProgress(job)}
+    <p class="job-status-message" data-job-status-message>
       ${escapeHtml(job.progress_message || "")}
     </p>
     ${jobDetailMeta(job)}
     ${error}
     ${jobFailureDetail(job)}
   </div>`;
+}
+
+function translationJobStatusLabel(status) {
+  return {
+    queued: "초벌 번역 대기",
+    running: "초벌 번역 중",
+    succeeded: "초벌 번역 완료",
+    failed: "초벌 번역 실패",
+    interrupted: "초벌 번역 중단",
+  }[status] || "상태 확인 필요";
 }
 
 function translationReviewAttention(project) {
@@ -654,6 +654,76 @@ function setTranslationJobs(jobs) {
   );
 }
 
+function visibleProjectCard(projectId) {
+  return [...document.querySelectorAll(".project-card[data-project-id]")]
+    .find((card) => card.dataset.projectId === projectId) || null;
+}
+
+function updateJobDisplay(kind, job) {
+  if (!["queued", "running"].includes(job.status)) return;
+  const card = visibleProjectCard(job.project_id);
+  if (!card) return;
+  const status = card.querySelector(`[data-job-status="${kind}"]`);
+  if (!status) return;
+
+  const label = status.querySelector("[data-job-status-label]");
+  if (label) {
+    label.textContent = kind === "source"
+      ? sourceJobStatusLabel(job.status)
+      : kind === "glossary"
+      ? glossaryJobStatusLabel(job.status)
+      : translationJobStatusLabel(job.status);
+  }
+
+  const model = status.querySelector("[data-job-model]");
+  if (model) {
+    model.textContent = kind === "glossary" ? "로컬 작업" : (job.model || "");
+  }
+
+  const progress = status.querySelector("[data-job-progress]");
+  if (progress) {
+    const available = (
+      Number.isInteger(job.progress_current)
+      && Number.isInteger(job.progress_total)
+      && job.progress_total > 0
+    );
+    progress.hidden = !available;
+    if (available) {
+      progress.max = job.progress_total;
+      progress.value = Math.min(job.progress_current, job.progress_total);
+    } else {
+      progress.removeAttribute("max");
+      progress.removeAttribute("value");
+    }
+  }
+
+  const message = status.querySelector("[data-job-status-message]");
+  if (message) message.textContent = job.progress_message || "";
+
+  const meta = status.querySelector("[data-job-meta]");
+  if (meta) {
+    const values = jobDetailValues(job);
+    meta.replaceChildren(...values.map((value) => {
+      const item = document.createElement("span");
+      item.textContent = value;
+      return item;
+    }));
+    meta.hidden = values.length === 0;
+  }
+}
+
+function updateActiveJobDisplays() {
+  for (const job of sourceJobs.values()) {
+    updateJobDisplay("source", job);
+  }
+  for (const job of glossaryJobs.values()) {
+    updateJobDisplay("glossary", job);
+  }
+  for (const job of translationJobs.values()) {
+    updateJobDisplay("translation", job);
+  }
+}
+
 function scheduleSourceJobPoll() {
   window.clearTimeout(sourceJobPollTimer);
   sourceJobPollTimer = null;
@@ -697,7 +767,10 @@ async function pollSourceJobs() {
         );
       },
     );
-    if (completedSource || completedGlossary || completedTranslation) {
+    const completedJob = (
+      completedSource || completedGlossary || completedTranslation
+    );
+    if (completedJob) {
       dashboard = await api("/api/dashboard");
     }
     if (completedSource) {
@@ -734,7 +807,11 @@ async function pollSourceJobs() {
         completedTranslation.status !== "succeeded",
       );
     }
-    render();
+    if (completedJob) {
+      render();
+    } else {
+      updateActiveJobDisplays();
+    }
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -1206,7 +1283,8 @@ function projectCard(project) {
   const attentionClass = projectNeedsAttention(project)
     ? " needs-attention"
     : "";
-  return `<article class="project-card${attentionClass}">
+  return `<article class="project-card${attentionClass}"
+    data-project-id="${escapeHtml(project.project_id)}">
     <div class="project-overview">
       <div class="project-head">
         <div>

@@ -273,6 +273,13 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(status, HTTPStatus.OK)
         self.assertIsInstance(script, str)
         self.assertIn("MAX_SOURCE_UPLOAD_BYTES = 500 * 1024 * 1024", script)
+        self.assertIn("function updateActiveJobDisplays()", script)
+        self.assertIn('data-project-id="${escapeHtml(project.project_id)}"', script)
+        self.assertIn(
+            'message.textContent = job.progress_message || ""',
+            script,
+        )
+        self.assertIn("updateActiveJobDisplays();", script)
         status, tokens = self._request("/assets/tokens.css")
         self.assertEqual(status, HTTPStatus.OK)
         self.assertIn("prefers-color-scheme: dark", tokens)

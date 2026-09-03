@@ -780,6 +780,11 @@ h1 {
   accent-color: var(--ink-soft);
 }
 
+.job-progress[hidden],
+.job-meta[hidden] {
+  display: none;
+}
+
 .job-error {
   margin: 0;
   color: var(--accent-dark);
