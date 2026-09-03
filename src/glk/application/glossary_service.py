@@ -268,6 +268,7 @@ class _GlossaryImportContext:
     paths: WorkspacePaths
     blocks: tuple[SourceBlock, ...]
     approved_hash: str
+    expected_candidates: tuple[GlossaryCandidate, ...]
     expected_candidate_ids: frozenset[str]
 
 
@@ -1012,10 +1013,20 @@ def _prepare_glossary_import(
         paths=paths,
         blocks=tuple(blocks),
         approved_hash=approved_hash,
+        expected_candidates=tuple(expected_candidates),
         expected_candidate_ids=frozenset(
             candidate.candidate_id for candidate in expected_candidates
         ),
     )
+
+
+def load_project_glossary_candidate_baseline(
+    *,
+    project: str | Path,
+    workspace_root: str | Path = "workspaces",
+) -> tuple[GlossaryCandidate, ...]:
+    """Return the deterministic generated candidates behind a current review."""
+    return _prepare_glossary_import(project, workspace_root).expected_candidates
 
 
 def _normalize_glossary_row_fields(

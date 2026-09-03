@@ -248,6 +248,24 @@
       font-size: 11px;
       white-space: nowrap;
     }
+    .ai-note {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      margin-top: 6px;
+      padding: 3px 6px;
+      color: var(--ink-soft);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--soft);
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .ai-note[data-confidence="low"] {
+      color: var(--accent-dark);
+      border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+      background: var(--accent-soft);
+    }
     details { margin-top: 5px; color: var(--muted); font-size: 12px; }
     summary { cursor: pointer; color: var(--ink-soft); font-weight: 700; }
     .example {
@@ -294,6 +312,83 @@
       overflow: auto;
     }
     .dialog-list li + li { margin-top: 4px; }
+    .ai-dialog { width: min(720px, calc(100vw - 32px)); }
+    .ai-facts {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin: 18px 0 0;
+    }
+    .ai-fact {
+      min-width: 0;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+    .ai-fact dt {
+      margin: 0 0 2px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .ai-fact dd {
+      margin: 0;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .ai-result-summary {
+      margin-top: 14px;
+      color: var(--ink-soft);
+      font-size: 12px;
+    }
+    .ai-result-list {
+      max-height: min(52vh, 520px);
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: auto;
+    }
+    .ai-result-item {
+      display: grid;
+      grid-template-columns: minmax(145px, .8fr) minmax(240px, 1.4fr);
+      gap: 14px;
+      padding: 11px 12px;
+      background: var(--surface);
+    }
+    .ai-result-item + .ai-result-item { border-top: 1px solid var(--line); }
+    .ai-result-term { font-weight: 700; overflow-wrap: anywhere; }
+    .ai-result-meta { margin-top: 4px; color: var(--muted); font-size: 10px; }
+    .ai-result-reason { color: var(--ink-soft); font-size: 12px; }
+    .ai-result-translation { margin-bottom: 3px; color: var(--ink); font-weight: 700; }
+    .ai-result-empty { color: var(--muted); font-weight: 400; }
+    .ai-result-conflicts {
+      display: grid;
+      gap: 4px;
+      margin: 7px 0;
+    }
+    .ai-conflict {
+      padding: 6px 8px;
+      color: var(--accent-dark);
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+      border-radius: 6px;
+      background: var(--accent-soft);
+      font-size: 11px;
+    }
+    .ai-conflict strong { color: inherit; }
+    .ai-conflict-choice {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 8px;
+      color: var(--ink);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .ai-conflict-choice input { margin: 0; }
     dialog .button-secondary {
       color: var(--ink);
       border-color: var(--line);
@@ -346,6 +441,8 @@
       .actions .button { flex: 1; }
       main { padding: 16px 10px 60px; }
       .toolbar { top: 124px; }
+      .ai-facts { grid-template-columns: 1fr 1fr; }
+      .ai-result-item { grid-template-columns: 1fr; gap: 5px; }
     }
   </style>
 </head>
@@ -391,7 +488,13 @@
         </select>
         <input class="control search" id="search" type="search"
           aria-label="검색어" placeholder="원문 용어 검색">
-        <button class="button-table toolbar-add" id="add-button" type="button">
+        <button class="button-table toolbar-add" id="ai-triage-button" type="button">
+          후보 1차 정리(AI)
+        </button>
+        <button class="button-table hidden" id="ai-undo-button" type="button">
+          AI 적용 취소
+        </button>
+        <button class="button-table" id="add-button" type="button">
           수동 용어 추가
         </button>
       </div>
@@ -452,6 +555,35 @@
       </button>
     </div>
   </dialog>
+  <dialog class="ai-dialog" id="aiEstimateDialog" aria-labelledby="aiEstimateTitle">
+    <h2 id="aiEstimateTitle">후보 1차 정리(AI)</h2>
+    <p>
+      아직 검토하지 않은 자동 후보만 AI가 분류합니다. 결과를 확인한 뒤 직접 반영할 수 있습니다.
+    </p>
+    <dl class="ai-facts" id="aiEstimateFacts"></dl>
+    <div class="dialog-actions">
+      <button class="button button-secondary" id="cancelAiTriage" type="button">
+        취소
+      </button>
+      <button class="button button-primary" id="runAiTriage" type="button">
+        AI 정리 시작
+      </button>
+    </div>
+  </dialog>
+  <dialog class="ai-dialog" id="aiResultDialog" aria-labelledby="aiResultTitle">
+    <h2 id="aiResultTitle">AI 추천 결과</h2>
+    <p>추천은 아직 검수 내용에 반영되지 않았습니다.</p>
+    <div class="ai-result-summary" id="aiResultSummary"></div>
+    <div class="ai-result-list" id="aiResultList"></div>
+    <div class="dialog-actions">
+      <button class="button button-secondary" id="closeAiResult" type="button">
+        닫기
+      </button>
+      <button class="button button-primary" id="applyAiResult" type="button">
+        추천 반영
+      </button>
+    </div>
+  </dialog>
   <div class="toast" id="toast"></div>
   <script>
     "use strict";
@@ -471,6 +603,11 @@
       ui: "UI",
       phrase: "문구"
     };
+    const CONFIDENCE_LABELS = {
+      high: "높음",
+      medium: "보통",
+      low: "직접 확인"
+    };
     const SEARCH_PLACEHOLDERS = {
       source: "원문 용어 검색",
       translation: "번역어 검색",
@@ -487,7 +624,13 @@
       categoryFilter: "all",
       sortOrder: "default",
       selected: new Set(),
-      manualSequence: 0
+      manualSequence: 0,
+      aiBusy: false,
+      aiSuggestions: new Map(),
+      aiLatestResults: [],
+      aiConflictSelections: new Set(),
+      aiUndoSnapshot: null,
+      aiUndoDirtyBefore: null
     };
     const $ = (selector) => document.querySelector(selector);
 
@@ -584,6 +727,14 @@
       $("#bulk-apply").disabled = !hasSelection || !$("#bulk-status").value;
       $("#save-button").disabled = state.busy || !state.dirty;
       $("#import-button").disabled = state.busy;
+      const aiTargetCount = state.document.rows.filter(
+        (row) => !row.manual && row.candidate_id && row.status === "review"
+      ).length;
+      $("#ai-triage-button").disabled = state.busy || aiTargetCount === 0;
+      $("#ai-triage-button").textContent = state.aiBusy
+        ? "AI 정리 중…"
+        : "후보 1차 정리(AI)";
+      $("#ai-undo-button").classList.toggle("hidden", !state.aiUndoSnapshot);
     }
 
     function rowSearchText(row) {
@@ -683,7 +834,11 @@
         .map((item) => item.row);
     }
 
-    function markDirty() {
+    function markDirty({ preserveAiUndo = false } = {}) {
+      if (!preserveAiUndo) {
+        state.aiUndoSnapshot = null;
+        state.aiUndoDirtyBefore = null;
+      }
       state.dirty = true;
       refreshSummary();
     }
@@ -792,6 +947,20 @@
           ? `${item.occurrences}회${location}`
           : (item.manual ? "확정 시 원문 확인" : `0회${location}`);
         evidenceCell.append(make("div", "meta", evidenceSummary));
+        const aiSuggestion = state.aiSuggestions.get(item.candidate_id);
+        if (aiSuggestion) {
+          const conflicts = aiSuggestionConflicts(aiSuggestion);
+          const aiNote = make(
+            "span",
+            "ai-note",
+            `AI 제안 · ${STATUS_LABELS[aiSuggestion.recommended_status]}` +
+              ` · ${CONFIDENCE_LABELS[aiSuggestion.confidence]}` +
+              (conflicts.length ? " · 입력과 다름" : "")
+          );
+          aiNote.dataset.confidence = aiSuggestion.confidence;
+          aiNote.title = [aiSuggestion.reason, ...conflicts].join("\n");
+          evidenceCell.append(aiNote);
+        }
         if (item.example || item.variants) {
           const details = make("details");
           const summaryNode = make("summary", "", "실제 문맥 펼치기");
@@ -884,6 +1053,290 @@
       });
     }
 
+    function setAiSuggestions(suggestions) {
+      state.aiSuggestions = new Map(
+        (Array.isArray(suggestions) ? suggestions : []).map(
+          (suggestion) => [suggestion.candidate_id, suggestion]
+        )
+      );
+    }
+
+    function formatCostRange(low, high) {
+      if (low === null || high === null) return "단가 미등록";
+      if (low === 0 && high === 0) return "$0 · 저장된 결과 사용";
+      const digits = high < 0.01 ? 6 : 4;
+      return `$${Number(low).toFixed(digits)}–$${Number(high).toFixed(digits)}`;
+    }
+
+    function appendAiFact(parent, label, value) {
+      const item = make("div", "ai-fact");
+      item.append(make("dt", "", label), make("dd", "", value));
+      parent.append(item);
+    }
+
+    function showAiEstimate(estimate) {
+      const facts = $("#aiEstimateFacts");
+      facts.replaceChildren();
+      appendAiFact(facts, "대상 후보", `${estimate.target_count}개`);
+      appendAiFact(facts, "사용 모델", estimate.model);
+      appendAiFact(facts, "새 API 요청", `${estimate.request_count}회`);
+      appendAiFact(facts, "저장된 결과", `${estimate.cached_count}개`);
+      appendAiFact(
+        facts,
+        "예상 토큰",
+        estimate.request_count
+          ? `입력 약 ${estimate.estimated_input_tokens.toLocaleString()} · ` +
+            `출력 ${estimate.estimated_output_tokens_low.toLocaleString()}–` +
+            `${estimate.estimated_output_tokens_high.toLocaleString()}`
+          : "추가 사용 없음"
+      );
+      appendAiFact(
+        facts,
+        "예상 비용",
+        formatCostRange(
+          estimate.estimated_cost_usd_low,
+          estimate.estimated_cost_usd_high
+        )
+      );
+      $("#aiEstimateDialog").showModal();
+    }
+
+    function showAiResults(payload) {
+      state.aiLatestResults = payload.suggestions || [];
+      state.aiConflictSelections.clear();
+      setAiSuggestions([
+        ...state.aiSuggestions.values(),
+        ...state.aiLatestResults
+      ]);
+      const counts = { approved: 0, keep: 0, rejected: 0, review: 0 };
+      let conflictCount = 0;
+      state.aiLatestResults.forEach((item) => {
+        if (Object.hasOwn(counts, item.recommended_status)) {
+          counts[item.recommended_status] += 1;
+        }
+        if (hasAiContentConflict(item)) conflictCount += 1;
+      });
+      const usage = payload.usage;
+      const usageText = usage
+        ? ` · API ${usage.requests}회 · 입력 ${usage.input_tokens.toLocaleString()}` +
+          ` / 출력 ${usage.output_tokens.toLocaleString()} 토큰`
+        : "";
+      $("#aiResultSummary").textContent =
+        `승인 ${counts.approved} · 원문 유지 ${counts.keep} · 제외 ${counts.rejected}` +
+        ` · 직접 확인 ${counts.review} · 입력과 다른 추천 ${conflictCount}` +
+        ` · 캐시 ${payload.cached_count}${usageText}`;
+
+      const list = $("#aiResultList");
+      list.replaceChildren();
+      state.aiLatestResults.forEach((item) => {
+        const resultItem = make("div", "ai-result-item");
+        const heading = make("div");
+        heading.append(make("div", "ai-result-term", item.source_term));
+        heading.append(make(
+          "div",
+          "ai-result-meta",
+          `${STATUS_LABELS[item.recommended_status]} · ` +
+            `${CATEGORY_LABELS[item.category]} · ` +
+            `${CONFIDENCE_LABELS[item.confidence]}` +
+            (item.apply_status ? "" : " · 직접 입력 보호") +
+            (item.cached ? " · 저장된 결과" : "")
+        ));
+        const explanation = make("div", "ai-result-reason");
+        explanation.append(make(
+          "div",
+          item.translation ? "ai-result-translation" : "ai-result-translation ai-result-empty",
+          item.translation || "번역어 없음"
+        ));
+        const conflicts = aiSuggestionConflicts(item);
+        if (conflicts.length) {
+          const conflictList = make("div", "ai-result-conflicts");
+          conflicts.forEach((message) => {
+            conflictList.append(make("div", "ai-conflict", message));
+          });
+          explanation.append(conflictList);
+          if (item.recommended_status !== "review") {
+            const choice = make("label", "ai-conflict-choice");
+            const checkbox = make("input");
+            checkbox.type = "checkbox";
+            checkbox.setAttribute(
+              "aria-label",
+              `${item.source_term}에 AI 추천 사용`
+            );
+            checkbox.checked = state.aiConflictSelections.has(item.candidate_id);
+            checkbox.addEventListener("change", () => {
+              if (checkbox.checked) {
+                state.aiConflictSelections.add(item.candidate_id);
+              } else {
+                state.aiConflictSelections.delete(item.candidate_id);
+              }
+              refreshAiApplyButton();
+            });
+            choice.append(checkbox, document.createTextNode("AI 추천으로 변경"));
+            explanation.append(choice);
+          }
+        }
+        explanation.append(document.createTextNode(item.reason));
+        resultItem.append(heading, explanation);
+        list.append(resultItem);
+      });
+      refreshAiApplyButton();
+      renderRows();
+      $("#aiResultDialog").showModal();
+    }
+
+    function hasAiContentConflict(item) {
+      const currentTranslation = String(item.current_translation || "").trim();
+      const suggestedTranslation = String(item.translation || "").trim();
+      const translationConflict = Boolean(
+        currentTranslation && currentTranslation !== suggestedTranslation
+      );
+      const categoryConflict = Boolean(
+        item.current_category
+        && item.current_category !== item.category
+        && !item.apply_category
+      );
+      return translationConflict || categoryConflict;
+    }
+
+    function aiSuggestionConflicts(item) {
+      const conflicts = [];
+      const currentTranslation = String(item.current_translation || "").trim();
+      const suggestedTranslation = String(item.translation || "").trim();
+      if (currentTranslation && currentTranslation !== suggestedTranslation) {
+        conflicts.push(
+          `현재 번역어 '${currentTranslation}' 유지 · AI 추천 ` +
+          `'${suggestedTranslation || "번역어 없음"}'`
+        );
+      }
+      if (
+        item.current_category
+        && item.current_category !== item.category
+        && !item.apply_category
+      ) {
+        conflicts.push(
+          `현재 분류 '${CATEGORY_LABELS[item.current_category]}' 유지 · ` +
+          `AI 추천 '${CATEGORY_LABELS[item.category]}'`
+        );
+      }
+      if (!item.apply_status) {
+        conflicts.push(
+          `체크하지 않으면 상태도 '${STATUS_LABELS[item.current_status]}'로 유지`
+        );
+      }
+      return conflicts;
+    }
+
+    function refreshAiApplyButton() {
+      const selected = state.aiConflictSelections.size;
+      $("#applyAiResult").textContent = selected
+        ? `추천 반영 · AI 값 ${selected}개 포함`
+        : "추천 반영";
+    }
+
+    async function estimateAiTriage() {
+      if (state.busy) return;
+      state.busy = true;
+      refreshSummary();
+      try {
+        const estimate = await api("/api/ai-triage/estimate", {
+          method: "POST",
+          body: requestBody()
+        });
+        if (!estimate.target_count) {
+          toast("AI로 정리할 자동 후보가 없습니다.");
+          return;
+        }
+        showAiEstimate(estimate);
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        state.busy = false;
+        refreshSummary();
+      }
+    }
+
+    async function runAiTriage() {
+      if (state.busy) return;
+      $("#aiEstimateDialog").close();
+      state.busy = true;
+      state.aiBusy = true;
+      refreshSummary();
+      try {
+        const payload = await api("/api/ai-triage", {
+          method: "POST",
+          body: requestBody()
+        });
+        showAiResults(payload);
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        state.busy = false;
+        state.aiBusy = false;
+        refreshSummary();
+      }
+    }
+
+    function applyAiResults() {
+      const byId = new Map(
+        state.document.rows.map((row) => [row.candidate_id, row])
+      );
+      const beforeRows = state.document.rows.map((row) => ({ ...row }));
+      let changed = 0;
+      state.aiLatestResults.forEach((suggestion) => {
+        const row = byId.get(suggestion.candidate_id);
+        if (!row || row.manual || row.status !== "review") return;
+        const before = JSON.stringify(row);
+        const useAiValues = state.aiConflictSelections.has(
+          suggestion.candidate_id
+        );
+        if (useAiValues) {
+          row.status = suggestion.recommended_status;
+          row.category = suggestion.category;
+          if (row.status === "approved") {
+            row.translation = suggestion.translation;
+          }
+          applyStatusRule(row);
+        } else {
+          if (suggestion.apply_status) {
+            row.status = suggestion.recommended_status;
+          }
+          if (suggestion.apply_category) row.category = suggestion.category;
+          if (
+            suggestion.apply_status
+            && row.status === "approved"
+            && suggestion.apply_translation
+            && !row.translation.trim()
+          ) {
+            row.translation = suggestion.translation;
+          }
+          if (suggestion.apply_status) applyStatusRule(row);
+        }
+        if (JSON.stringify(row) !== before) changed += 1;
+      });
+      $("#aiResultDialog").close();
+      if (!changed) {
+        toast("변경할 추천 결과가 없습니다.");
+        return;
+      }
+      state.aiUndoSnapshot = beforeRows;
+      state.aiUndoDirtyBefore = state.dirty;
+      markDirty({ preserveAiUndo: true });
+      renderRows();
+      toast(`${changed}개 후보에 AI 추천을 반영했습니다. 저장 전까지 취소할 수 있습니다.`);
+    }
+
+    function undoAiResults() {
+      if (!state.aiUndoSnapshot) return;
+      state.document.rows = state.aiUndoSnapshot;
+      state.aiUndoSnapshot = null;
+      const dirtyBefore = state.aiUndoDirtyBefore;
+      state.aiUndoDirtyBefore = null;
+      state.selected.clear();
+      state.dirty = Boolean(dirtyBefore);
+      renderRows();
+      toast("AI 추천 반영을 취소했습니다.");
+    }
+
     function showMissingManualTerms(sourceTerms) {
       const list = $("#missingManualTermsList");
       list.replaceChildren();
@@ -904,6 +1357,8 @@
         });
         state.document = payload.document;
         state.selected.clear();
+        state.aiUndoSnapshot = null;
+        state.aiUndoDirtyBefore = null;
         state.dirty = false;
         render();
         if (action === "save") {
@@ -932,6 +1387,16 @@
 
     $("#save-button").addEventListener("click", () => runAction("save"));
     $("#import-button").addEventListener("click", () => runAction("import"));
+    $("#ai-triage-button").addEventListener("click", estimateAiTriage);
+    $("#ai-undo-button").addEventListener("click", undoAiResults);
+    $("#cancelAiTriage").addEventListener("click", () => {
+      $("#aiEstimateDialog").close();
+    });
+    $("#runAiTriage").addEventListener("click", runAiTriage);
+    $("#closeAiResult").addEventListener("click", () => {
+      $("#aiResultDialog").close();
+    });
+    $("#applyAiResult").addEventListener("click", applyAiResults);
     $("#editMissingTerms").addEventListener("click", () => {
       $("#missingManualTermsDialog").close();
     });
@@ -1042,6 +1507,12 @@
         });
         initializeControls();
         render();
+        api("/api/ai-triage")
+          .then((payload) => {
+            setAiSuggestions(payload.suggestions);
+            renderRows();
+          })
+          .catch((error) => toast(error.message, true));
       })
       .catch((error) => {
         $("#rows").innerHTML = "";

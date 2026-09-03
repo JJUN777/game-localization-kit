@@ -10,6 +10,7 @@ from dotenv import dotenv_values
 
 from glk.config import resolve_settings_root
 from glk.infrastructure.gemini_common import gemini_failure_code, resolve_model_name
+from glk.infrastructure.gemini_glossary_triage import GeminiGlossaryTriageProvider
 from glk.infrastructure.gemini_layout import GeminiLayoutProvider
 from glk.infrastructure.gemini_ocr import GeminiImageOcrProvider
 from glk.infrastructure.gemini_pdf_icon_audit import GeminiPdfIconAuditProvider
@@ -18,6 +19,7 @@ from glk.infrastructure.openai_common import (
     openai_failure_code,
     resolve_openai_model_name,
 )
+from glk.infrastructure.openai_glossary_triage import OpenAIGlossaryTriageProvider
 from glk.infrastructure.openai_layout import OpenAILayoutProvider
 from glk.infrastructure.openai_ocr import OpenAIImageOcrProvider
 from glk.infrastructure.openai_pdf_icon_audit import OpenAIPdfIconAuditProvider
@@ -69,6 +71,14 @@ def translation_provider_prompt_version(
     return GeminiTranslationProvider.prompt_version
 
 
+def glossary_triage_provider_prompt_version(
+    provider_name: AiProviderName,
+) -> str:
+    if provider_name == "openai":
+        return OpenAIGlossaryTriageProvider.prompt_version
+    return GeminiGlossaryTriageProvider.prompt_version
+
+
 def create_layout_provider(
     model_name: str | None = None,
     *,
@@ -112,6 +122,22 @@ def create_pdf_icon_audit_provider(
             settings_root=settings_root,
         )
     return GeminiPdfIconAuditProvider.from_environment(
+        model_name,
+        settings_root=settings_root,
+    )
+
+
+def create_glossary_triage_provider(
+    model_name: str | None = None,
+    *,
+    settings_root: str | os.PathLike[str] | None = None,
+):
+    if resolve_ai_provider_name(settings_root) == "openai":
+        return OpenAIGlossaryTriageProvider.from_environment(
+            model_name,
+            settings_root=settings_root,
+        )
+    return GeminiGlossaryTriageProvider.from_environment(
         model_name,
         settings_root=settings_root,
     )

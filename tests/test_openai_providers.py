@@ -11,6 +11,9 @@ from glk.infrastructure.openai_common import (
     OpenAIEmptyResponseError,
     openai_failure_code,
 )
+from glk.infrastructure.openai_glossary_triage import (
+    OpenAIGlossaryTriageProvider,
+)
 from glk.infrastructure.openai_layout import OpenAILayoutProvider
 from glk.infrastructure.openai_ocr import OpenAIImageOcrProvider
 from glk.infrastructure.openai_pdf_icon_audit import OpenAIPdfIconAuditProvider
@@ -103,6 +106,22 @@ class OpenAIProviderTests(unittest.TestCase):
             request["text"]["format"]["name"],  # type: ignore[index]
             "pdf_icon_audit",
         )
+
+    def test_glossary_triage_uses_its_structured_schema(self) -> None:
+        provider, responses = self._provider(
+            OpenAIGlossaryTriageProvider,
+            '{"suggestions":[]}',
+        )
+
+        value = provider.triage("Review candidates")
+
+        self.assertEqual(value["suggestions"], [])
+        request = responses.requests[0]
+        self.assertEqual(
+            request["text"]["format"]["name"],  # type: ignore[index]
+            "glossary_candidate_triage",
+        )
+        self.assertIn("untrusted source data", request["instructions"])
 
     def test_empty_output_is_rejected(self) -> None:
         provider, _ = self._provider(OpenAITranslationProvider, "")

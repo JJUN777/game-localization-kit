@@ -41,7 +41,7 @@ flowchart LR
 | CLI | 인자, 대화형 입력, 사람이 읽는 출력, 종료 코드 | `cli.py` |
 | Application | 프로젝트 단위 use case, 캐시, 원자적 출력, 단계 연결 | 각 `*_service`, `ai_model_catalog`, `ai_usage_ledger`, 공통 `_io`, `_hashing`, `_translation_context`, `translation_types` |
 | Domain | 외부 SDK와 파일 포맷에 독립적인 모델·검증 | `project.py`, `source_block.py`, `source_qa.py`, `translation_segment.py`, `translation_qa.py`, `approved_translation.py` |
-| Extraction | PDF layout, 이미지 OCR과 PDF 아이콘 검사 결과 처리 계약 | `layout.py`, `image_ocr.py`, `pdf_icon_audit.py` |
+| Extraction | PDF layout, 이미지 OCR, PDF 아이콘 검사와 용어 후보 AI 정리 결과 처리 계약 | `layout.py`, `image_ocr.py`, `pdf_icon_audit.py`, `glossary_triage.py` |
 | Infrastructure | 외부 모델 adapter와 로컬 대시보드·검수 서버 | `ai_provider.py`, `ai_usage.py`, `gemini_*`, `openai_*`, `dashboard_server.py`, `dashboard_routes.py`, `source_review_server.py`, `glossary_review_server.py`, `translation_review_server.py` |
 
 CLI의 통합 명령(`glk run`)과 개별 명령은 application service를 공유합니다. `glk run`은 별도 추출 구현을 갖지 않고 PDF의 `extract_project_pdf()` 또는 이미지의 `ocr_project_images()`를 호출한 뒤 segmentation과 QA service를 연결합니다.
@@ -154,6 +154,7 @@ review TXT는 `[PAGE]` 또는 `[SOURCE]`, `[BLOCK]`, `[[GLK_END ...]]` marker로
 | 사람 승인 | draft/review/final/approved 파일 hash | `source_review.json` |
 | PDF 아이콘 검사 | block 원문·bbox, 페이지 이미지, 아이콘 정의, provider·model, prompt version | `pdf_icon_audit.json` |
 | 용어 후보 | approved JSONL, 후보 생성 파라미터 | `glossary_build.json` |
+| 용어 후보 AI 정리 | 후보 원문·근거, 언어, provider·model, prompt version | `glossary_ai_review.json` |
 | Termbase import | approved JSONL, 정규화된 검토 TSV, termbase hash | `glossary_import.json` |
 | 초벌 번역 | approved JSONL, termbase, project prompt, 모델, hard rule·청크 설정 | `translation.json` |
 | 번역 승인 | translation JSONL, draft/review, termbase, QA/final 파일 hash | `translation_review.json` |
@@ -245,6 +246,7 @@ PDF layout·이미지 OCR·번역 provider의 옵션 호환성을 먼저 확인�
 ```text
 03_terminology/glossary_review.tsv
         ↕ localhost HTML 표 편집
+        ↕ 선택적 AI 추천 cache (.glk/state/glossary_ai_review.json)
         ↓ 구조·ID·원문 근거 검증
 03_terminology/termbase.json
 .glk/state/glossary_import.json
@@ -253,6 +255,12 @@ PDF layout·이미지 OCR·번역 provider의 옵션 호환성을 먼저 확인�
 `glk glossary import`는 자동 후보를 다시 생성해 TSV의 candidate ID 집합과 비교합니다. 행을 삭제하는 대신 `rejected`로 남겨야 하며, ID가 비어 있는 행만 수동 용어로 판정합니다.
 
 수동 용어는 승인 원문에서 대소문자와 보수적인 단수·복수 변형을 검색해 ID, 빈도, block ID, 위치와 예문을 다시 계산합니다. `--allow-missing-terms` 없이는 근거가 없는 용어를 허용하지 않습니다.
+
+`glossary_ai_service`는 브라우저의 현재 행과 저장된 review hash를 검증한 뒤,
+수동 행을 제외하고 상태가 `review`인 자동 후보만 25개 단위로 Gemini 또는 OpenAI
+adapter에 전달합니다. 응답은 고정 JSON schema로 검증하며 낮은 신뢰도는 기존
+`review` 상태로 정규화합니다. 캐시는 후보별 fingerprint로 재사용하되 추천 반영과
+TSV 저장은 브라우저에서 명시적으로 분리합니다.
 
 termbase entry는 source term, translation, category, status, note, variants, occurrences, block IDs, locations, example, origin과 source 검증 여부를 보존합니다. `approved`와 `keep`만 번역 prompt의 활성 용어가 되고 `rejected`는 검토 이력으로 유지됩니다.
 
@@ -325,7 +333,10 @@ PDF 원문 준비가 일부 실패하면 `DashboardJobManager.continue_partial_s
 service는 최대 요청 수, block ID와 현재 source hash를 검증하고 선택한 bbox의
 페이지 crop만 Gemini 또는 OpenAI icon audit adapter에 전달합니다. 검증된 결과는
 `.glk/state/pdf_icon_audit.json`에 cache하며, 사용자가 적용하기 전에는 review를
-바꾸지 않습니다. `ai_usage_ledger`는 원문 준비·아이콘 검사·번역·선택 재번역의
+바꾸지 않습니다. 용어 검수 서버의 `POST /api/ai-triage/estimate`는 현재 후보와
+cache로 새 요청 수·token·비용 범위를 계산하고, `POST /api/ai-triage`는 검증한
+추천을 cache하되 TSV를 저장하지 않습니다. `ai_usage_ledger`는 원문 준비·아이콘
+검사·용어 후보 정리·번역·선택 재번역의
 provider usage를 `.glk/state/ai_usage.jsonl`에 append하고 `dashboard_service`가
 단계별 누적 사용량과 예상 비용으로 집계합니다.
 

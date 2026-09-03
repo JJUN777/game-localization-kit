@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from glk.infrastructure.ai_provider import (
+    create_glossary_triage_provider,
     create_pdf_icon_audit_provider,
     create_translation_provider,
     resolve_ai_model_name,
@@ -52,10 +53,21 @@ class AiProviderTests(unittest.TestCase):
                         settings_root=root
                     )
 
+                with patch(
+                    "glk.infrastructure.ai_provider."
+                    "OpenAIGlossaryTriageProvider.from_environment",
+                    return_value="openai-glossary-provider",
+                ) as glossary_factory:
+                    glossary_provider = create_glossary_triage_provider(
+                        settings_root=root
+                    )
+
             self.assertEqual(provider, "openai-provider")
             factory.assert_called_once_with(None, settings_root=root)
             self.assertEqual(icon_provider, "openai-icon-provider")
             icon_factory.assert_called_once_with(None, settings_root=root)
+            self.assertEqual(glossary_provider, "openai-glossary-provider")
+            glossary_factory.assert_called_once_with(None, settings_root=root)
 
 
 if __name__ == "__main__":

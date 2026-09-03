@@ -23,6 +23,9 @@ from glk.infrastructure.gemini_common import (
     run_with_gemini_retry,
     structured_generation_config,
 )
+from glk.infrastructure.gemini_glossary_triage import (
+    GeminiGlossaryTriageProvider,
+)
 from glk.infrastructure.gemini_layout import GeminiLayoutProvider
 from glk.infrastructure.gemini_ocr import GeminiImageOcrProvider
 from glk.infrastructure.gemini_translation import GeminiTranslationProvider
@@ -218,6 +221,7 @@ class GeminiCommonPolicyTests(unittest.TestCase):
             GeminiLayoutProvider,
             GeminiImageOcrProvider,
             GeminiTranslationProvider,
+            GeminiGlossaryTriageProvider,
         )
         for provider_type in providers:
             with self.subTest(provider=provider_type.__name__):
@@ -240,6 +244,7 @@ class GeminiCommonPolicyTests(unittest.TestCase):
             GeminiLayoutProvider,
             GeminiImageOcrProvider,
             GeminiTranslationProvider,
+            GeminiGlossaryTriageProvider,
         )
         for provider_type in providers:
             with self.subTest(provider=provider_type.__name__):
@@ -260,6 +265,32 @@ class GeminiCommonPolicyTests(unittest.TestCase):
                 load.assert_called_once_with(None)
                 client.assert_called_once()
                 self.assertEqual(provider.model_name, "environment-model")
+
+    def test_glossary_triage_uses_structured_json_generation(self) -> None:
+        provider = GeminiGlossaryTriageProvider(
+            api_key="test-key",
+            model_name="test-model",
+            max_retries=1,
+        )
+        requests: list[dict[str, object]] = []
+
+        def generate_content(**kwargs: object) -> SimpleNamespace:
+            requests.append(kwargs)
+            return SimpleNamespace(
+                text='{"suggestions":[]}',
+                usage_metadata=None,
+            )
+
+        provider.client = SimpleNamespace(
+            models=SimpleNamespace(generate_content=generate_content)
+        )
+
+        value = provider.triage("Review candidates")
+
+        self.assertEqual(value["suggestions"], [])
+        config = requests[0]["config"]
+        self.assertEqual(config.response_mime_type, "application/json")
+        self.assertEqual(config.response_json_schema["required"], ["suggestions"])
 
     def test_provider_reads_api_key_and_model_from_explicit_settings_root(
         self,

@@ -182,6 +182,7 @@ class DashboardHttpServer(LocalHttpServer):
                 review_server = create_glossary_review_server(
                     project=location.path,
                     workspace_root=self.workspace_root,
+                    settings_root=self.settings_root,
                     port=0,
                     return_url=self.dashboard_url,
                 )

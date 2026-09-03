@@ -365,7 +365,11 @@ glk glossary build --project sample_rulebook --force
 glk review glossary --project sample_rulebook
 ```
 
-HTML 표에서 모든 자동 후보를 `approved`, `keep`, `rejected` 중 하나로 확정합니다. 검색·필터, 첫 등장 위치·출현 횟수·원문 용어·상태 정렬, 여러 행 선택 후 상태 일괄 변경, 실제 문맥 펼쳐보기와 수동 용어 추가를 지원합니다. 저장은 기존 `glossary_review.tsv`를 갱신합니다. 정확한 컬럼과 상태값은 [용어집 검토 사양](GLOSSARY.md)을 따릅니다.
+HTML 표에서 모든 자동 후보를 `approved`, `keep`, `rejected` 중 하나로 확정합니다. 검색·필터, 첫 등장 위치·출현 횟수·원문 용어·상태 정렬, 여러 행 선택 후 상태 일괄 변경, 실제 문맥 펼쳐보기와 수동 용어 추가를 지원합니다. 선택 기능인 `후보 1차 정리(AI)`는 아직 `review`인 자동 후보만 최대 25개씩 요청하고, 실행 전 예상 비용과 실행 후 추천 근거를 보여줍니다. 추천 반영은 저장과 분리되며 한 번 취소할 수 있습니다. 저장은 기존 `glossary_review.tsv`를 갱신합니다. 정확한 컬럼과 상태값은 [용어집 검토 사양](GLOSSARY.md)을 따릅니다.
+
+AI 결과는 후보별 fingerprint와 함께 `.glk/state/glossary_ai_review.json`에 저장합니다.
+같은 원문·후보·언어·provider·model·prompt version이면 저장된 결과를 재사용하고,
+실제 새 요청만 `.glk/state/ai_usage.jsonl`의 `glossary` 단계에 기록합니다.
 
 ### Termbase 생성
 
@@ -646,6 +650,7 @@ workspaces/<project_id>/
     ├── state/
     │   ├── ai_usage.jsonl            # 단계별 AI 사용량 원장
     │   ├── pdf_icon_audit.json       # PDF 아이콘 검사 cache
+    │   ├── glossary_ai_review.json   # 용어 후보 AI 추천 cache
     │   └── ...
     └── reports/
 ```

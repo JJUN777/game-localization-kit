@@ -13,6 +13,7 @@ from glk.infrastructure.glossary_review_server import (
     GlossaryReviewHttpServer,
     create_glossary_review_server,
 )
+from tests.test_glossary_ai_service import FakeGlossaryTriageProvider
 from tests.test_glossary_service import create_approved_project, sample_blocks
 
 
@@ -30,6 +31,8 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.server: GlossaryReviewHttpServer = create_glossary_review_server(
             project="glossary_project",
             workspace_root=self.workspace_root,
+            settings_root=self.temporary_directory.name,
+            glossary_ai_provider=FakeGlossaryTriageProvider(),
         )
         self.thread = threading.Thread(
             target=self.server.serve_forever,
@@ -106,6 +109,19 @@ class GlossaryReviewServerTests(unittest.TestCase):
         )
         self.assertNotIn("glossary_review.tsv에 그대로 저장", html)
         self.assertIn("용어집 확정", html)
+        self.assertIn("후보 1차 정리(AI)", html)
+        self.assertIn("아직 검토하지 않은 자동 후보만 AI가 분류합니다.", html)
+        self.assertIn("AI 적용 취소", html)
+        self.assertIn('id="aiResultDialog"', html)
+        self.assertIn('body: requestBody()', html)
+        self.assertIn('row.status !== "review"', html)
+        self.assertIn("입력과 다른 추천 ${conflictCount}", html)
+        self.assertIn('conflicts.length ? " · 입력과 다름" : ""', html)
+        self.assertIn("현재 번역어 '${currentTranslation}' 유지", html)
+        self.assertIn("현재 분류 '${CATEGORY_LABELS[item.current_category]}' 유지", html)
+        self.assertIn("AI 추천으로 변경", html)
+        self.assertIn("state.aiConflictSelections.has(", html)
+        self.assertIn("추천 반영 · AI 값 ${selected}개 포함", html)
         self.assertIn("실패 항목: ${payload.detail}", html)
         self.assertNotIn('id="allow-missing"', html)
         self.assertIn("원문에서 찾을 수 없는 수동 용어가 있습니다", html)
@@ -194,6 +210,10 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertFalse(payload["ok"])
 
+        status, payload, _ = self._request("/api/ai-triage", authorized=False)
+        self.assertEqual(status, 403)
+        self.assertFalse(payload["ok"])
+
         status, payload, _ = self._request(
             "/api/review",
             origin="https://attacker.example",
@@ -241,6 +261,44 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertEqual(conflict["code"], "REVIEW_CONFLICT")
         self.assertIn("새로고침", conflict["message"])
         self.assertIn("changed after", conflict["detail"])
+
+    def test_estimates_runs_and_reloads_cached_ai_triage_without_saving(self) -> None:
+        _, document, _ = self._request("/api/review")
+        rows = self._editable_rows(document)
+
+        status, estimate, _ = self._request(
+            "/api/ai-triage/estimate",
+            method="POST",
+            payload={
+                "review_sha256": document["review_sha256"],
+                "rows": rows,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(estimate["target_count"], len(rows))
+        self.assertEqual(estimate["request_count"], 1)
+        self.assertEqual(estimate["model"], "gemini-3.8-flash")
+
+        status, result, _ = self._request(
+            "/api/ai-triage",
+            method="POST",
+            payload={
+                "review_sha256": document["review_sha256"],
+                "rows": rows,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(len(result["suggestions"]), len(rows))
+        self.assertEqual(result["usage"]["requests"], 1)
+
+        _, after, _ = self._request("/api/review")
+        self.assertEqual(after["review_sha256"], document["review_sha256"])
+        self.assertTrue(all(row["status"] == "review" for row in after["rows"]))
+
+        status, cached, _ = self._request("/api/ai-triage")
+        self.assertEqual(status, 200)
+        self.assertEqual(cached["cached_count"], len(rows))
+        self.assertTrue(all(item["cached"] for item in cached["suggestions"]))
 
     def test_generated_rows_cannot_be_deleted_and_review_can_be_imported(self) -> None:
         _, document, _ = self._request("/api/review")

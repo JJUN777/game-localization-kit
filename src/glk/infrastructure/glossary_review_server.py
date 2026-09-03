@@ -7,10 +7,16 @@ from http.server import BaseHTTPRequestHandler
 from importlib import resources
 import json
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlsplit
 import webbrowser
 
+from glk.application.glossary_ai_service import (
+    GlossaryAiTriageError,
+    GlossaryTriageProvider,
+    estimate_project_glossary_ai_triage,
+    get_project_glossary_ai_suggestions,
+    triage_project_glossary_candidates,
+)
 from glk.application.glossary_review_service import (
     GlossaryReviewConflictError,
     GlossaryReviewError,
@@ -45,7 +51,9 @@ class GlossaryReviewHttpServer(LocalHttpServer):
         *,
         project: str | Path,
         workspace_root: str | Path,
+        settings_root: str | Path | None = None,
         return_url: str | None = None,
+        glossary_ai_provider: GlossaryTriageProvider | None = None,
     ) -> None:
         self.return_url = validate_local_return_url(
             return_url,
@@ -54,6 +62,8 @@ class GlossaryReviewHttpServer(LocalHttpServer):
         super().__init__(server_address, handler_class)
         self.project = str(project)
         self.workspace_root = str(workspace_root)
+        self.settings_root = settings_root
+        self.glossary_ai_provider = glossary_ai_provider
 
     @property
     def review_url(self) -> str:
@@ -127,6 +137,39 @@ class _GlossaryReviewHandler(LocalHttpRequestHandler):
                 return
             self._send_json(HTTPStatus.OK, document)
             return
+        if path == "/api/ai-triage":
+            if not self._api_authorized():
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                    code="REVIEW_SESSION_INVALID",
+                )
+                return
+            try:
+                result = get_project_glossary_ai_suggestions(
+                    project=self.server.project,
+                    workspace_root=self.server.workspace_root,
+                    settings_root=self.server.settings_root,
+                    provider=self.server.glossary_ai_provider,
+                )
+            except GlossaryReviewConflictError as error:
+                self._send_error_json(
+                    HTTPStatus.CONFLICT,
+                    error,
+                    code=error.code,
+                )
+                return
+            except (GlossaryReviewError, OSError, ValueError) as error:
+                code = getattr(error, "code", "INVALID_REQUEST")
+                self._send_error_json(
+                    HTTPStatus.BAD_REQUEST,
+                    error,
+                    code=code,
+                    message=localized_detail_message(error),
+                )
+                return
+            self._send_json(HTTPStatus.OK, {"ok": True, **result.to_dict()})
+            return
         self._send_error_json(
             HTTPStatus.NOT_FOUND,
             "Not found.",
@@ -135,7 +178,12 @@ class _GlossaryReviewHandler(LocalHttpRequestHandler):
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
-        if path not in {"/api/save", "/api/import"}:
+        if path not in {
+            "/api/save",
+            "/api/import",
+            "/api/ai-triage/estimate",
+            "/api/ai-triage",
+        }:
             self._send_error_json(
                 HTTPStatus.NOT_FOUND,
                 "Not found.",
@@ -158,56 +206,77 @@ class _GlossaryReviewHandler(LocalHttpRequestHandler):
             if not isinstance(rows, list):
                 raise GlossaryReviewError("rows must be a list.")
             with self.server.mutation_lock:
-                document = save_project_glossary_review(
-                    project=self.server.project,
-                    workspace_root=self.server.workspace_root,
-                    rows=rows,
-                    expected_review_sha256=review_hash,
-                )
-                if path == "/api/save":
-                    response: dict[str, Any] = {
-                        "ok": True,
-                        "document": document,
-                    }
+                if path == "/api/ai-triage/estimate":
+                    estimate = estimate_project_glossary_ai_triage(
+                        project=self.server.project,
+                        workspace_root=self.server.workspace_root,
+                        settings_root=self.server.settings_root,
+                        expected_review_sha256=review_hash,
+                        rows=rows,
+                        provider=self.server.glossary_ai_provider,
+                    )
+                    response = {"ok": True, **estimate.to_dict()}
+                elif path == "/api/ai-triage":
+                    triage_result = triage_project_glossary_candidates(
+                        project=self.server.project,
+                        workspace_root=self.server.workspace_root,
+                        settings_root=self.server.settings_root,
+                        expected_review_sha256=review_hash,
+                        rows=rows,
+                        provider=self.server.glossary_ai_provider,
+                    )
+                    response = {"ok": True, **triage_result.to_dict()}
                 else:
-                    try:
-                        result = import_project_glossary(
-                            project=self.server.project,
-                            workspace_root=self.server.workspace_root,
-                            file="03_terminology/glossary_review.tsv",
-                            allow_missing_terms=bool(
-                                body.get("allow_missing_terms", False)
-                            ),
-                        )
-                    except GlossaryManualTermsMissingError as error:
-                        response = dict(
-                            make_error_response(
-                                error.code,
-                                error,
-                                message=localized_detail_message(error),
-                            ).to_dict()
-                        )
-                        response["missing_terms"] = list(error.source_terms)
-                        response["document"] = document
-                    except GlossaryImportError as error:
-                        response = dict(
-                            make_error_response(
-                                "GLOSSARY_IMPORT_FAILED",
-                                error,
-                                message=localized_detail_message(error),
-                            ).to_dict()
-                        )
-                        response["document"] = document
-                    else:
+                    document = save_project_glossary_review(
+                        project=self.server.project,
+                        workspace_root=self.server.workspace_root,
+                        rows=rows,
+                        expected_review_sha256=review_hash,
+                    )
+                    if path == "/api/save":
                         response = {
                             "ok": True,
-                            "result": result.to_dict(),
-                            "document": get_project_glossary_review_document(
+                            "document": document,
+                        }
+                    else:
+                        try:
+                            import_result = import_project_glossary(
                                 project=self.server.project,
                                 workspace_root=self.server.workspace_root,
-                            ),
-                        }
-        except (GlossaryReviewError, OSError, ValueError) as error:
+                                file="03_terminology/glossary_review.tsv",
+                                allow_missing_terms=bool(
+                                    body.get("allow_missing_terms", False)
+                                ),
+                            )
+                        except GlossaryManualTermsMissingError as error:
+                            response = dict(
+                                make_error_response(
+                                    error.code,
+                                    error,
+                                    message=localized_detail_message(error),
+                                ).to_dict()
+                            )
+                            response["missing_terms"] = list(error.source_terms)
+                            response["document"] = document
+                        except GlossaryImportError as error:
+                            response = dict(
+                                make_error_response(
+                                    "GLOSSARY_IMPORT_FAILED",
+                                    error,
+                                    message=localized_detail_message(error),
+                                ).to_dict()
+                            )
+                            response["document"] = document
+                        else:
+                            response = {
+                                "ok": True,
+                                "result": import_result.to_dict(),
+                                "document": get_project_glossary_review_document(
+                                    project=self.server.project,
+                                    workspace_root=self.server.workspace_root,
+                                ),
+                            }
+        except (GlossaryAiTriageError, GlossaryReviewError, OSError, ValueError) as error:
             status = (
                 HTTPStatus.CONFLICT
                 if isinstance(error, GlossaryReviewConflictError)
@@ -227,8 +296,10 @@ def create_glossary_review_server(
     *,
     project: str | Path,
     workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
     port: int = 0,
     return_url: str | None = None,
+    glossary_ai_provider: GlossaryTriageProvider | None = None,
 ) -> GlossaryReviewHttpServer:
     validate_local_port(port, error_type=GlossaryReviewError)
     get_project_glossary_review_document(
@@ -240,7 +311,9 @@ def create_glossary_review_server(
         _GlossaryReviewHandler,
         project=project,
         workspace_root=workspace_root,
+        settings_root=settings_root,
         return_url=return_url,
+        glossary_ai_provider=glossary_ai_provider,
     )
 
 

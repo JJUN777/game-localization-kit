@@ -240,6 +240,10 @@ class WorkspacePaths:
         return self.state_dir / "glossary_import.json"
 
     @property
+    def glossary_ai_review_state(self) -> Path:
+        return self.state_dir / "glossary_ai_review.json"
+
+    @property
     def translation_state(self) -> Path:
         return self.state_dir / "translation.json"
 
