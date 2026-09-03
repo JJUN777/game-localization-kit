@@ -25,6 +25,7 @@ class OpenAIImageOcrProvider(OpenAIProviderBase):
 
     def transcribe(self, prompt: str, image: Image.Image) -> dict[str, Any]:
         def request() -> dict[str, Any]:
+            self.usage.begin_request()
             response = self.client.responses.create(
                 model=self.model_name,
                 input=[
@@ -49,6 +50,7 @@ class OpenAIImageOcrProvider(OpenAIProviderBase):
                     }
                 },
             )
+            self.usage.record_openai(response)
             if not response.output_text:
                 raise OpenAIEmptyResponseError(
                     "OpenAI returned an empty OCR response."

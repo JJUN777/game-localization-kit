@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib import resources
 import json
 import secrets
 from socketserver import TCPServer
@@ -24,8 +25,8 @@ def local_security_headers(
     return {
         "Cache-Control": "no-store",
         "Content-Security-Policy": (
-            "default-src 'self'; script-src 'unsafe-inline'; "
-            "style-src 'unsafe-inline'; connect-src 'self'; "
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; connect-src 'self'; "
             f"img-src {image_sources}; base-uri 'none'; "
             "form-action 'none'; frame-ancestors 'none'"
         ),
@@ -115,6 +116,17 @@ class LocalHttpRequestHandler(BaseHTTPRequestHandler):
     request_error_type: type[ValueError] = ValueError
     security_headers: Mapping[str, str] = LOCAL_SECURITY_HEADERS
     allowed_methods: tuple[str, ...] = ("GET", "POST")
+    _web_assets = {
+        "/assets/tokens.css": ("tokens.css", "text/css; charset=utf-8"),
+        "/assets/dashboard.css": (
+            "dashboard.css",
+            "text/css; charset=utf-8",
+        ),
+        "/assets/dashboard.js": (
+            "dashboard.js",
+            "text/javascript; charset=utf-8",
+        ),
+    }
 
     def log_message(self, format: str, *args: Any) -> None:
         return
@@ -230,6 +242,38 @@ class LocalHttpRequestHandler(BaseHTTPRequestHandler):
     def _send_json(self, status: HTTPStatus, value: Any) -> None:
         data = (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8")
         self._send_bytes(status, data, "application/json; charset=utf-8")
+
+    def _send_web_asset(self, path: str) -> bool:
+        """Serve one packaged, immutable UI asset on localhost."""
+        if not path.startswith("/assets/"):
+            return False
+        if not self._host_is_local():
+            self._send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "Only localhost is allowed.",
+                code="LOCAL_ACCESS_REQUIRED",
+            )
+            return True
+        asset = self._web_assets.get(path)
+        if asset is None:
+            self._send_error_json(
+                HTTPStatus.NOT_FOUND,
+                "UI asset not found.",
+                code="RESOURCE_NOT_FOUND",
+            )
+            return True
+        filename, content_type = asset
+        try:
+            data = resources.files("glk.web").joinpath(filename).read_bytes()
+        except (OSError, UnicodeError):
+            self._send_error_json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                "UI asset could not be loaded.",
+                code="INTERNAL_ERROR",
+            )
+            return True
+        self._send_bytes(HTTPStatus.OK, data, content_type)
+        return True
 
     def _send_error_json(
         self,

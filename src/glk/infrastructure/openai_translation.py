@@ -24,6 +24,7 @@ class OpenAITranslationProvider(OpenAIProviderBase):
 
     def translate(self, prompt: str) -> dict[str, Any]:
         def request() -> dict[str, Any]:
+            self.usage.begin_request()
             response = self.client.responses.create(
                 model=self.model_name,
                 instructions=TRANSLATION_SYSTEM_INSTRUCTION,
@@ -37,6 +38,7 @@ class OpenAITranslationProvider(OpenAIProviderBase):
                     }
                 },
             )
+            self.usage.record_openai(response)
             if not response.output_text:
                 raise OpenAIEmptyResponseError(
                     "OpenAI returned an empty translation response."

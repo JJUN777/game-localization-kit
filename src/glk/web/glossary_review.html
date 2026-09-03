@@ -4,33 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GLK 용어 검수</title>
+  <link rel="stylesheet" href="/assets/tokens.css">
   <style>
-    :root {
-      --ink: #24292f;
-      --ink-soft: #32383f;
-      --muted: #66707a;
-      --paper: #f6f7f8;
-      --surface: #fff;
-      --soft: #f3f4f6;
-      --line: #e1e4e8;
-      --line-strong: #c7cdd3;
-      --navy: #32383f;
-      --accent: #d85c41;
-      --accent-dark: #a9402e;
-      --success: #557565;
-      --success-bg: #eef3f0;
-      --review: #a9402e;
-      --review-bg: #fbefeb;
-      --keep: #66707a;
-      --keep-bg: #f3f4f6;
-      --rejected: #66707a;
-      --rejected-bg: #f3f4f6;
-      --error: #a9402e;
-      --error-bg: #fbefeb;
-      --warning-bg: #fbefeb;
-      --focus: #0969da;
-      --shadow: 0 1px 2px rgb(36 41 47 / 5%);
-    }
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -52,7 +27,7 @@
       padding: 11px 22px;
       color: var(--ink);
       border-bottom: 1px solid var(--line);
-      background: rgb(255 255 255 / 96%);
+      background: color-mix(in srgb, var(--surface) 96%, transparent);
       box-shadow: none;
     }
     .brand { min-width: 230px; }
@@ -68,7 +43,7 @@
     .metric {
       min-width: 69px;
       padding: 6px 9px;
-      border: 1px solid rgba(255,255,255,.13);
+      border: 1px solid var(--line);
       border-radius: 0;
       border-width: 0 1px 0 0;
       border-color: var(--line);
@@ -88,10 +63,10 @@
     .button-secondary {
       color: var(--ink);
       border-color: var(--line);
-      background: #fff;
+      background: var(--surface);
     }
     .button-primary,
-    .button-success { color: white; border-color: var(--ink); background: var(--ink); }
+    .button-success { color: var(--on-solid); border-color: var(--ink); background: var(--ink); }
     .button-primary:hover,
     .button-success:hover { background: var(--ink-soft); }
     main { padding: 20px 22px 72px; }
@@ -125,7 +100,7 @@
       margin-bottom: 12px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: rgb(255 255 255 / 96%);
+      background: color-mix(in srgb, var(--surface) 96%, transparent);
       box-shadow: none;
       backdrop-filter: none;
     }
@@ -144,7 +119,7 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       outline: none;
-      background: white;
+      background: var(--surface);
     }
     .control:focus { border-color: var(--line-strong); box-shadow: none; }
     .search {
@@ -168,10 +143,10 @@
       color: var(--navy);
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: white;
+      background: var(--surface);
       font-weight: 700;
     }
-    .button-table:hover { border-color: #aab4c5; background: #f8fafc; }
+    .button-table:hover { border-color: var(--line-strong); background: var(--surface-hover); }
     .table-shell {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -203,10 +178,10 @@
       padding: 8px;
       border-bottom: 1px solid var(--line);
       vertical-align: top;
-      background: white;
+      background: var(--surface);
     }
     tbody tr:last-child td { border-bottom: 0; }
-    tbody tr:hover td { background: #fafbfc; }
+    tbody tr:hover td { background: var(--surface-hover); }
     tbody tr.status-review td:first-child { box-shadow: inset 4px 0 var(--review); }
     tbody tr.status-approved td:first-child { box-shadow: inset 4px 0 var(--success); }
     tbody tr.status-keep td:first-child { box-shadow: inset 4px 0 var(--keep); }
@@ -219,14 +194,14 @@
       border: 1px solid var(--line);
       border-radius: 6px;
       outline: none;
-      background: #fff;
+      background: var(--surface);
     }
     .cell-input:focus, .cell-select:focus {
       border-color: var(--line-strong);
       box-shadow: none;
     }
     .cell-input:disabled {
-      color: #7b818d;
+      color: var(--muted);
       border-color: transparent;
       background: transparent;
     }
@@ -267,9 +242,9 @@
     .delete-button {
       padding: 5px 7px;
       color: var(--error);
-      border: 1px solid #efc3c0;
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
       border-radius: 6px;
-      background: white;
+      background: var(--surface);
       font-size: 11px;
     }
     .empty {
@@ -299,15 +274,15 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--surface);
-      box-shadow: 0 24px 80px rgba(31, 41, 55, .24);
+      box-shadow: var(--shadow-dialog);
     }
-    dialog::backdrop { background: rgb(31 35 40 / 48%); }
+    dialog::backdrop { background: var(--overlay); }
     dialog h2 { margin: 0 0 10px; font-size: 21px; }
     dialog p { margin: 0; color: var(--muted); }
     dialog .button-secondary {
       color: var(--ink);
       border-color: var(--line);
-      background: #fff;
+      background: var(--surface);
     }
     .dialog-actions {
       display: flex;
@@ -324,7 +299,7 @@
       z-index: 50;
       max-width: 480px;
       padding: 12px 15px;
-      color: white;
+      color: var(--on-solid);
       border-radius: 8px;
       background: var(--ink);
       box-shadow: var(--shadow);

@@ -44,6 +44,7 @@ from glk.extraction.layout import (
     validate_layout,
 )
 from glk.infrastructure.ai_provider import ai_failure_code, create_layout_provider
+from glk.infrastructure.ai_usage import provider_usage
 
 
 LAYOUT_VALIDATION_ATTEMPTS = 3
@@ -86,6 +87,7 @@ class ExtractionResult:
     failures: tuple[PageFailure, ...]
     output_file: str | None
     dry_run: bool = False
+    usage: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -478,4 +480,5 @@ def extract_project_pdf(
         ),
         failures=batch.failures,
         output_file=str(output_path),
+        usage=provider_usage(active_provider),
     )

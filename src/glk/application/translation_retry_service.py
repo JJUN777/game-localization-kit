@@ -38,6 +38,7 @@ from glk.infrastructure.ai_provider import (
     resolve_ai_provider_name,
     translation_provider_prompt_version,
 )
+from glk.infrastructure.ai_usage import provider_usage
 from glk.domain.workspace import WorkspacePaths
 
 
@@ -57,6 +58,7 @@ class TranslationRetryResult:
     review_file: str | None
     revision_file: str | None
     dry_run: bool = False
+    usage: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -337,6 +339,7 @@ def _save_translation_retry(
             "review_sha256_before": context.document["review_sha256"],
             "review_sha256_after": saved_document["review_sha256"],
             "retried_blocks": len(execution.changes),
+            "usage": provider_usage(provider),
             "changes": list(execution.changes),
         },
     )
@@ -355,6 +358,7 @@ def _save_translation_retry(
         warning_count=qa_result.warning_count,
         review_file=str(context.paths.translation_review),
         revision_file=str(revision_path),
+        usage=provider_usage(provider),
     )
 
 
@@ -403,14 +407,20 @@ def retry_failed_translations(
         context.selected_model,
         settings_root=settings_root,
     )
-    execution = _execute_translation_retry(
-        context=context,
-        provider=active_provider,
-        approved_by_id=approved_by_id,
-        termbase_entries=termbase_entries,
-        project_instructions=project_instructions,
-        notify=notify,
-    )
+    try:
+        execution = _execute_translation_retry(
+            context=context,
+            provider=active_provider,
+            approved_by_id=approved_by_id,
+            termbase_entries=termbase_entries,
+            project_instructions=project_instructions,
+            notify=notify,
+        )
+    except Exception as error:
+        usage = provider_usage(active_provider)
+        if usage is not None:
+            error.ai_usage = usage  # type: ignore[attr-defined]
+        raise
     return _save_translation_retry(
         context=context,
         execution=execution,

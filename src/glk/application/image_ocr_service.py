@@ -42,6 +42,7 @@ from glk.infrastructure.ai_provider import (
     ai_failure_code,
     create_image_ocr_provider,
 )
+from glk.infrastructure.ai_usage import provider_usage
 
 
 IMAGE_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS
@@ -103,6 +104,7 @@ class ImageOcrRunResult:
     failures: tuple[ImageOcrFailure, ...]
     output_file: str | None
     dry_run: bool = False
+    usage: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -548,4 +550,5 @@ def ocr_project_images(
         ),
         failures=batch.failures,
         output_file=str(combined_path),
+        usage=provider_usage(active_provider),
     )

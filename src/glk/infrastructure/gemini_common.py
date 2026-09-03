@@ -16,6 +16,7 @@ from google import genai
 from google.genai import errors, types
 
 from glk.config import resolve_settings_root
+from glk.infrastructure.ai_usage import AiUsageAccumulator
 
 
 DEFAULT_MODEL = "gemini-2.5-flash"
@@ -305,6 +306,7 @@ class GeminiProviderBase:
         self.max_retries = max_retries
         self.base_delay = base_delay
         self.request_timeout_ms = request_timeout_ms
+        self.usage = AiUsageAccumulator(self.provider_name, model_name)
         self.client = genai.Client(
             api_key=api_key,
             http_options=gemini_http_options(request_timeout_ms),
@@ -331,8 +333,12 @@ class GeminiProviderBase:
 
     def run_request(self, operation: Callable[[], ResultT]) -> ResultT:
         """Run one provider request with the shared retry policy."""
-        return run_with_gemini_retry(
-            operation,
-            max_attempts=self.max_retries,
-            base_delay=self.base_delay,
-        )
+        try:
+            return run_with_gemini_retry(
+                operation,
+                max_attempts=self.max_retries,
+                base_delay=self.base_delay,
+            )
+        except Exception as error:
+            error.ai_usage = self.usage.to_dict()  # type: ignore[attr-defined]
+            raise
