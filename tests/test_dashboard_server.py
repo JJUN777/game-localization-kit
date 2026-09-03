@@ -837,7 +837,7 @@ class DashboardServerTests(unittest.TestCase):
         self.assertTrue(glossary_opened["ok"])
         with urlopen(str(glossary_opened["url"]), timeout=3) as response:
             glossary_html = response.read().decode("utf-8")
-        self.assertIn("용어집 생성이 완료되었습니다", glossary_html)
+        self.assertIn("용어집 확정 완료", glossary_html)
         self.assertIn(
             f"const RETURN_URL = {json.dumps(self.server.dashboard_url)};",
             glossary_html,

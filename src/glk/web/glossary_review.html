@@ -30,7 +30,7 @@
       background: color-mix(in srgb, var(--surface) 96%, transparent);
       box-shadow: none;
     }
-    .brand { min-width: 230px; }
+    .brand { flex: 1; min-width: 230px; }
     .eyebrow {
       color: var(--muted);
       font-size: 10px;
@@ -39,19 +39,7 @@
       text-transform: uppercase;
     }
     h1 { margin: 1px 0 0; font-size: 19px; line-height: 1.2; }
-    .metrics { display: flex; flex: 1; gap: 7px; overflow-x: auto; }
-    .metric {
-      min-width: 69px;
-      padding: 6px 9px;
-      border: 1px solid var(--line);
-      border-radius: 0;
-      border-width: 0 1px 0 0;
-      border-color: var(--line);
-      background: transparent;
-    }
-    .metric strong { display: block; font-size: 15px; }
-    .metric span { color: var(--muted); font-size: 10px; white-space: nowrap; }
-    .actions { display: flex; gap: 7px; }
+    .actions { display: flex; gap: 14px; }
     .button {
       border: 1px solid transparent;
       border-radius: 8px;
@@ -65,10 +53,8 @@
       border-color: var(--line);
       background: var(--surface);
     }
-    .button-primary,
-    .button-success { color: var(--on-solid); border-color: var(--ink); background: var(--ink); }
-    .button-primary:hover,
-    .button-success:hover { background: var(--ink-soft); }
+    .button-primary { color: var(--on-solid); border-color: var(--ink); background: var(--ink); }
+    .button-primary:hover { background: var(--ink-soft); }
     main { padding: 20px 22px 72px; }
     .intro {
       display: flex;
@@ -111,6 +97,38 @@
       align-items: center;
       width: 100%;
     }
+    .status-filters {
+      display: flex;
+      gap: 7px;
+      width: 100%;
+      padding-bottom: 9px;
+      border-bottom: 1px solid var(--line);
+      overflow-x: auto;
+    }
+    .status-filter {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: baseline;
+      gap: 8px;
+      min-height: 36px;
+      padding: 7px 11px;
+      color: var(--ink-soft);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .status-filter:hover { border-color: var(--line-strong); background: var(--surface-hover); }
+    .status-filter[aria-pressed="true"] {
+      color: var(--on-solid);
+      border-color: var(--ink);
+      background: var(--ink);
+    }
+    .status-filter strong {
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
     .control {
       height: 36px;
       min-height: 36px;
@@ -134,6 +152,11 @@
       flex: 0 0 16px;
       width: 16px;
       height: 1px;
+    }
+    .toolbar-add { margin-left: auto; }
+    .bulk-row {
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
     }
     .selection-count { color: var(--muted); font-size: 12px; }
     .button-table {
@@ -252,21 +275,6 @@
       color: var(--muted);
       text-align: center;
     }
-    .option-line {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin: 0 0 12px;
-      padding: 10px 12px;
-      color: var(--accent-dark);
-      border: 1px solid rgb(216 92 65 / 28%);
-      border-radius: 8px;
-      background: var(--error-bg);
-      font-size: 13px;
-    }
-    .option-line input { flex: 0 0 auto; }
-    .option-line strong { display: block; }
-    .option-line small { display: block; color: var(--muted); }
     dialog {
       width: min(480px, calc(100vw - 32px));
       padding: 24px;
@@ -279,6 +287,16 @@
     dialog::backdrop { background: var(--overlay); }
     dialog h2 { margin: 0 0 10px; font-size: 21px; }
     dialog p { margin: 0; color: var(--muted); }
+    .dialog-list {
+      max-height: 180px;
+      margin: 16px 0 0;
+      padding: 10px 12px 10px 30px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+      overflow: auto;
+    }
+    .dialog-list li + li { margin-top: 4px; }
     dialog .button-secondary {
       color: var(--ink);
       border-color: var(--line);
@@ -327,7 +345,6 @@
     @media (max-width: 960px) {
       .header { flex-wrap: wrap; }
       .brand { min-width: 0; flex: 1; }
-      .metrics { order: 3; width: 100%; }
       .actions { width: 100%; }
       .actions .button { flex: 1; }
       main { padding: 16px 10px 60px; }
@@ -341,32 +358,22 @@
       <div class="eyebrow">Game Localization Kit</div>
       <h1 id="project-name">용어 검수</h1>
     </div>
-    <div class="metrics" id="metrics"></div>
     <div class="actions">
-      <button class="button button-secondary" id="save-button">TSV 저장</button>
-      <button class="button button-success" id="import-button">검증 및 termbase 생성</button>
+      <button class="button button-secondary" id="save-button">검수 내용 저장</button>
+      <button class="button button-primary" id="import-button">용어집 확정</button>
     </div>
   </header>
   <main>
     <div class="intro">
       <div>
-        <h2>용어 후보를 표처럼 검수하세요</h2>
-        <p>상태·번역어·분류를 수정하면 기존 glossary_review.tsv에 그대로 저장됩니다.</p>
+        <h2>번역에 사용할 용어를 정리하세요</h2>
+        <p>용어별 상태·번역어·분류를 확인하고, 검수가 끝나면 용어집을 확정하세요.</p>
       </div>
       <span class="file-state" id="file-state">불러오는 중</span>
     </div>
-    <label class="option-line">
-      <input id="allow-missing" type="checkbox">
-      <span>
-        <strong>승인 원문에 없는 수동 용어 허용</strong>
-        <small>확장판 용어처럼 원문에서 찾을 수 없는 용어를 의도적으로 등록할 때만 선택하세요.</small>
-      </span>
-    </label>
     <section class="toolbar">
+      <nav class="status-filters" id="status-filters" aria-label="상태 필터"></nav>
       <div class="toolbar-row search-row">
-        <select class="control" id="status-filter" aria-label="상태 필터">
-          <option value="all">모든 상태</option>
-        </select>
         <select class="control" id="category-filter" aria-label="분류 필터">
           <option value="all">모든 분류</option>
         </select>
@@ -387,14 +394,17 @@
         </select>
         <input class="control search" id="search" type="search"
           aria-label="검색어" placeholder="원문 용어 검색">
+        <button class="button-table toolbar-add" id="add-button" type="button">
+          수동 용어 추가
+        </button>
       </div>
-      <div class="toolbar-row bulk-row">
-        <span class="selection-count" id="selection-count">0개 선택</span>
+      <div class="toolbar-row bulk-row hidden" id="bulk-row">
+        <span class="selection-count" id="selection-count" aria-live="polite">0개 선택</span>
         <select class="control" id="bulk-status" aria-label="일괄 상태">
           <option value="">상태 일괄 변경</option>
         </select>
         <button class="button-table" id="bulk-apply" type="button">적용</button>
-        <button class="button-table" id="add-button" type="button">+ 수동 용어</button>
+        <button class="button-table" id="clear-selection" type="button">선택 해제</button>
       </div>
     </section>
     <section class="table-shell">
@@ -416,10 +426,25 @@
       </table>
     </section>
   </main>
-  <dialog id="termbaseCompleteDialog" aria-labelledby="termbaseCompleteTitle">
-    <h2 id="termbaseCompleteTitle">용어집 생성이 완료되었습니다</h2>
+  <dialog id="missingManualTermsDialog" aria-labelledby="missingManualTermsTitle">
+    <h2 id="missingManualTermsTitle">원문에서 찾을 수 없는 수동 용어가 있습니다</h2>
     <p>
-      다음 단계에서 승인된 용어집을 기반으로 초벌 번역을 시작할 수 있습니다.
+      오탈자인지 확인하세요. 확장판처럼 원문 밖의 용어라면 그대로 포함할 수 있습니다.
+    </p>
+    <ul class="dialog-list" id="missingManualTermsList"></ul>
+    <div class="dialog-actions">
+      <button class="button button-secondary" id="editMissingTerms" type="button">
+        돌아가서 수정
+      </button>
+      <button class="button button-primary" id="confirmMissingTerms" type="button">
+        그대로 포함하고 확정
+      </button>
+    </div>
+  </dialog>
+  <dialog id="termbaseCompleteDialog" aria-labelledby="termbaseCompleteTitle">
+    <h2 id="termbaseCompleteTitle">용어집 확정 완료</h2>
+    <p>
+      검수한 내용으로 번역에 사용할 용어집을 만들었습니다.
     </p>
     <div class="dialog-actions">
       <button class="button button-secondary" id="stayAfterImport" type="button">
@@ -501,12 +526,11 @@
 
     function importFailureMessage(payload) {
       const lines = [
-        `TSV는 저장했지만 termbase를 만들지 못했습니다: ${payload.message}`
+        `검수 내용은 저장했지만 용어집을 확정하지 못했습니다: ${payload.message}`
       ];
       if (payload.detail) lines.push(`실패 항목: ${payload.detail}`);
       lines.push(
-        "표시된 행의 상태·번역어·중복 여부를 확인하세요. " +
-        "원문에 없는 수동 용어라면 화면 상단의 허용 항목을 선택한 뒤 다시 시도하세요."
+        "표시된 행의 상태·번역어·중복 여부를 확인하세요."
       );
       return lines.join("\n");
     }
@@ -515,12 +539,6 @@
       const node = make("option", "", label);
       node.value = value;
       node.selected = selected;
-      return node;
-    }
-
-    function metric(value, label) {
-      const node = make("div", "metric");
-      node.append(make("strong", "", String(value)), make("span", "", label));
       return node;
     }
 
@@ -551,17 +569,18 @@
 
     function refreshSummary() {
       const value = summary();
-      $("#metrics").replaceChildren(
-        metric(value.rows, "전체"),
-        metric(value.review, "검토 필요"),
-        metric(value.approved, "승인"),
-        metric(value.keep, "원문 유지"),
-        metric(value.rejected, "제외")
-      );
+      document.querySelectorAll("[data-status-filter]").forEach((button) => {
+        const filter = button.dataset.statusFilter;
+        const count = filter === "all" ? value.rows : value[filter];
+        button.querySelector("strong").textContent = String(count ?? 0);
+        const active = filter === state.statusFilter;
+        button.setAttribute("aria-pressed", String(active));
+      });
       $("#file-state").textContent =
         `${termbaseStatusLabel(state.document.termbase_status)}` +
         (state.dirty ? " · 저장 안 됨" : "");
       $("#selection-count").textContent = `${state.selected.size}개 선택`;
+      $("#bulk-row").classList.toggle("hidden", state.selected.size === 0);
       $("#save-button").disabled = state.busy || !state.dirty;
       $("#import-button").disabled = state.busy;
     }
@@ -767,9 +786,11 @@
         categoryCell.append(category);
 
         const evidenceCell = make("td", "evidence");
-        const count = item.occurrences || (item.manual ? "저장 후 확인" : "0");
         const location = item.locations ? ` · ${item.locations}` : "";
-        evidenceCell.append(make("div", "meta", `${count}회${location}`));
+        const evidenceSummary = item.occurrences
+          ? `${item.occurrences}회${location}`
+          : (item.manual ? "확정 시 원문 확인" : `0회${location}`);
+        evidenceCell.append(make("div", "meta", evidenceSummary));
         if (item.example || item.variants) {
           const details = make("details");
           const summaryNode = make("summary", "", "실제 문맥 펼치기");
@@ -816,10 +837,23 @@
     }
 
     function initializeControls() {
-      const statusFilter = $("#status-filter");
+      const statusFilters = $("#status-filters");
       const bulkStatus = $("#bulk-status");
+      const addStatusFilter = (value, label) => {
+        const button = make("button", "status-filter");
+        button.type = "button";
+        button.dataset.statusFilter = value;
+        button.setAttribute("aria-pressed", "false");
+        button.append(make("span", "", label), make("strong", "", "0"));
+        button.addEventListener("click", () => {
+          state.statusFilter = value;
+          renderRows();
+        });
+        statusFilters.append(button);
+      };
+      addStatusFilter("all", "전체");
       state.document.statuses.forEach((value) => {
-        statusFilter.append(option(value, STATUS_LABELS[value]));
+        addStatusFilter(value, STATUS_LABELS[value]);
         bulkStatus.append(option(value, STATUS_LABELS[value]));
       });
       const categoryFilter = $("#category-filter");
@@ -834,10 +868,10 @@
       renderRows();
     }
 
-    function requestBody() {
+    function requestBody({ allowMissingTerms = false } = {}) {
       return JSON.stringify({
         review_sha256: state.document.review_sha256,
-        allow_missing_terms: $("#allow-missing").checked,
+        allow_missing_terms: allowMissingTerms,
         rows: state.document.rows.map((row) => ({
           candidate_id: row.candidate_id,
           status: row.status,
@@ -849,26 +883,41 @@
       });
     }
 
-    async function runAction(action) {
+    function showMissingManualTerms(sourceTerms) {
+      const list = $("#missingManualTermsList");
+      list.replaceChildren();
+      sourceTerms.forEach((sourceTerm) => {
+        list.append(make("li", "", sourceTerm));
+      });
+      $("#missingManualTermsDialog").showModal();
+    }
+
+    async function runAction(action, { allowMissingTerms = false } = {}) {
       if (state.busy) return;
       state.busy = true;
       refreshSummary();
       try {
         const payload = await api(`/api/${action}`, {
           method: "POST",
-          body: requestBody()
+          body: requestBody({ allowMissingTerms })
         });
         state.document = payload.document;
         state.selected.clear();
         state.dirty = false;
         render();
         if (action === "save") {
-          toast("glossary_review.tsv에 저장했습니다.");
+          toast("검수 내용을 저장했습니다.");
         } else if (payload.ok) {
           toast(
-            `termbase를 생성했습니다. 활성 용어 ${payload.result.active_count}개, 제외 ${payload.result.rejected_count}개.`
+            `용어집을 확정했습니다. 활성 용어 ${payload.result.active_count}개, 제외 ${payload.result.rejected_count}개.`
           );
           $("#termbaseCompleteDialog").showModal();
+        } else if (
+          action === "import"
+          && payload.code === "GLOSSARY_MANUAL_TERMS_MISSING"
+          && Array.isArray(payload.missing_terms)
+        ) {
+          showMissingManualTerms(payload.missing_terms);
         } else {
           toast(importFailureMessage(payload), true);
         }
@@ -882,6 +931,13 @@
 
     $("#save-button").addEventListener("click", () => runAction("save"));
     $("#import-button").addEventListener("click", () => runAction("import"));
+    $("#editMissingTerms").addEventListener("click", () => {
+      $("#missingManualTermsDialog").close();
+    });
+    $("#confirmMissingTerms").addEventListener("click", () => {
+      $("#missingManualTermsDialog").close();
+      runAction("import", { allowMissingTerms: true });
+    });
     $("#stayAfterImport").addEventListener("click", () => {
       $("#termbaseCompleteDialog").close();
     });
@@ -897,10 +953,6 @@
       state.searchField = event.target.value;
       $("#search").placeholder =
         SEARCH_PLACEHOLDERS[state.searchField] || SEARCH_PLACEHOLDERS.source;
-      renderRows();
-    });
-    $("#status-filter").addEventListener("change", (event) => {
-      state.statusFilter = event.target.value;
       renderRows();
     });
     $("#category-filter").addEventListener("change", (event) => {
@@ -939,6 +991,10 @@
       renderRows();
       toast(`${changed}개 용어를 '${STATUS_LABELS[status]}' 상태로 변경했습니다.`);
     });
+    $("#clear-selection").addEventListener("click", () => {
+      state.selected.clear();
+      renderRows();
+    });
     $("#add-button").addEventListener("click", () => {
       const rowKey = `manual-browser-${Date.now()}-${state.manualSequence++}`;
       state.document.rows.unshift({
@@ -957,7 +1013,6 @@
       });
       state.statusFilter = "all";
       state.categoryFilter = "all";
-      $("#status-filter").value = "all";
       $("#category-filter").value = "all";
       markDirty();
       renderRows();

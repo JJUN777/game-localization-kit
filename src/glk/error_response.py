@@ -47,6 +47,7 @@ _CODE_MESSAGES = {
     "GLOSSARY_IMPORT_FAILED": "검수한 용어집을 확정하지 못했습니다.",
     "GLOSSARY_GENERATED_CANDIDATE_DELETE": "자동 생성된 용어 후보는 삭제할 수 없습니다. 필요하지 않으면 상태를 제외로 변경하세요.",
     "GLOSSARY_REVIEW_INCOMPLETE": "검토 중인 용어가 남아 있습니다. 상태를 승인·원문 유지·제외 중 하나로 변경하세요.",
+    "GLOSSARY_MANUAL_TERMS_MISSING": "원문에서 찾을 수 없는 수동 용어가 있습니다.",
     "GLOSSARY_REVIEW_SERVER_FAILED": "용어 검수 페이지를 열지 못했습니다.",
     "TRANSLATION_FAILED": "초벌 번역에 실패했습니다.",
     "TRANSLATION_REVIEW_PREPARE_FAILED": "번역 검수 파일을 준비하지 못했습니다.",

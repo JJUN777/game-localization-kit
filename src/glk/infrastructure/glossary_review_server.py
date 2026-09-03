@@ -19,6 +19,7 @@ from glk.application.glossary_review_service import (
 )
 from glk.application.glossary_service import (
     GlossaryImportError,
+    GlossaryManualTermsMissingError,
     import_project_glossary,
 )
 from glk.error_response import (
@@ -178,6 +179,16 @@ class _GlossaryReviewHandler(LocalHttpRequestHandler):
                                 body.get("allow_missing_terms", False)
                             ),
                         )
+                    except GlossaryManualTermsMissingError as error:
+                        response = dict(
+                            make_error_response(
+                                error.code,
+                                error,
+                                message=localized_detail_message(error),
+                            ).to_dict()
+                        )
+                        response["missing_terms"] = list(error.source_terms)
+                        response["document"] = document
                     except GlossaryImportError as error:
                         response = dict(
                             make_error_response(

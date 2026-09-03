@@ -369,7 +369,7 @@ HTML 표에서 모든 자동 후보를 `approved`, `keep`, `rejected` 중 하나
 
 ### Termbase 생성
 
-화면의 `검증 및 termbase 생성`을 누르거나, TSV를 직접 편집했다면:
+화면의 `용어집 확정`을 누르거나, TSV를 직접 편집했다면:
 
 ```bash
 glk glossary import \

@@ -99,19 +99,23 @@ class GlossaryReviewServerTests(unittest.TestCase):
         status, html, headers = self._request("/", authorized=False)
         self.assertEqual(status, 200)
         self.assertIsInstance(html, str)
-        self.assertIn("용어 후보를 표처럼 검수하세요", html)
-        self.assertIn("검증 및 termbase 생성", html)
+        self.assertIn("번역에 사용할 용어를 정리하세요", html)
+        self.assertIn(
+            "용어별 상태·번역어·분류를 확인하고, 검수가 끝나면 용어집을 확정하세요.",
+            html,
+        )
+        self.assertNotIn("glossary_review.tsv에 그대로 저장", html)
+        self.assertIn("용어집 확정", html)
         self.assertIn("실패 항목: ${payload.detail}", html)
-        self.assertIn("원문에 없는 수동 용어라면 화면 상단의", html)
-        self.assertIn("승인 원문에 없는 수동 용어 허용", html)
+        self.assertNotIn('id="allow-missing"', html)
+        self.assertIn("원문에서 찾을 수 없는 수동 용어가 있습니다", html)
+        self.assertIn("돌아가서 수정", html)
+        self.assertIn("그대로 포함하고 확정", html)
+        self.assertIn('payload.code === "GLOSSARY_MANUAL_TERMS_MISSING"', html)
         self.assertIn('current: "최신 상태"', html)
         self.assertIn('not_built: "미생성"', html)
         self.assertIn('stale: "업데이트 필요"', html)
         self.assertIn('not_ready: "준비 전"', html)
-        self.assertLess(
-            html.index('id="allow-missing"'),
-            html.index('class="toolbar-row search-row"'),
-        )
         self.assertIn('id="search-field"', html)
         self.assertIn('<option value="source">원문 용어</option>', html)
         self.assertIn('<option value="translation">번역어</option>', html)
@@ -122,12 +126,15 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertNotIn("<th>메모</th>", html)
         self.assertLess(
             html.index('class="toolbar-row search-row"'),
-            html.index('class="toolbar-row bulk-row"'),
+            html.index('class="toolbar-row bulk-row hidden"'),
         )
         self.assertLess(
-            html.index('id="status-filter"'),
+            html.index('id="status-filters"'),
             html.index('id="category-filter"'),
         )
+        self.assertNotIn('<select class="control" id="status-filter"', html)
+        self.assertIn('button.dataset.statusFilter = value;', html)
+        self.assertIn('button.setAttribute("aria-pressed", String(active));', html)
         self.assertLess(
             html.index('id="category-filter"'),
             html.index('id="sort-order"'),
@@ -141,14 +148,30 @@ class GlossaryReviewServerTests(unittest.TestCase):
             html.index('id="search"'),
         )
         self.assertLess(
-            html.index('id="bulk-apply"'),
             html.index('id="add-button"'),
+            html.index('class="toolbar-row bulk-row hidden"'),
         )
+        self.assertIn(
+            'class="button button-primary" id="import-button"',
+            html,
+        )
+        self.assertNotIn(
+            'class="button button-success" id="import-button"',
+            html,
+        )
+        self.assertIn('id="clear-selection"', html)
+        self.assertIn('item.manual ? "확정 시 원문 확인"', html)
+        self.assertNotIn('"저장 후 확인"', html)
+        self.assertIn(
+            '$("#bulk-row").classList.toggle("hidden", state.selected.size === 0);',
+            html,
+        )
+        self.assertIn('state.selected.clear();\n      renderRows();', html)
         self.assertIn('id="sort-order"', html)
         self.assertIn("첫 등장 위치 순", html)
         self.assertIn("출현 많은 순", html)
         self.assertIn("출현 적은 순", html)
-        self.assertIn("용어집 생성이 완료되었습니다", html)
+        self.assertIn("용어집 확정 완료", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
         self.assertNotIn("__GLK_RETURN_URL_JSON__", html)
         self.assertIn("const RETURN_URL = null;", html)
@@ -272,7 +295,7 @@ class GlossaryReviewServerTests(unittest.TestCase):
             document["review_sha256"],
         )
 
-    def test_import_error_exposes_the_failed_row_detail(self) -> None:
+    def test_import_requires_confirmation_for_manual_term_without_evidence(self) -> None:
         _, document, _ = self._request("/api/review")
         rows = self._editable_rows(document)
         for row in rows:
@@ -300,9 +323,24 @@ class GlossaryReviewServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertFalse(payload["ok"])
-        self.assertIn("Record 2", payload["detail"])
+        self.assertEqual(payload["code"], "GLOSSARY_MANUAL_TERMS_MISSING")
+        self.assertEqual(payload["message"], "원문에서 찾을 수 없는 수동 용어가 있습니다.")
+        self.assertEqual(payload["missing_terms"], ["Missing Manual Term"])
         self.assertIn("Missing Manual Term", payload["detail"])
         self.assertIn("not found in the approved source", payload["detail"])
+
+        status, confirmed, _ = self._request(
+            "/api/import",
+            method="POST",
+            payload={
+                "review_sha256": payload["document"]["review_sha256"],
+                "rows": rows,
+                "allow_missing_terms": True,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(confirmed["ok"])
+        self.assertEqual(confirmed["result"]["unverified_count"], 1)
 
     def test_injects_only_a_local_return_url(self) -> None:
         return_url = "http://127.0.0.1:8765/"
