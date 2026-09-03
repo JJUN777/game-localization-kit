@@ -198,8 +198,8 @@ card_images/
 아이콘은 참조 이미지를 매 요청마다 보내지 않고 공통 prompt에 시각적 특징과 출력 token을 설명합니다.
 
 ```text
-- {DEFENSE}: 속이 빈 방패 외곽선. 중앙에는 다른 문양이 없음.
-- {HEALTH}: 위쪽이 두 갈래로 둥글고 아래쪽이 뾰족한 하트 실루엣.
+- [DEFENSE]: 속이 빈 방패 외곽선. 중앙에는 다른 문양이 없음.
+- [HEALTH]: 위쪽이 두 갈래로 둥글고 아래쪽이 뾰족한 하트 실루엣.
 정의하지 않은 아이콘은 [ICON: concise visible description]으로 표시한다.
 ```
 
@@ -220,7 +220,7 @@ card_images/
 QA는 LLM을 호출하거나 원문을 자동 수정하지 않습니다. 현재 검사 범위:
 
 - `[ILLEGIBLE]`, 미확정 `[ICON: ...]`, replacement character
-- `{HP}` 같은 token의 괄호 손상과 허용되지 않은 token
+- `[HP]` 같은 icon token의 괄호 손상과 허용되지 않은 token
 - 숫자와 같은 문자열에 섞인 `O/0`, `I/l/1` 혼동 후보
 - identifier 형식·중복과 source hash 불일치
 - OCR provider가 남긴 warning과 불확실한 legibility
@@ -269,7 +269,7 @@ glk review finalize --project sample_rulebook             # 최종화
 
 검사 항목: marker, block 순서, 빈 본문, 미해결 OCR 표시, token 구조와 stale 상태
 
-`{HP}` 같은 token 변경을 의도했다면 원본을 확인한 뒤에만 사용합니다.
+`[HP]` 같은 icon token 변경을 의도했다면 원본을 확인한 뒤에만 사용합니다.
 
 ```bash
 glk review finalize --project sample_rulebook --allow-token-changes

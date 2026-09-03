@@ -241,6 +241,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
             {
                 "source_upload",
                 "source_job",
+                "source_continue",
                 "glossary_job",
                 "translation_job",
                 "projects",
@@ -520,6 +521,8 @@ class _DashboardHandler(LocalHttpRequestHandler):
                     ocr_prompt,
                     replace=replace,
                 )
+                if replace:
+                    self.server.job_manager.clear_source_job(project_id)
         except ProjectNotFoundError as error:
             self._send_error_json(
                 HTTPStatus.NOT_FOUND,
@@ -795,6 +798,23 @@ class _DashboardHandler(LocalHttpRequestHandler):
                     {"ok": True, "job": job},
                 )
                 return
+            if route.name == "source_continue":
+                project_id = request.get("project_id")
+                if not isinstance(project_id, str) or not project_id.strip():
+                    raise DashboardJobError("project_id is required.")
+                if "/" in project_id or "\\" in project_id:
+                    raise DashboardJobError(
+                        "Project ID must not contain path separators."
+                    )
+                with self.server.mutation_lock:
+                    job = self.server.job_manager.continue_partial_source_review(
+                        project_id=project_id.strip(),
+                    )
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"ok": True, "job": job},
+                )
+                return
             if route.name == "glossary_job":
                 project_id = request.get("project_id")
                 if not isinstance(project_id, str) or not project_id.strip():
@@ -908,7 +928,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 "PROJECT_INIT_FAILED"
                 if route.name == "projects"
                 else "SOURCE_JOB_START_FAILED"
-                if route.name == "source_job"
+                if route.name in {"source_job", "source_continue"}
                 else "GLOSSARY_JOB_START_FAILED"
                 if route.name == "glossary_job"
                 else "TRANSLATION_JOB_START_FAILED"

@@ -117,7 +117,7 @@ def read_blocks(path: Path) -> list[SourceBlock]:
 
 
 class SegmentationServiceTests(unittest.TestCase):
-    def test_rebuilds_v3_cache_once_before_reusing_v4_result(self) -> None:
+    def test_rebuilds_v3_cache_once_before_reusing_v5_result(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
             project_path = create_pdf_source(workspace_root)
@@ -144,7 +144,7 @@ class SegmentationServiceTests(unittest.TestCase):
                     encoding="utf-8"
                 )
             )
-            self.assertEqual(state["version"], "source-block-v4")
+            self.assertEqual(state["version"], "source-block-v5")
 
     def test_normalizes_pdf_blocks_and_reuses_cache(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -289,6 +289,53 @@ class SegmentationServiceTests(unittest.TestCase):
                 segment_project_source(
                     project="image_source", workspace_root=workspace_root
                 )
+
+    def test_forced_partial_pdf_adds_manual_review_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_root = Path(temporary_directory) / "workspaces"
+            project_path = create_pdf_source(workspace_root)
+            state_path = project_path / ".glk/state/pdf_acquisition.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state.update(
+                {
+                    "status": "partial",
+                    "selected_pages": [1, 2],
+                    "successful_pages": [1],
+                    "failures": [
+                        {
+                            "page": 2,
+                            "code": "SOURCE_PROCESSING_FAILED",
+                            "error": "No embedded text fragments were found.",
+                        }
+                    ],
+                }
+            )
+            write_json(state_path, state)
+            page_image = project_path / ".glk/cache/pdf/pages/page_002.png"
+            page_image.parent.mkdir(parents=True, exist_ok=True)
+            page_image.write_bytes(b"png")
+
+            with self.assertRaises(SegmentationError):
+                segment_project_source(
+                    project="pdf_source",
+                    workspace_root=workspace_root,
+                )
+
+            result = segment_project_source(
+                project="pdf_source",
+                workspace_root=workspace_root,
+                allow_partial=True,
+            )
+
+            self.assertEqual(result.total_blocks, 3)
+            self.assertEqual(result.flagged_blocks, 1)
+            blocks = read_blocks(project_path / ".glk/segments/source.jsonl")
+            placeholder = blocks[-1]
+            self.assertEqual(placeholder.page, 2)
+            self.assertEqual(placeholder.block_type, "unresolved_page")
+            self.assertEqual(placeholder.raw_text, "[ILLEGIBLE]")
+            self.assertIsNone(placeholder.bbox)
+            self.assertEqual(placeholder.legibility, "uncertain")
 
     def test_dry_run_does_not_create_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

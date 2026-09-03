@@ -84,7 +84,17 @@ class DashboardJobManagerTests(unittest.TestCase):
             self.assertEqual(model, "gemini-test")
             progress("Image 1/1: source.png", 0, 1)  # type: ignore[operator]
             completed.set()
-            return {"ok": True, "status": "succeeded"}
+            return {
+                "ok": True,
+                "status": "succeeded",
+                "usage": {
+                    "model": "gemini-test",
+                    "requests": 2,
+                    "input_tokens": 1_000,
+                    "output_tokens": 200,
+                    "estimated_cost_usd": 0.001,
+                },
+            }
 
         manager = DashboardJobManager(
             self.workspace_root,
@@ -109,6 +119,21 @@ class DashboardJobManagerTests(unittest.TestCase):
         self.assertEqual(state["status"], "succeeded")
         self.assertEqual(state["schema_version"], 1)
         manager.close()
+        ledger = WorkspacePaths(self.location.path).ai_usage_ledger.read_text(
+            encoding="utf-8"
+        ).splitlines()
+        self.assertEqual(len(ledger), 1)
+        self.assertEqual(json.loads(ledger[0])["stage"], "source_extraction")
+        reloaded = DashboardJobManager(self.workspace_root)
+        reloaded.close()
+        self.assertEqual(
+            len(
+                WorkspacePaths(self.location.path).ai_usage_ledger.read_text(
+                    encoding="utf-8"
+                ).splitlines()
+            ),
+            1,
+        )
 
     def test_default_source_runner_receives_explicit_settings_root(
         self,
@@ -382,6 +407,80 @@ class DashboardJobManagerTests(unittest.TestCase):
         segment.assert_called_once()
         source_qa.assert_called_once()
         self.assertIn("원문 검수 준비가 완료되었습니다.", messages)
+
+    def test_continues_partial_pdf_to_manual_source_review(self) -> None:
+        state_path = WorkspacePaths(
+            self.location.path
+        ).dashboard_source_job_state
+        state_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "job_id": "partial-pdf-job",
+                    "project_id": "background_job",
+                    "source_type": "pdf",
+                    "model": "gemini-test",
+                    "status": "partial",
+                    "progress_message": "일부 원본 처리에 실패했습니다.",
+                    "progress_current": 2,
+                    "progress_total": 2,
+                    "result": {
+                        "ok": False,
+                        "status": "partial",
+                        "source_type": "pdf",
+                        "acquisition": {
+                            "selected_pages": [1, 2],
+                            "successful_pages": [1],
+                            "failures": [{"page": 2, "code": "SOURCE_PROCESSING_FAILED"}],
+                        },
+                    },
+                    "error": "일부 원본 처리에 실패했습니다.",
+                    "created_at": "2026-09-03T00:00:00Z",
+                    "started_at": "2026-09-03T00:00:01Z",
+                    "finished_at": "2026-09-03T00:00:02Z",
+                    "updated_at": "2026-09-03T00:00:02Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+        segmentation = SimpleNamespace(
+            to_dict=lambda: {"total_blocks": 3, "review_status": "current"}
+        )
+        qa = SimpleNamespace(to_dict=lambda: {"total_issues": 1})
+        manager = DashboardJobManager(self.workspace_root)
+        with (
+            patch(
+                "glk.application.dashboard_job_service.ensure_project_pdf_page_image"
+            ) as ensure_page,
+            patch(
+                "glk.application.dashboard_job_service.segment_project_source",
+                return_value=segmentation,
+            ) as segment,
+            patch(
+                "glk.application.dashboard_job_service.run_project_source_qa",
+                return_value=qa,
+            ) as source_qa,
+        ):
+            continued = manager.continue_partial_source_review(
+                project_id="background_job"
+            )
+
+        self.assertEqual(continued["status"], "succeeded")
+        self.assertIsNone(continued["error"])
+        self.assertEqual(continued["result"]["manual_review_pages"], [2])
+        ensure_page.assert_called_once_with(
+            project="background_job",
+            page_number=2,
+            workspace_root=self.workspace_root.resolve(),
+        )
+        segment.assert_called_once_with(
+            project="background_job",
+            workspace_root=self.workspace_root.resolve(),
+            force=True,
+            allow_partial=True,
+        )
+        source_qa.assert_called_once()
+        manager.close()
 
     def test_registered_pipeline_marks_all_provider_failures_as_failed(
         self,
@@ -821,6 +920,13 @@ class DashboardJobManagerTests(unittest.TestCase):
                 "ok": True,
                 "status": "succeeded",
                 "translation": {"completed_blocks": 3},
+                "usage": {
+                    "model": "gemini-test",
+                    "requests": 1,
+                    "input_tokens": 2_000,
+                    "output_tokens": 500,
+                    "estimated_cost_usd": 0.004,
+                },
             }
 
         manager = DashboardJobManager(
@@ -861,6 +967,11 @@ class DashboardJobManagerTests(unittest.TestCase):
             "Translate naturally.",
         )
         manager.close()
+        ledger = WorkspacePaths(project_path).ai_usage_ledger.read_text(
+            encoding="utf-8"
+        ).splitlines()
+        self.assertEqual(len(ledger), 1)
+        self.assertEqual(json.loads(ledger[0])["stage"], "translation")
 
     def test_marks_a_previous_translation_job_as_interrupted(self) -> None:
         project_path = create_translation_project(

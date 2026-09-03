@@ -274,6 +274,14 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIsInstance(script, str)
         self.assertIn("MAX_SOURCE_UPLOAD_BYTES = 500 * 1024 * 1024", script)
         self.assertIn("function updateActiveJobDisplays()", script)
+        self.assertIn("function updateActiveJobElapsed()", script)
+        self.assertIn("function continuePartialSourceReview(job)", script)
+        self.assertIn("/api/jobs/source/continue", script)
+        self.assertIn("window.setInterval(updateActiveJobElapsed, 1000)", script)
+        self.assertIn("누적 AI 비용", script)
+        self.assertIn("pipelineTotal(project)", script)
+        self.assertIn('pipelineStep(project, "translation_review"', script)
+        self.assertIn("data-usage-detail", script)
         self.assertIn('data-project-id="${escapeHtml(project.project_id)}"', script)
         self.assertIn(
             'message.textContent = job.progress_message || ""',
@@ -1621,6 +1629,7 @@ class DashboardServerTests(unittest.TestCase):
         self.assertFalse(
             (location.path / "01_input/pdf/old.pdf").exists()
         )
+
         self.assertTrue(
             (location.path / "01_input/images/new.png").is_file()
         )
@@ -1671,6 +1680,38 @@ class DashboardServerTests(unittest.TestCase):
         self.assertFalse(
             (location.path / "01_input/pdf/old.pdf").exists()
         )
+
+        acquisition_state = location.path / ".glk/state/image_ocr.json"
+        acquisition_state.write_text(
+            json.dumps({
+                "status": "partial",
+                "failures": [
+                    {"file": "new.png", "code": "SOURCE_PROCESSING_FAILED"}
+                ],
+            }),
+            encoding="utf-8",
+        )
+        stale_output = location.path / "02_source/ocr/combined.partial.txt"
+        stale_output.write_text("partial output", encoding="utf-8")
+        stale_cache = location.path / ".glk/cache/ocr/results/new.json"
+        stale_cache.parent.mkdir(parents=True, exist_ok=True)
+        stale_cache.write_text("{}", encoding="utf-8")
+
+        status, recovered = self._request(
+            "/api/projects/replace_upload/source",
+            method="PUT",
+            body=pdf_body,
+            content_type=pdf_content_type,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(recovered["source"]["replaced"])
+        self.assertEqual(recovered["source"]["source_type"], "pdf")
+        self.assertTrue((location.path / "01_input/pdf/old.pdf").is_file())
+        self.assertFalse((location.path / "01_input/images/new.png").exists())
+        self.assertFalse(acquisition_state.exists())
+        self.assertFalse(stale_output.exists())
+        self.assertFalse(stale_cache.exists())
 
     def test_source_upload_rejects_bad_input_and_unknown_project(self) -> None:
         create_project(

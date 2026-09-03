@@ -60,15 +60,15 @@ def write_blocks(path: Path, blocks: list[SourceBlock]) -> None:
 class LocalSourceQaRuleTests(unittest.TestCase):
     def test_clean_text_has_no_issues(self) -> None:
         blocks = [
-            make_block(1, "Deal 10 {DMGR}."),
+            make_block(1, "Deal 10 [DMGR]."),
             make_block(2, "DE-CB-M43/90", block_type="identifier"),
-            make_block(3, "{Dark}", block_type="identifier"),
+            make_block(3, "[DARK]", block_type="identifier"),
         ]
-        self.assertEqual(run_local_source_qa(blocks, ("DMGR", "Dark")), [])
+        self.assertEqual(run_local_source_qa(blocks, ("DMGR", "DARK")), [])
 
     def test_flags_only_deterministic_suspicious_patterns(self) -> None:
         blocks = [
-            make_block(1, "Deal l0 {DMR} and [ICON: star]."),
+            make_block(1, "Deal l0 [DMR] and [ICON: star]."),
             make_block(
                 2,
                 "DE C8 M43/9O",
@@ -77,7 +77,7 @@ class LocalSourceQaRuleTests(unittest.TestCase):
                 status="flagged",
                 warnings=("Small text",),
             ),
-            make_block(3, "Bad {DMGR �"),
+            make_block(3, "Bad [DMGR �"),
             make_block(4, "[ILLEGIBLE]", legibility="uncertain", status="flagged"),
             make_block(5, "DUP-01", block_type="identifier"),
             make_block(6, "DUP-01", block_type="identifier"),
@@ -122,11 +122,11 @@ class SourceQaServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace_root = Path(temporary_directory) / "workspaces"
             location = create_project(name="QA Project", workspace_root=workspace_root)
-            blocks = [make_block(1, "Deal 10 {DMGR}.")]
+            blocks = [make_block(1, "Deal 10 [DMGR].")]
             write_blocks(location.path / ".glk/segments/source.jsonl", blocks)
             prompt_path = location.path / "01_input/images/ocr_prompt.txt"
             prompt_path.write_text(
-                "Eight-point burst: {DMGR}\nKeep line order.\n",
+                "- [DMGR]: eight-point burst.\nKeep line order.\n",
                 encoding="utf-8",
             )
 
@@ -151,7 +151,7 @@ class SourceQaServiceTests(unittest.TestCase):
             )
             self.assertTrue(cached.cached)
 
-            prompt_path.write_text("Air symbol: {Air}", encoding="utf-8")
+            prompt_path.write_text("- [AIR]: air symbol.", encoding="utf-8")
             changed = run_project_source_qa(
                 project="qa_project", workspace_root=workspace_root
             )

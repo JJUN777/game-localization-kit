@@ -18,6 +18,12 @@
   --success-soft: #eef3f0;
   --focus: #0969da;
   --on-solid: #ffffff;
+  --toast-bg: #24292f;
+  --toast-text: #ffffff;
+  --toast-border: transparent;
+  --toast-error-bg: #a9402e;
+  --toast-error-text: #ffffff;
+  --toast-error-border: transparent;
   --overlay: rgb(31 35 40 / 48%);
   --shadow: 0 1px 2px rgb(36 41 47 / 5%);
   --shadow-dialog: 0 24px 80px rgb(31 35 40 / 24%);
@@ -65,6 +71,12 @@
     --success-soft: #1b2b23;
     --focus: #58a6ff;
     --on-solid: #0f1216;
+    --toast-bg: #1d2229;
+    --toast-text: #e6edf3;
+    --toast-border: #46515e;
+    --toast-error-bg: #3a211d;
+    --toast-error-text: #ff9b84;
+    --toast-error-border: rgb(240 128 104 / 42%);
     --overlay: rgb(0 0 0 / 70%);
     --shadow: 0 1px 2px rgb(0 0 0 / 32%);
     --shadow-dialog: 0 24px 80px rgb(0 0 0 / 60%);

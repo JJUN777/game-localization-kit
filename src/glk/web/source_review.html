@@ -79,6 +79,10 @@
       cursor: pointer; min-width: 3px; min-height: 3px;
     }
     .box.selected { border-color: var(--text); background: rgb(50 56 63 / 18%); z-index: 3; }
+    .box.icon-selected {
+      border-color: var(--focus); background: color-mix(in srgb, var(--focus) 18%, transparent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 34%, transparent); z-index: 4;
+    }
     .box.excluded { border-color: #7d8794; background: rgba(90,98,110,.16); opacity: .55; }
     .box.warning { box-shadow: 0 0 0 2px var(--warn); }
     .box.issue { box-shadow: 0 0 0 2px var(--danger); }
@@ -93,6 +97,7 @@
       background: var(--surface);
     }
     .card.selected { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+    .card.icon-selected { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
     .card.excluded { opacity: .6; }
     .card-head { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
     .card-id { color: var(--muted); font: 11px ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -111,11 +116,12 @@
     }
     textarea:focus { outline: none; border-color: var(--line-strong); }
     .mini { padding: 4px 7px; font-size: 12px; }
+    .icon-audit-select { color: var(--text); font-size: 12px; font-weight: 600; }
     .notice {
       position: fixed; right: 18px; bottom: 18px; max-width: 460px; padding: 12px 15px;
-      border-radius: 8px; color: var(--on-solid); background: var(--text); border: 1px solid var(--line); z-index: 30;
+      border-radius: 8px; color: var(--toast-text); background: var(--toast-bg); border: 1px solid var(--toast-border); z-index: 30;
     }
-    .notice.error { border-color: var(--danger); color: var(--on-solid); background: var(--danger); }
+    .notice.error { border-color: var(--toast-error-border); color: var(--toast-error-text); background: var(--toast-error-bg); }
     dialog {
       width: min(460px, calc(100vw - 32px)); border: 1px solid var(--line);
       border-radius: 8px; background: var(--surface); color: var(--text);
@@ -128,11 +134,37 @@
       display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px;
       flex-wrap: wrap;
     }
+    dialog.icon-audit-dialog { width: min(960px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+    .icon-audit-results { display: grid; gap: 14px; margin-top: 18px; }
+    .icon-audit-result {
+      display: grid; grid-template-columns: minmax(220px, .75fr) minmax(0, 1.25fr);
+      gap: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--panel2);
+    }
+    .icon-audit-result.applied { border-color: color-mix(in srgb, var(--success) 45%, var(--line)); }
+    .icon-audit-crop { min-width: 0; }
+    .icon-audit-crop img {
+      display: block; width: 100%; max-height: 260px; object-fit: contain;
+      border: 1px solid var(--line); border-radius: 6px; background: white;
+    }
+    .icon-audit-detail { min-width: 0; }
+    .icon-audit-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .icon-audit-head strong { font-size: 13px; }
+    .icon-audit-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .icon-audit-copy { min-width: 0; }
+    .icon-audit-copy span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 11px; }
+    .icon-audit-copy pre {
+      min-height: 76px; margin: 0; padding: 9px; overflow: auto; border: 1px solid var(--line);
+      border-radius: 6px; background: var(--surface); color: var(--text);
+      font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap;
+    }
+    .icon-audit-icons { display: grid; gap: 5px; margin: 10px 0 0; padding: 0; list-style: none; }
+    .icon-audit-icons li { color: var(--muted); font-size: 12px; }
+    .icon-audit-icons code { color: var(--text); font-weight: 700; }
+    .icon-audit-item-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+    .icon-audit-empty { color: var(--muted); font-size: 12px; }
     .hidden { display: none !important; }
     label.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
-    .token-confirm-copy { display: flex; flex-direction: column; line-height: 1.25; }
-    .token-confirm-copy span { color: var(--text); font-size: 12px; }
-    .token-confirm-copy small { color: var(--muted); font-size: 10px; }
     button:focus-visible,
     textarea:focus-visible,
     input:focus-visible {
@@ -143,6 +175,7 @@
     @media (max-width: 1050px) {
       .layout { grid-template-columns: 150px 1fr; }
       section.editor { grid-column: 1 / -1; height: 55vh; border-top: 1px solid var(--line); }
+      .icon-audit-result, .icon-audit-compare { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -151,13 +184,8 @@
     <h1>원문 이미지 · 추출문 검수</h1>
     <span id="project" class="status"></span>
     <div class="grow"></div>
-    <label class="check" title="원본 이미지를 확인하고 아이콘 표기를 직접 수정한 경우에만 선택합니다.">
-      <input id="allowTokens" type="checkbox">
-      <span class="token-confirm-copy">
-        <span>아이콘 표기를 직접 바꿨습니다</span>
-        <small>예: [ICON: 주황 마름모] → {DAMAGE}</small>
-      </span>
-    </label>
+    <button id="iconAuditMode" class="hidden" type="button">PDF 아이콘 확인</button>
+    <button id="iconAuditRun" class="hidden" type="button" disabled>선택 블록 AI 검사 (0)</button>
     <button id="save">저장</button>
     <button id="validate">검증</button>
     <button id="finalize" class="primary">최종 승인</button>
@@ -184,6 +212,7 @@
     <main>
       <div class="viewer-tools">
         <button id="addMissing">누락 문단 추가</button>
+        <button id="selectPageIcons" class="hidden" type="button">현재 페이지 전체 선택</button>
         <button id="openPdf" class="hidden">원본 PDF 열기</button>
         <label>확대 <input id="zoom" type="range" min="50" max="180" value="100"></label>
         <span id="drawHint" class="status hidden">원본에서 누락 영역을 드래그하세요.</span>
@@ -198,6 +227,14 @@
       <div id="cards"></div>
     </section>
   </div>
+  <dialog id="iconAuditDialog" class="icon-audit-dialog" aria-labelledby="iconAuditTitle">
+    <h2 id="iconAuditTitle">PDF 아이콘 검사 결과</h2>
+    <p id="iconAuditSummary"></p>
+    <div id="iconAuditResults" class="icon-audit-results"></div>
+    <div class="dialog-actions">
+      <button id="iconAuditClose" type="button">결과 닫기</button>
+    </div>
+  </dialog>
   <dialog id="approvalCompleteDialog" aria-labelledby="approvalCompleteTitle">
     <h2 id="approvalCompleteTitle">원문 승인이 완료되었습니다</h2>
     <p>
@@ -214,6 +251,7 @@
   <script>
     const TOKEN = __GLK_TOKEN_JSON__;
     const RETURN_URL = __GLK_RETURN_URL_JSON__;
+    const MAX_ICON_AUDIT_BLOCKS = 24;
     let documentState = null;
     let currentGroup = null;
     let selectedId = null;
@@ -223,6 +261,11 @@
     let newCounter = 0;
     let layoutWarningsOnly = false;
     let unresolvedOnly = false;
+    let iconAuditMode = false;
+    let iconAuditBusy = false;
+    let iconAuditSelection = new Set();
+    let iconAuditResults = [];
+    let iconAuditRunSummary = "";
 
     const $ = (id) => document.getElementById(id);
     const api = async (path, options = {}) => {
@@ -231,7 +274,12 @@
         headers: {"X-GLK-Token": TOKEN, ...(options.headers || {})}
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.message || "요청에 실패했습니다.");
+      if (!response.ok) {
+        const error = new Error(body.message || "요청에 실패했습니다.");
+        error.code = body.code;
+        error.detail = body.detail;
+        throw error;
+      }
       return body;
     };
     const notice = (message, error = false) => {
@@ -256,6 +304,43 @@
       (b) => (!layoutWarningsOnly || b.layout_warnings) && (!unresolvedOnly || isUnresolved(b))
     );
     const groupById = () => documentState.groups.find((g) => g.id === currentGroup);
+    const iconAuditEligible = (block) => (
+      documentState.source_type === "pdf" && block.source_type === "pdf" &&
+      !block.manual && !block.excluded && Array.isArray(block.bbox)
+    );
+
+    function toggleIconAuditBlock(block) {
+      if (!iconAuditEligible(block) || iconAuditBusy) return;
+      if (iconAuditSelection.has(block.id)) iconAuditSelection.delete(block.id);
+      else if (iconAuditSelection.size < MAX_ICON_AUDIT_BLOCKS) {
+        iconAuditSelection.add(block.id);
+      } else {
+        notice(`한 번에 최대 ${MAX_ICON_AUDIT_BLOCKS}개 블록을 검사할 수 있습니다.`, true);
+      }
+      renderCards(); renderOverlay(); renderIconAuditControls();
+    }
+
+    function renderIconAuditControls() {
+      const available = documentState?.source_type === "pdf";
+      const mode = $("iconAuditMode");
+      mode.classList.toggle("hidden", !available);
+      mode.textContent = iconAuditMode ? "아이콘 선택 취소" : "PDF 아이콘 확인";
+      mode.disabled = iconAuditBusy;
+      const run = $("iconAuditRun");
+      run.classList.toggle("hidden", !available || !iconAuditMode);
+      run.disabled = iconAuditBusy || !iconAuditSelection.size;
+      run.textContent = iconAuditBusy
+        ? "선택 블록 검사 중…"
+        : `선택 블록 AI 검사 (${iconAuditSelection.size})`;
+      const page = $("selectPageIcons");
+      page.classList.toggle("hidden", !available || !iconAuditMode);
+      const eligible = allGroupBlocks().filter(iconAuditEligible);
+      const pageHasSelection = eligible.some(
+        (block) => iconAuditSelection.has(block.id)
+      );
+      page.disabled = iconAuditBusy || !eligible.length;
+      page.textContent = pageHasSelection ? "현재 페이지 선택 해제" : "현재 페이지 전체 선택";
+    }
 
     function renderGroups() {
       $("groups").innerHTML = "";
@@ -302,11 +387,15 @@
         if (!block.bbox) continue;
         const [x0,y0,x1,y1] = block.bbox;
         const box = document.createElement("div");
-        box.className = `box${selectedId === block.id ? " selected" : ""}${block.excluded ? " excluded" : ""}${block.warnings.length ? " warning" : ""}${block.issues.length ? " issue" : ""}`;
+        box.className = `box${selectedId === block.id ? " selected" : ""}${iconAuditSelection.has(block.id) ? " icon-selected" : ""}${block.excluded ? " excluded" : ""}${block.warnings.length ? " warning" : ""}${block.issues.length ? " issue" : ""}`;
         box.style.left = `${x0/10}%`; box.style.top = `${y0/10}%`;
         box.style.width = `${(x1-x0)/10}%`; box.style.height = `${(y1-y0)/10}%`;
         box.title = block.text.slice(0, 100);
-        box.onclick = (event) => { event.stopPropagation(); selectBlock(block.id); };
+        box.onclick = (event) => {
+          event.stopPropagation();
+          if (iconAuditMode) toggleIconAuditBlock(block);
+          else selectBlock(block.id);
+        };
         overlay.appendChild(box);
       }
     }
@@ -333,16 +422,29 @@
       for (const block of groupBlocks()) {
         const card = document.createElement("div");
         card.dataset.card = block.id;
-        card.className = `card${selectedId === block.id ? " selected" : ""}${block.excluded ? " excluded" : ""}`;
+        card.className = `card${selectedId === block.id ? " selected" : ""}${iconAuditSelection.has(block.id) ? " icon-selected" : ""}${block.excluded ? " excluded" : ""}`;
         const head = document.createElement("div");
         head.className = "card-head";
         head.innerHTML = `
           <span class="card-id" title="${block.id}">${block.id}</span>
           ${block.manual ? '<span class="tag manual">수동 추가</span>' : ""}
+          ${block.block_type === "unresolved_page" ? '<span class="tag issue">원문 직접 입력 필요</span>' : ""}
           ${block.layout_warnings ? `<span class="tag warning">AI 정렬 누락 ${block.layout_warnings}</span>` : ""}
           ${block.warnings.length - block.layout_warnings ? `<span class="tag warning">추출 경고 ${block.warnings.length - block.layout_warnings}</span>` : ""}
           ${block.issues.length ? `<span class="tag issue">QA ${block.issues.length}</span>` : ""}
           <span class="grow"></span>`;
+        if (iconAuditMode) {
+          const auditLabel = document.createElement("label");
+          auditLabel.className = "check icon-audit-select";
+          auditLabel.onclick = (event) => event.stopPropagation();
+          const auditCheck = document.createElement("input");
+          auditCheck.type = "checkbox";
+          auditCheck.checked = iconAuditSelection.has(block.id);
+          auditCheck.disabled = !iconAuditEligible(block) || iconAuditBusy;
+          auditCheck.onchange = () => toggleIconAuditBlock(block);
+          auditLabel.append(auditCheck, document.createTextNode(" 아이콘 검사"));
+          head.appendChild(auditLabel);
+        }
         const up = document.createElement("button"); up.className = "mini"; up.textContent = "↑";
         up.onclick = () => moveBlock(block.id, -1);
         const down = document.createElement("button"); down.className = "mini"; down.textContent = "↓";
@@ -354,7 +456,11 @@
         } else {
           const label = document.createElement("label"); label.className = "check";
           const check = document.createElement("input"); check.type = "checkbox"; check.checked = block.excluded;
-          check.onchange = () => { block.excluded = check.checked; render(); };
+          check.onchange = () => {
+            block.excluded = check.checked;
+            if (block.excluded) iconAuditSelection.delete(block.id);
+            render();
+          };
           label.append(check, document.createTextNode(" 제외")); head.appendChild(label);
         }
         const area = document.createElement("textarea");
@@ -452,6 +558,7 @@
 
     function render() {
       renderGroups(); renderSource(); renderCards(); renderOverlay(); renderSummary();
+      renderIconAuditControls();
     }
 
     function normalizedPoint(event) {
@@ -538,10 +645,220 @@
       notice("누락 문단 추가를 취소했습니다.");
     });
 
-    function payload({allowUnresolvedIcons = false} = {}) {
+    function addAuditCopy(parent, label, value) {
+      const column = document.createElement("div");
+      column.className = "icon-audit-copy";
+      const title = document.createElement("span");
+      title.textContent = label;
+      const copy = document.createElement("pre");
+      copy.textContent = value;
+      column.append(title, copy);
+      parent.appendChild(column);
+    }
+
+    function applyIconAuditResult(result, card) {
+      const block = documentState.blocks.find((item) => item.id === result.block_id);
+      if (!block) {
+        notice("검사한 원문 블록을 찾지 못했습니다. 다시 검사하세요.", true);
+        return;
+      }
+      if (block.text !== result.current_text) {
+        notice("검사 후 원문이 변경되었습니다. 해당 블록을 다시 검사하세요.", true);
+        return;
+      }
+      block.text = result.suggested_text;
+      result.applied = true;
+      result.ignored = false;
+      card.classList.add("applied");
+      render();
+      renderIconAuditResults();
+      notice(`PAGE ${result.page} 아이콘 제안을 적용했습니다.`);
+    }
+
+    function renderIconAuditResults() {
+      $("iconAuditSummary").textContent = iconAuditRunSummary;
+      const host = $("iconAuditResults");
+      host.replaceChildren();
+      for (const result of iconAuditResults) {
+        const card = document.createElement("article");
+        card.className = `icon-audit-result${result.applied ? " applied" : ""}`;
+        const crop = document.createElement("div");
+        crop.className = "icon-audit-crop";
+        const image = document.createElement("img");
+        image.alt = `PAGE ${result.page} ${result.block_id} 원본 영역`;
+        image.src = `${result.crop_url}&token=${encodeURIComponent(TOKEN)}`;
+        crop.appendChild(image);
+
+        const detail = document.createElement("div");
+        detail.className = "icon-audit-detail";
+        const head = document.createElement("div");
+        head.className = "icon-audit-head";
+        const title = document.createElement("strong");
+        title.textContent = `PAGE ${result.page} · ${result.block_id}`;
+        const state = document.createElement("span");
+        state.className = "tag";
+        state.textContent = result.applied
+          ? "적용됨"
+          : result.ignored
+          ? "무시됨"
+          : result.cached
+          ? result.icons.length
+            ? `저장된 결과 · 아이콘 ${result.icons.length}개`
+            : "저장된 결과 · 아이콘 없음"
+          : result.icons.length
+          ? `아이콘 ${result.icons.length}개`
+          : "아이콘 없음";
+        head.append(title, state);
+        detail.appendChild(head);
+
+        const compare = document.createElement("div");
+        compare.className = "icon-audit-compare";
+        addAuditCopy(compare, "현재 원문", result.current_text);
+        addAuditCopy(compare, "AI 제안", result.suggested_text);
+        detail.appendChild(compare);
+
+        if (result.icons.length) {
+          const icons = document.createElement("ul");
+          icons.className = "icon-audit-icons";
+          for (const icon of result.icons) {
+            const item = document.createElement("li");
+            const marker = document.createElement("code");
+            marker.textContent = icon.marker;
+            const confidence = {
+              high: "높은 신뢰도",
+              medium: "중간 신뢰도",
+              low: "낮은 신뢰도"
+            }[icon.confidence] || "신뢰도 확인 필요";
+            item.append(
+              marker,
+              document.createTextNode(` · ${icon.description} · ${confidence}`)
+            );
+            icons.appendChild(item);
+          }
+          detail.appendChild(icons);
+          const actions = document.createElement("div");
+          actions.className = "icon-audit-item-actions";
+          const ignore = document.createElement("button");
+          ignore.type = "button";
+          ignore.textContent = "무시";
+          ignore.disabled = result.applied || result.ignored;
+          ignore.onclick = () => {
+            result.ignored = true;
+            renderIconAuditResults();
+          };
+          const apply = document.createElement("button");
+          apply.type = "button";
+          apply.className = "primary";
+          apply.textContent = "제안 적용";
+          apply.disabled = result.applied || result.ignored;
+          apply.onclick = () => applyIconAuditResult(result, card);
+          actions.append(ignore, apply);
+          detail.appendChild(actions);
+        } else {
+          const empty = document.createElement("p");
+          empty.className = "icon-audit-empty";
+          empty.textContent = result.summary || "의미 있는 누락 아이콘을 찾지 못했습니다.";
+          detail.appendChild(empty);
+        }
+        card.append(crop, detail);
+        host.appendChild(card);
+      }
+    }
+
+    async function runPdfIconAudit() {
+      const selected = documentState.blocks.filter(
+        (block) => iconAuditSelection.has(block.id) && iconAuditEligible(block)
+      );
+      if (!selected.length || iconAuditBusy) return;
+      iconAuditBusy = true;
+      renderCards(); renderOverlay(); renderIconAuditControls();
+      try {
+        const result = await api("/api/icon-audit", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            review_sha256: documentState.review_sha256,
+            blocks: selected.map((block) => ({id: block.id, text: block.text}))
+          })
+        });
+        iconAuditResults = result.results;
+        const usage = result.usage;
+        const thinkingLabel = usage && usage.thinking_tokens > 0
+          ? ` (thinking ${usage.thinking_tokens} 포함)`
+          : "";
+        const cachedInputLabel = usage && usage.cached_input_tokens > 0
+          ? ` · cached input ${usage.cached_input_tokens} token`
+          : "";
+        const usageLabel = usage && Number.isInteger(usage.requests) && usage.requests > 0
+          ? ` · API ${usage.requests}회 · 입력 ${usage.input_tokens || 0} token · 출력 ${usage.output_tokens || 0} token${thinkingLabel}${cachedInputLabel}`
+          : "";
+        const costLabel = usage && usage.requests > 0
+          ? Number.isFinite(usage.estimated_cost_usd)
+            ? ` · 예상 비용 $${usage.estimated_cost_usd < 0.0001
+                ? usage.estimated_cost_usd.toFixed(6)
+                : usage.estimated_cost_usd.toFixed(4)}`
+            : " · 예상 비용 단가 미등록"
+          : result.cached_blocks
+            ? " · 추가 비용 $0 (저장 결과 재사용)"
+            : "";
+        const cacheLabel = result.cached_blocks
+          ? ` · 저장된 결과 ${result.cached_blocks}개 재사용`
+          : "";
+        iconAuditRunSummary = `${result.inspected_blocks}개 블록 검사 · 아이콘 ${result.detected_icons}개 감지${cacheLabel}${usageLabel}${costLabel}`;
+        iconAuditMode = false;
+        iconAuditSelection.clear();
+        render();
+        renderIconAuditResults();
+        $("iconAuditDialog").showModal();
+      } catch (error) {
+        notice(error.message, true);
+      } finally {
+        iconAuditBusy = false;
+        renderIconAuditControls();
+      }
+    }
+
+    $("iconAuditMode").onclick = () => {
+      iconAuditMode = !iconAuditMode;
+      iconAuditSelection.clear();
+      if (iconAuditMode) {
+        layoutWarningsOnly = false;
+        unresolvedOnly = false;
+        setDrawMode(false);
+      }
+      render();
+    };
+    $("iconAuditRun").onclick = runPdfIconAudit;
+    $("selectPageIcons").onclick = () => {
+      const eligible = allGroupBlocks().filter(iconAuditEligible);
+      const pageHasSelection = eligible.some(
+        (block) => iconAuditSelection.has(block.id)
+      );
+      for (const block of eligible) {
+        if (pageHasSelection) iconAuditSelection.delete(block.id);
+        else if (iconAuditSelection.size < MAX_ICON_AUDIT_BLOCKS) {
+          iconAuditSelection.add(block.id);
+        }
+      }
+      if (!pageHasSelection && eligible.some((block) => !iconAuditSelection.has(block.id))) {
+        notice(`현재 페이지에서 최대 ${MAX_ICON_AUDIT_BLOCKS}개 블록을 선택했습니다.`);
+      }
+      renderCards(); renderOverlay(); renderIconAuditControls();
+    };
+    $("iconAuditClose").onclick = () => $("iconAuditDialog").close();
+
+    const iconTokens = (text) => (
+      text.match(/\[(?!(?:ICON|ILLEGIBLE)\])[A-Z][A-Z0-9_]*\]/g) || []
+    ).sort();
+    const tokenChangeBlocks = () => documentState.blocks.filter((block) => (
+      !block.manual && !block.excluded &&
+      JSON.stringify(iconTokens(block.text)) !== JSON.stringify(iconTokens(block.raw_text))
+    ));
+
+    function payload({allowUnresolvedIcons = false, allowTokenChanges = false} = {}) {
       return {
         review_sha256: documentState.review_sha256,
-        allow_token_changes: $("allowTokens").checked,
+        allow_token_changes: allowTokenChanges,
         allow_unresolved_icons: allowUnresolvedIcons,
         blocks: documentState.blocks.map((b) => ({
           id: b.id, text: b.text, excluded: b.excluded, source_type: b.source_type,
@@ -555,7 +872,7 @@
         if (kinds.icon && !allowUnresolvedIcons) {
           return {
             block,
-            message: "미확정 아이콘([ICON: ...])이 남아 있습니다. 원본을 확인해 정의된 {TOKEN}으로 바꾸거나, 의미 없는 장식 아이콘이면 해당 표기를 삭제하세요. 아이콘 표기를 수정했다면 상단의 ‘아이콘 표기를 직접 바꿨습니다’도 선택하세요."
+            message: "미확정 아이콘([ICON: ...])이 남아 있습니다. 원본을 확인해 정의된 [TOKEN]으로 바꾸거나, 의미 없는 장식 아이콘이면 해당 표기를 삭제하세요."
           };
         }
         if (kinds.illegible) {
@@ -586,6 +903,15 @@
         if (blocker) {
           showBlocker(blocker);
           return null;
+        }
+        const changedTokens = tokenChangeBlocks();
+        if (!options.allowTokenChanges && changedTokens.length) {
+          const confirmed = confirm(
+            `아이콘 token이 변경된 블록이 ${changedTokens.length}개 있습니다.\n\n`
+            + "원본 이미지와 대조한 변경이 맞습니까?"
+          );
+          if (!confirmed) return null;
+          options = {...options, allowTokenChanges: true};
         }
       }
       try {
@@ -663,8 +989,10 @@
     (async () => {
       try {
         documentState = await api("/api/review");
+        const firstUnresolved = documentState.blocks.find(isUnresolved);
         currentGroup = (
-          documentState.groups.find((group) => group.layout_warnings)
+          documentState.groups.find((group) => group.id === firstUnresolved?.group_id)
+          || documentState.groups.find((group) => group.layout_warnings)
           || documentState.groups[0]
         )?.id || null;
         render();

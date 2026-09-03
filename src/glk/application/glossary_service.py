@@ -37,7 +37,9 @@ GLOSSARY_REVIEW_COLUMNS = (
     "example",
     "candidate_id",
 )
-_TOKEN_PATTERN = re.compile(r"\{[A-Za-z][A-Za-z0-9_]*\}")
+_TOKEN_PATTERN = re.compile(
+    r"(?:\{[A-Za-z][A-Za-z0-9_]*\}|\[[A-Z][A-Z0-9_]*\])"
+)
 _QUANTITY_PREFIX_PATTERN = re.compile(r"(?<![A-Za-z0-9])\d+\s*[x×](?=\s|$)", re.IGNORECASE)
 _LIST_ENUMERATOR_PATTERN = re.compile(r"^\s*\d+[A-Za-z]?\.\s*")
 _WORD_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9'’\-]*")

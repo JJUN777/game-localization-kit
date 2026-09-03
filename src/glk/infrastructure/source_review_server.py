@@ -5,6 +5,7 @@ from __future__ import annotations
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from importlib import resources
+from io import BytesIO
 import json
 import mimetypes
 from pathlib import Path
@@ -13,6 +14,11 @@ from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
 from glk.application.project_service import load_project
+from glk.application.pdf_icon_audit_service import (
+    PdfIconAuditProvider,
+    audit_project_pdf_icons,
+    crop_pdf_review_block,
+)
 from glk.application.review_types import SourceReviewDocument
 from glk.application.source_review_service import (
     SourceReviewConflictError,
@@ -44,6 +50,7 @@ class SourceReviewHttpServer(LocalHttpServer):
         project: str | Path,
         workspace_root: str | Path,
         return_url: str | None = None,
+        icon_audit_provider: PdfIconAuditProvider | None = None,
     ) -> None:
         self.return_url = validate_local_return_url(
             return_url,
@@ -52,6 +59,7 @@ class SourceReviewHttpServer(LocalHttpServer):
         super().__init__(server_address, handler_class)
         self.project = str(project)
         self.workspace_root = str(workspace_root)
+        self.icon_audit_provider = icon_audit_provider
 
     @property
     def review_url(self) -> str:
@@ -250,6 +258,30 @@ class _SourceReviewHandler(LocalHttpRequestHandler):
                     code="RESOURCE_NOT_FOUND",
                 )
             return
+        if path == "/api/icon-crop":
+            if not self._asset_authorized(query):
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                    code="REVIEW_SESSION_INVALID",
+                )
+                return
+            try:
+                image = crop_pdf_review_block(
+                    project=self.server.project,
+                    workspace_root=self.server.workspace_root,
+                    block_id=query.get("block", [""])[0],
+                )
+                output = BytesIO()
+                image.save(output, format="PNG")
+                self._send_bytes(HTTPStatus.OK, output.getvalue(), "image/png")
+            except (SourceReviewError, OSError, ValueError) as error:
+                self._send_error_json(
+                    HTTPStatus.NOT_FOUND,
+                    error,
+                    code="RESOURCE_NOT_FOUND",
+                )
+            return
         self._send_error_json(
             HTTPStatus.NOT_FOUND,
             "Not found.",
@@ -258,7 +290,12 @@ class _SourceReviewHandler(LocalHttpRequestHandler):
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
-        if path not in {"/api/save", "/api/validate", "/api/finalize"}:
+        if path not in {
+            "/api/save",
+            "/api/validate",
+            "/api/finalize",
+            "/api/icon-audit",
+        }:
             self._send_error_json(
                 HTTPStatus.NOT_FOUND,
                 "Not found.",
@@ -274,6 +311,26 @@ class _SourceReviewHandler(LocalHttpRequestHandler):
             return
         try:
             body = self._read_request_json(max_bytes=_MAX_REQUEST_BYTES)
+            if path == "/api/icon-audit":
+                review_hash = body.get("review_sha256")
+                blocks = body.get("blocks")
+                if not isinstance(review_hash, str):
+                    raise SourceReviewError("review_sha256 is required.")
+                if not isinstance(blocks, list):
+                    raise SourceReviewError("blocks must be a list.")
+                with self.server.mutation_lock:
+                    audit_result = audit_project_pdf_icons(
+                        project=self.server.project,
+                        workspace_root=self.server.workspace_root,
+                        expected_review_sha256=review_hash,
+                        selected_blocks=blocks,
+                        provider=self.server.icon_audit_provider,
+                    )
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"ok": True, **audit_result.to_dict()},
+                )
+                return
             review_hash = body.get("review_sha256")
             blocks = body.get("blocks")
             allow_token_changes = body.get("allow_token_changes", False)
@@ -298,7 +355,7 @@ class _SourceReviewHandler(LocalHttpRequestHandler):
                 if path == "/api/save":
                     response: dict[str, Any] = {"ok": True, "document": document}
                 else:
-                    result = finalize_project_source_review(
+                    finalize_result = finalize_project_source_review(
                         project=self.server.project,
                         workspace_root=self.server.workspace_root,
                         allow_token_changes=allow_token_changes,
@@ -307,7 +364,7 @@ class _SourceReviewHandler(LocalHttpRequestHandler):
                     )
                     response = {
                         "ok": True,
-                        "result": result.to_dict(),
+                        "result": finalize_result.to_dict(),
                         "document": self._document(),
                     }
             self._send_json(HTTPStatus.OK, response)
@@ -332,6 +389,7 @@ def create_source_review_server(
     workspace_root: str | Path = "workspaces",
     port: int = 0,
     return_url: str | None = None,
+    icon_audit_provider: PdfIconAuditProvider | None = None,
 ) -> SourceReviewHttpServer:
     validate_local_port(port, error_type=SourceReviewError)
     get_project_source_review_document(
@@ -343,6 +401,7 @@ def create_source_review_server(
         project=project,
         workspace_root=workspace_root,
         return_url=return_url,
+        icon_audit_provider=icon_audit_provider,
     )
 
 

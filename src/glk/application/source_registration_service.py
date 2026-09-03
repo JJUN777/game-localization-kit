@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from dataclasses import dataclass
@@ -198,12 +199,100 @@ def project_has_source_files(location: ProjectLocation) -> bool:
 
 
 def project_source_replacement_allowed(location: ProjectLocation) -> bool:
-    """Return whether registered originals may be replaced before processing."""
+    """Return whether originals may be replaced without discarding review work."""
     has_source = (
         location.manifest.source_file is not None
         or project_has_source_files(location)
     )
-    return has_source and not source_processing_started(location)
+    if not has_source:
+        return False
+    return (
+        not source_processing_started(location)
+        or project_source_recovery_replacement_allowed(location)
+    )
+
+
+def project_source_recovery_replacement_allowed(
+    location: ProjectLocation,
+) -> bool:
+    """Allow replacement after a partial acquisition, before review data exists."""
+    paths = WorkspacePaths(location.path)
+    acquisition_path = (
+        paths.pdf_acquisition_state
+        if is_pdf_source_file(location.manifest.source_file)
+        else paths.image_ocr_state
+    )
+    try:
+        acquisition = json.loads(acquisition_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError, UnicodeError):
+        return False
+    if (
+        not isinstance(acquisition, dict)
+        or acquisition.get("status") != "partial"
+        or not acquisition.get("failures")
+    ):
+        return False
+
+    protected_files = (
+        paths.source_draft,
+        paths.source_review,
+        paths.source_qa_markdown,
+        paths.source_final,
+        paths.source_segments,
+        paths.source_manifest,
+        paths.approved_source_segments,
+        paths.segmentation_state,
+        paths.source_qa_state,
+        paths.source_review_state,
+        paths.pdf_icon_audit_state,
+    )
+    if any(path.is_file() for path in protected_files):
+        return False
+
+    protected_roots = (
+        location.path / "03_terminology",
+        location.path / "05_output",
+        location.path / ".glk/reports",
+    )
+    if any(
+        child.is_file()
+        for root in protected_roots
+        if root.is_dir()
+        for child in root.rglob("*")
+    ):
+        return False
+
+    translation_root = location.path / "04_translation"
+    return not any(
+        child.is_file() and child != paths.translation_prompt
+        for child in translation_root.rglob("*")
+    )
+
+
+def _clear_recoverable_source_artifacts(location: ProjectLocation) -> None:
+    """Remove disposable acquisition output after a recovery replacement."""
+    paths = WorkspacePaths(location.path)
+    for root in (
+        paths.source_dir,
+        paths.pdf_pages.parent,
+        paths.ocr_results.parent,
+    ):
+        if root.exists():
+            shutil.rmtree(root)
+    for root in (
+        paths.ocr_individual,
+        paths.pdf_pages,
+        paths.pdf_fragments,
+        paths.pdf_layouts,
+        paths.ocr_results,
+    ):
+        root.mkdir(parents=True, exist_ok=True)
+    for state_path in (
+        paths.pdf_acquisition_state,
+        paths.image_ocr_state,
+        paths.dashboard_source_job_state,
+    ):
+        state_path.unlink(missing_ok=True)
 
 
 def _replace_input_directories(
@@ -213,6 +302,7 @@ def _replace_input_directories(
         RegisteredPdfSource | RegisteredImageSources,
     ],
 ) -> RegisteredPdfSource | RegisteredImageSources:
+    recovery_replacement = project_source_recovery_replacement_allowed(location)
     if not project_source_replacement_allowed(location):
         if source_processing_started(location):
             raise SourceRegistrationError(
@@ -247,6 +337,8 @@ def _replace_input_directories(
             copy_file_atomic(previous_prompt, paths.input_ocr_prompt)
 
         registered = register()
+        if recovery_replacement:
+            _clear_recoverable_source_artifacts(registered.location)
         remove_backup = True
     except Exception as replacement_error:
         recovery_errors: list[str] = []

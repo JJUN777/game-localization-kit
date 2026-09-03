@@ -183,7 +183,7 @@ approved⇥Critical Hit⇥치명타⇥term⇥항상 치명타로 번역⇥⇥⇥
 | 같은 용어가 중복됨 | 대소문자·단수·복수가 같은 후보군을 하나로 합침 |
 | 자동 후보의 `candidate_id`가 삭제·변경·중복됨 | 삭제하지 말고 `rejected`로 처리 |
 | 수동 용어가 승인 원문에서 발견되지 않음 | 원문 확인 후 철자 수정, 또는 `--allow-missing-terms` 사용 |
-| `{HP}`, `{DEF}` 같은 보호 token을 용어로 등록 | 보호 token은 용어집이 아니라 OCR prompt에서 관리 |
+| `[HP]`, `[DEF]` 같은 보호 token을 용어로 등록 | 보호 token은 용어집이 아니라 OCR prompt에서 관리 |
 
 ### 원문에 없는 용어를 의도적으로 등록할 때
 

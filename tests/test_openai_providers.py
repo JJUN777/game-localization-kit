@@ -13,6 +13,7 @@ from glk.infrastructure.openai_common import (
 )
 from glk.infrastructure.openai_layout import OpenAILayoutProvider
 from glk.infrastructure.openai_ocr import OpenAIImageOcrProvider
+from glk.infrastructure.openai_pdf_icon_audit import OpenAIPdfIconAuditProvider
 from glk.infrastructure.openai_translation import OpenAITranslationProvider
 
 
@@ -84,6 +85,24 @@ class OpenAIProviderTests(unittest.TestCase):
         self.assertEqual(value["blocks"], [])
         self.assertEqual(value["warnings"], [])
         self.assertEqual(value["status"], "needs_review")
+
+    def test_pdf_icon_audit_uses_its_structured_schema(self) -> None:
+        provider, responses = self._provider(
+            OpenAIPdfIconAuditProvider,
+            '{"icons":[],"summary":"No missing icons."}',
+        )
+
+        value = provider.inspect(
+            "Inspect icons",
+            Image.new("RGB", (2, 2), "white"),
+        )
+
+        self.assertEqual(value["icons"], [])
+        request = responses.requests[0]
+        self.assertEqual(
+            request["text"]["format"]["name"],  # type: ignore[index]
+            "pdf_icon_audit",
+        )
 
     def test_empty_output_is_rejected(self) -> None:
         provider, _ = self._provider(OpenAITranslationProvider, "")

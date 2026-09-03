@@ -79,9 +79,10 @@ Fixed rules that additional instructions cannot override:
 10. If the image has no meaningful text, return an empty blocks array and explain in warnings.
 
 Custom icon rules:
-- Project instructions may describe visual icon shapes and assign exact output tokens.
+- Project instructions may describe visual icon shapes and assign exact [TOKEN] outputs.
 - Apply a custom token only when the target icon confidently matches its written visual
-  description. Put it at the icon's exact position in the reading order.
+  description. Icon tokens use uppercase ASCII square-bracket form such as [DAMAGE].
+  Put the token at the icon's exact position in the reading order.
 - Distinguish similar icons using every stated feature. Do not guess from game context.
 - If the shape does not confidently match, use [ICON: concise visible description] and
   add a warning instead of guessing a custom token.

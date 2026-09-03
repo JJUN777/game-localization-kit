@@ -224,6 +224,14 @@ class WorkspacePaths:
         return self.state_dir / "source_review.json"
 
     @property
+    def pdf_icon_audit_state(self) -> Path:
+        return self.state_dir / "pdf_icon_audit.json"
+
+    @property
+    def ai_usage_ledger(self) -> Path:
+        return self.state_dir / "ai_usage.jsonl"
+
+    @property
     def glossary_build_state(self) -> Path:
         return self.state_dir / "glossary_build.json"
 

@@ -68,6 +68,12 @@ class DashboardRouteTests(unittest.TestCase):
             ("POST", "/api/projects", "projects", "session"),
             ("POST", "/api/review/open", "review_open", "session"),
             ("POST", "/api/jobs/source", "source_job", "session"),
+            (
+                "POST",
+                "/api/jobs/source/continue",
+                "source_continue",
+                "session",
+            ),
             ("POST", "/api/jobs/glossary", "glossary_job", "session"),
             (
                 "POST",

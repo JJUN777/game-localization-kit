@@ -14,13 +14,14 @@ from glk.extraction.image_ocr import (
 class ImageOcrTests(unittest.TestCase):
     def test_prompt_contains_common_and_per_image_instructions(self) -> None:
         prompt = build_ocr_prompt(
-            "An empty shield icon must be {DEF}.",
+            "- [DEF]: an empty shield icon.",
             "Read the small footer text.",
         )
-        self.assertIn("An empty shield icon must be {DEF}.", prompt)
+        self.assertIn("- [DEF]: an empty shield icon.", prompt)
         self.assertIn("Read the small footer text.", prompt)
         self.assertIn("Do not translate", prompt)
         self.assertIn("written visual", prompt)
+        self.assertIn("[DAMAGE]", prompt)
         self.assertNotIn("Reference icon images", prompt)
 
     def test_valid_result_builds_individual_text(self) -> None:

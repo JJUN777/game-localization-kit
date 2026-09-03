@@ -226,15 +226,15 @@ def _extract_pdf_page(
     notify: ProgressCallback,
 ) -> _PageExtraction:
     notify(f"Page {page_number}: extracting PDF fragments")
+    png_bytes, page_image = render_page(page, scale)
+    page_stem = f"page_{page_number:03d}"
+    _write_bytes_atomic(paths.pdf_pages / f"{page_stem}.png", png_bytes)
     fragments = extract_line_fragments(page, page_number)
     if not fragments:
         raise ExtractionError(
             "No embedded text fragments were found; this page requires OCR."
         )
-    png_bytes, page_image = render_page(page, scale)
     fragment_hash = _sha256_json(fragments)
-    page_stem = f"page_{page_number:03d}"
-    _write_bytes_atomic(paths.pdf_pages / f"{page_stem}.png", png_bytes)
     _write_json_atomic(
         paths.pdf_fragments / f"{page_stem}.json",
         {
@@ -291,6 +291,37 @@ def _extract_pdf_page(
     page_text = build_page_text(blocks)
     _write_text_atomic(paths.pdf_layouts / f"{page_stem}.txt", page_text)
     return _PageExtraction(page_number, page_text, cached is not None)
+
+
+def ensure_project_pdf_page_image(
+    *,
+    project: str | Path,
+    page_number: int,
+    workspace_root: str | Path = "workspaces",
+    scale: float = 1.5,
+) -> Path:
+    """Render a PDF page needed for manual source review when extraction failed."""
+    if page_number <= 0:
+        raise ExtractionError("PDF page number must be positive.")
+    if scale <= 0:
+        raise ExtractionError("Render scale must be greater than zero.")
+    location = load_project(project, workspace_root)
+    source_path = _resolve_project_source(location, None)
+    paths = WorkspacePaths(location.path)
+    output = paths.pdf_pages / f"page_{page_number:03d}.png"
+    if output.is_file():
+        return output
+    document = pymupdf.open(source_path)
+    try:
+        if page_number > document.page_count:
+            raise ExtractionError(
+                f"PDF page {page_number} exceeds page count {document.page_count}."
+            )
+        png_bytes, _ = render_page(document[page_number - 1], scale)
+    finally:
+        document.close()
+    _write_bytes_atomic(output, png_bytes)
+    return output
 
 
 def _extract_selected_pages(
