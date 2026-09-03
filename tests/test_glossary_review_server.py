@@ -160,10 +160,22 @@ class GlossaryReviewServerTests(unittest.TestCase):
             html,
         )
         self.assertIn('id="clear-selection"', html)
+        self.assertIn(
+            'id="bulk-apply" type="button" disabled',
+            html,
+        )
         self.assertIn('item.manual ? "확정 시 원문 확인"', html)
         self.assertNotIn('"저장 후 확인"', html)
         self.assertIn(
-            '$("#bulk-row").classList.toggle("hidden", state.selected.size === 0);',
+            '$("#search-row").classList.toggle("hidden", hasSelection);',
+            html,
+        )
+        self.assertIn(
+            '$("#bulk-row").classList.toggle("hidden", !hasSelection);',
+            html,
+        )
+        self.assertIn(
+            '$("#bulk-apply").disabled = !hasSelection || !$("#bulk-status").value;',
             html,
         )
         self.assertIn('state.selected.clear();\n      renderRows();', html)

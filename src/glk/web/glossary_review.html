@@ -154,10 +154,6 @@
       height: 1px;
     }
     .toolbar-add { margin-left: auto; }
-    .bulk-row {
-      padding-top: 8px;
-      border-top: 1px solid var(--line);
-    }
     .selection-count { color: var(--muted); font-size: 12px; }
     .button-table {
       height: 36px;
@@ -170,6 +166,7 @@
       font-weight: 700;
     }
     .button-table:hover { border-color: var(--line-strong); background: var(--surface-hover); }
+    .button-table:disabled { cursor: not-allowed; opacity: .45; }
     .table-shell {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -373,7 +370,7 @@
     </div>
     <section class="toolbar">
       <nav class="status-filters" id="status-filters" aria-label="상태 필터"></nav>
-      <div class="toolbar-row search-row">
+      <div class="toolbar-row search-row" id="search-row">
         <select class="control" id="category-filter" aria-label="분류 필터">
           <option value="all">모든 분류</option>
         </select>
@@ -403,7 +400,7 @@
         <select class="control" id="bulk-status" aria-label="일괄 상태">
           <option value="">상태 일괄 변경</option>
         </select>
-        <button class="button-table" id="bulk-apply" type="button">적용</button>
+        <button class="button-table" id="bulk-apply" type="button" disabled>적용</button>
         <button class="button-table" id="clear-selection" type="button">선택 해제</button>
       </div>
     </section>
@@ -580,7 +577,11 @@
         `${termbaseStatusLabel(state.document.termbase_status)}` +
         (state.dirty ? " · 저장 안 됨" : "");
       $("#selection-count").textContent = `${state.selected.size}개 선택`;
-      $("#bulk-row").classList.toggle("hidden", state.selected.size === 0);
+      const hasSelection = state.selected.size > 0;
+      $("#search-row").classList.toggle("hidden", hasSelection);
+      $("#bulk-row").classList.toggle("hidden", !hasSelection);
+      if (!hasSelection) $("#bulk-status").value = "";
+      $("#bulk-apply").disabled = !hasSelection || !$("#bulk-status").value;
       $("#save-button").disabled = state.busy || !state.dirty;
       $("#import-button").disabled = state.busy;
     }
@@ -990,6 +991,9 @@
       markDirty();
       renderRows();
       toast(`${changed}개 용어를 '${STATUS_LABELS[status]}' 상태로 변경했습니다.`);
+    });
+    $("#bulk-status").addEventListener("change", () => {
+      $("#bulk-apply").disabled = !$("#bulk-status").value;
     });
     $("#clear-selection").addEventListener("click", () => {
       state.selected.clear();
