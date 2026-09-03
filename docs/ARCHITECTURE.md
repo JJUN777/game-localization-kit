@@ -335,7 +335,9 @@ service는 최대 요청 수, block ID와 현재 source hash를 검증하고 선
 `.glk/state/pdf_icon_audit.json`에 cache하며, 사용자가 적용하기 전에는 review를
 바꾸지 않습니다. 용어 검수 서버의 `POST /api/ai-triage/estimate`는 현재 후보와
 cache로 새 요청 수·token·비용 범위를 계산하고, `POST /api/ai-triage`는 검증한
-추천을 cache하되 TSV를 저장하지 않습니다. `ai_usage_ledger`는 원문 준비·아이콘
+추천 작업을 background thread에서 시작합니다. 브라우저는 `GET /api/ai-triage/job`을
+polling해 청크별 후보·요청 진행률과 terminal 결과를 받고, 추천은 cache하되 TSV를
+저장하지 않습니다. `ai_usage_ledger`는 원문 준비·아이콘
 검사·용어 후보 정리·번역·선택 재번역의
 provider usage를 `.glk/state/ai_usage.jsonl`에 append하고 `dashboard_service`가
 단계별 누적 사용량과 예상 비용으로 집계합니다.

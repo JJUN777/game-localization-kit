@@ -84,7 +84,7 @@ class GlossaryAiServiceTests(unittest.TestCase):
             provider=self.provider,
         )
 
-    def triage(self):
+    def triage(self, *, progress=None):
         return triage_project_glossary_candidates(
             project="glossary_project",
             workspace_root=self.workspace_root,
@@ -92,6 +92,7 @@ class GlossaryAiServiceTests(unittest.TestCase):
             expected_review_sha256=self.document["review_sha256"],
             rows=self.rows,
             provider=self.provider,
+            progress=progress,
         )
 
     def test_estimates_only_automatic_review_rows(self) -> None:
@@ -141,6 +142,23 @@ class GlossaryAiServiceTests(unittest.TestCase):
         self.assertEqual(estimate.cached_count, estimate.target_count)
         self.assertEqual(estimate.request_count, 0)
         self.assertEqual(estimate.estimated_cost_usd_low, 0.0)
+
+    def test_triage_reports_candidate_request_and_finalizing_progress(self) -> None:
+        events: list[dict[str, int | str]] = []
+
+        result = self.triage(progress=events.append)
+
+        self.assertGreaterEqual(len(events), 2)
+        self.assertEqual(events[0]["stage"], "analyzing")
+        self.assertEqual(events[0]["processed_candidates"], 0)
+        self.assertEqual(events[0]["request_completed"], 0)
+        self.assertEqual(events[-1]["stage"], "finalizing")
+        self.assertEqual(
+            events[-1]["processed_candidates"],
+            result.target_count,
+        )
+        self.assertEqual(events[-1]["request_completed"], 1)
+        self.assertEqual(events[-1]["request_total"], 1)
 
     def test_protects_user_translation_category_and_non_review_status(self) -> None:
         self.rows[0]["translation"] = "직접 번역"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
@@ -113,6 +114,12 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertIn("아직 검토하지 않은 자동 후보만 AI가 분류합니다.", html)
         self.assertIn("AI 적용 취소", html)
         self.assertIn('id="aiResultDialog"', html)
+        self.assertIn('id="aiProgressDialog"', html)
+        self.assertIn('id="aiProgressCandidates"', html)
+        self.assertIn('id="aiProgressRequests"', html)
+        self.assertIn('id="aiProgressElapsed"', html)
+        self.assertIn('api("/api/ai-triage/job")', html)
+        self.assertIn("750", html)
         self.assertIn('body: requestBody()', html)
         self.assertIn('row.status !== "review"', html)
         self.assertIn("입력과 다른 추천 ${conflictCount}", html)
@@ -215,6 +222,13 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
 
         status, payload, _ = self._request(
+            "/api/ai-triage/job",
+            authorized=False,
+        )
+        self.assertEqual(status, 403)
+        self.assertFalse(payload["ok"])
+
+        status, payload, _ = self._request(
             "/api/review",
             origin="https://attacker.example",
         )
@@ -287,7 +301,24 @@ class GlossaryReviewServerTests(unittest.TestCase):
                 "rows": rows,
             },
         )
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 202)
+        job = result["job"]
+        self.assertIn(job["status"], {"running", "completed"})
+        self.assertTrue(job["job_id"])
+        for _ in range(100):
+            status, progress, _ = self._request("/api/ai-triage/job")
+            self.assertEqual(status, 200)
+            job = progress["job"]
+            if job["status"] != "running":
+                break
+            time.sleep(0.01)
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(job["stage"], "completed")
+        self.assertEqual(job["processed_candidates"], len(rows))
+        self.assertEqual(job["request_completed"], 1)
+        self.assertEqual(job["request_total"], 1)
+        self.assertGreaterEqual(job["elapsed_seconds"], 0)
+        result = job["result"]
         self.assertEqual(len(result["suggestions"]), len(rows))
         self.assertEqual(result["usage"]["requests"], 1)
 
@@ -299,6 +330,63 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(cached["cached_count"], len(rows))
         self.assertTrue(all(item["cached"] for item in cached["suggestions"]))
+
+    def test_reports_running_ai_triage_progress_and_rejects_duplicate_start(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        base_provider = FakeGlossaryTriageProvider()
+
+        class BlockingProvider:
+            model_name = base_provider.model_name
+            prompt_version = base_provider.prompt_version
+            usage = base_provider.usage
+
+            def triage(self, prompt: str) -> dict[str, object]:
+                started.set()
+                release.wait(timeout=2)
+                return base_provider.triage(prompt)
+
+        self.server.glossary_ai_provider = BlockingProvider()
+        _, document, _ = self._request("/api/review")
+        rows = self._editable_rows(document)
+        request = {
+            "review_sha256": document["review_sha256"],
+            "rows": rows,
+        }
+
+        status, payload, _ = self._request(
+            "/api/ai-triage",
+            method="POST",
+            payload=request,
+        )
+        self.assertEqual(status, 202)
+        self.assertTrue(started.wait(timeout=1))
+
+        status, progress, _ = self._request("/api/ai-triage/job")
+        self.assertEqual(status, 200)
+        job = progress["job"]
+        self.assertEqual(job["status"], "running")
+        self.assertEqual(job["stage"], "analyzing")
+        self.assertEqual(job["total_candidates"], len(rows))
+        self.assertEqual(job["processed_candidates"], 0)
+        self.assertEqual(job["request_completed"], 0)
+        self.assertEqual(job["request_total"], 1)
+
+        status, duplicate, _ = self._request(
+            "/api/ai-triage",
+            method="POST",
+            payload=request,
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(duplicate["code"], "GLOSSARY_AI_JOB_ACTIVE")
+
+        release.set()
+        for _ in range(100):
+            _, progress, _ = self._request("/api/ai-triage/job")
+            if progress["job"]["status"] == "completed":
+                break
+            time.sleep(0.01)
+        self.assertEqual(progress["job"]["status"], "completed")
 
     def test_generated_rows_cannot_be_deleted_and_review_can_be_imported(self) -> None:
         _, document, _ = self._request("/api/review")

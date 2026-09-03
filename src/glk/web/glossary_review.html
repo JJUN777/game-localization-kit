@@ -339,6 +339,59 @@
       font-weight: 700;
       overflow-wrap: anywhere;
     }
+    .ai-progress-dialog { width: min(520px, calc(100vw - 32px)); }
+    .ai-progress-panel {
+      margin-top: 20px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+    .ai-progress-bar {
+      display: block;
+      width: 100%;
+      height: 6px;
+      border: 0;
+      border-radius: 999px;
+      background: var(--line);
+      overflow: hidden;
+      appearance: none;
+    }
+    .ai-progress-bar::-webkit-progress-bar { background: var(--line); }
+    .ai-progress-bar::-webkit-progress-value { background: var(--ink); }
+    .ai-progress-bar::-moz-progress-bar { background: var(--ink); }
+    .ai-progress-count {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 9px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .ai-progress-count strong { color: var(--ink); font-size: 13px; }
+    .ai-progress-details {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin: 14px 0 0;
+    }
+    .ai-progress-detail {
+      min-width: 0;
+      padding-top: 9px;
+      border-top: 1px solid var(--line);
+    }
+    .ai-progress-detail dt {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .ai-progress-detail dd {
+      margin: 2px 0 0;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+    }
     .ai-result-summary {
       margin-top: 14px;
       color: var(--ink-soft);
@@ -570,6 +623,31 @@
       </button>
     </div>
   </dialog>
+  <dialog class="ai-progress-dialog" id="aiProgressDialog" aria-labelledby="aiProgressTitle">
+    <h2 id="aiProgressTitle">후보 정리 중</h2>
+    <p id="aiProgressStage" aria-live="polite">정리할 후보를 확인하고 있습니다.</p>
+    <div class="ai-progress-panel">
+      <progress class="ai-progress-bar" id="aiProgressBar" max="100" value="0"></progress>
+      <div class="ai-progress-count">
+        <strong id="aiProgressCandidates">0 / 0개 분석</strong>
+        <span id="aiProgressPercent">0%</span>
+      </div>
+      <dl class="ai-progress-details">
+        <div class="ai-progress-detail">
+          <dt>API 요청</dt>
+          <dd id="aiProgressRequests">준비 중</dd>
+        </div>
+        <div class="ai-progress-detail">
+          <dt>저장된 결과</dt>
+          <dd id="aiProgressCached">확인 중</dd>
+        </div>
+        <div class="ai-progress-detail">
+          <dt>경과 시간</dt>
+          <dd id="aiProgressElapsed">0초</dd>
+        </div>
+      </dl>
+    </div>
+  </dialog>
   <dialog class="ai-dialog" id="aiResultDialog" aria-labelledby="aiResultTitle">
     <h2 id="aiResultTitle">AI 추천 결과</h2>
     <p>추천은 아직 검수 내용에 반영되지 않았습니다.</p>
@@ -626,6 +704,9 @@
       selected: new Set(),
       manualSequence: 0,
       aiBusy: false,
+      aiEstimate: null,
+      aiJob: null,
+      aiPollTimer: null,
       aiSuggestions: new Map(),
       aiLatestResults: [],
       aiConflictSelections: new Set(),
@@ -731,9 +812,17 @@
         (row) => !row.manual && row.candidate_id && row.status === "review"
       ).length;
       $("#ai-triage-button").disabled = state.busy || aiTargetCount === 0;
-      $("#ai-triage-button").textContent = state.aiBusy
-        ? "AI 정리 중…"
-        : "후보 1차 정리(AI)";
+      if (state.aiBusy) {
+        const processed = Number(state.aiJob?.processed_candidates || 0);
+        const total = Number(
+          state.aiJob?.total_candidates || state.aiEstimate?.target_count || 0
+        );
+        $("#ai-triage-button").textContent = total
+          ? `AI 정리 ${processed}/${total}`
+          : "AI 정리 준비 중…";
+      } else {
+        $("#ai-triage-button").textContent = "후보 1차 정리(AI)";
+      }
       $("#ai-undo-button").classList.toggle("hidden", !state.aiUndoSnapshot);
     }
 
@@ -1075,6 +1164,7 @@
     }
 
     function showAiEstimate(estimate) {
+      state.aiEstimate = estimate;
       const facts = $("#aiEstimateFacts");
       facts.replaceChildren();
       appendAiFact(facts, "대상 후보", `${estimate.target_count}개`);
@@ -1099,6 +1189,111 @@
         )
       );
       $("#aiEstimateDialog").showModal();
+    }
+
+    function formatElapsed(seconds) {
+      const total = Math.max(0, Math.floor(Number(seconds) || 0));
+      const minutes = Math.floor(total / 60);
+      const remainder = total % 60;
+      return minutes ? `${minutes}분 ${remainder}초` : `${remainder}초`;
+    }
+
+    function updateAiProgress(job) {
+      state.aiJob = job;
+      const total = Number(
+        job.total_candidates || state.aiEstimate?.target_count || 0
+      );
+      const processed = Math.min(
+        total,
+        Number(job.processed_candidates || 0)
+      );
+      const percent = total ? Math.round((processed / total) * 100) : 0;
+      const stageLabels = {
+        preparing: "정리할 후보와 저장된 결과를 확인하고 있습니다.",
+        analyzing: "AI가 후보를 분석하고 있습니다.",
+        finalizing: "추천 결과를 정리하고 있습니다.",
+        completed: "추천 결과를 모두 정리했습니다.",
+        failed: "후보 정리를 완료하지 못했습니다."
+      };
+      $("#aiProgressStage").textContent =
+        stageLabels[job.stage] || stageLabels.preparing;
+      $("#aiProgressBar").value = percent;
+      $("#aiProgressCandidates").textContent = `${processed} / ${total}개 분석`;
+      $("#aiProgressPercent").textContent = `${percent}%`;
+      const requestTotal = Number(
+        job.request_total || state.aiEstimate?.request_count || 0
+      );
+      const requestCompleted = Math.min(
+        requestTotal,
+        Number(job.request_completed || 0)
+      );
+      $("#aiProgressRequests").textContent = requestTotal
+        ? `${requestCompleted} / ${requestTotal}회`
+        : "추가 요청 없음";
+      const cached = Number(
+        job.cached_candidates || state.aiEstimate?.cached_count || 0
+      );
+      $("#aiProgressCached").textContent = `${cached}개`;
+      $("#aiProgressElapsed").textContent = formatElapsed(job.elapsed_seconds);
+      refreshSummary();
+    }
+
+    function stopAiPolling() {
+      if (state.aiPollTimer !== null) {
+        clearTimeout(state.aiPollTimer);
+        state.aiPollTimer = null;
+      }
+    }
+
+    function finishAiJob(job) {
+      stopAiPolling();
+      updateAiProgress(job);
+      state.busy = false;
+      state.aiBusy = false;
+      if ($("#aiProgressDialog").open) $("#aiProgressDialog").close();
+      refreshSummary();
+      if (job.status === "completed" && job.result) {
+        showAiResults(job.result);
+        return;
+      }
+      const error = job.error || {};
+      toast(error.message || "AI 후보 정리를 완료하지 못했습니다.", true);
+    }
+
+    async function pollAiJob(expectedJobId) {
+      try {
+        const payload = await api("/api/ai-triage/job");
+        const job = payload.job;
+        if (!job || job.job_id !== expectedJobId) {
+          throw new Error("진행 중인 AI 정리 작업을 찾을 수 없습니다.");
+        }
+        if (job.status !== "running") {
+          finishAiJob(job);
+          return;
+        }
+        updateAiProgress(job);
+        state.aiPollTimer = setTimeout(() => pollAiJob(expectedJobId), 750);
+      } catch (error) {
+        stopAiPolling();
+        state.busy = false;
+        state.aiBusy = false;
+        if ($("#aiProgressDialog").open) $("#aiProgressDialog").close();
+        refreshSummary();
+        toast(error.message, true);
+      }
+    }
+
+    function watchAiJob(job) {
+      stopAiPolling();
+      state.busy = true;
+      state.aiBusy = true;
+      updateAiProgress(job);
+      if (!$("#aiProgressDialog").open) $("#aiProgressDialog").showModal();
+      if (job.status !== "running") {
+        finishAiJob(job);
+        return;
+      }
+      state.aiPollTimer = setTimeout(() => pollAiJob(job.job_id), 250);
     }
 
     function showAiResults(payload) {
@@ -1260,19 +1455,29 @@
       $("#aiEstimateDialog").close();
       state.busy = true;
       state.aiBusy = true;
+      updateAiProgress({
+        stage: "preparing",
+        total_candidates: state.aiEstimate?.target_count || 0,
+        cached_candidates: state.aiEstimate?.cached_count || 0,
+        processed_candidates: 0,
+        request_total: state.aiEstimate?.request_count || 0,
+        request_completed: 0,
+        elapsed_seconds: 0
+      });
+      $("#aiProgressDialog").showModal();
       refreshSummary();
       try {
         const payload = await api("/api/ai-triage", {
           method: "POST",
           body: requestBody()
         });
-        showAiResults(payload);
+        watchAiJob(payload.job);
       } catch (error) {
-        toast(error.message, true);
-      } finally {
+        if ($("#aiProgressDialog").open) $("#aiProgressDialog").close();
         state.busy = false;
         state.aiBusy = false;
         refreshSummary();
+        toast(error.message, true);
       }
     }
 
@@ -1393,6 +1598,9 @@
       $("#aiEstimateDialog").close();
     });
     $("#runAiTriage").addEventListener("click", runAiTriage);
+    $("#aiProgressDialog").addEventListener("cancel", (event) => {
+      if (state.aiBusy) event.preventDefault();
+    });
     $("#closeAiResult").addEventListener("click", () => {
       $("#aiResultDialog").close();
     });
@@ -1507,6 +1715,11 @@
         });
         initializeControls();
         render();
+        api("/api/ai-triage/job")
+          .then((payload) => {
+            if (payload.job?.status === "running") watchAiJob(payload.job);
+          })
+          .catch((error) => toast(error.message, true));
         api("/api/ai-triage")
           .then((payload) => {
             setAiSuggestions(payload.suggestions);

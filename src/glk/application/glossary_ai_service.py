@@ -8,7 +8,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import Any, Protocol, Sequence
+from typing import Any, Callable, Protocol, Sequence
 
 from glk.application._io import write_json_atomic
 from glk.application.ai_usage_ledger import append_ai_usage_event
@@ -69,6 +69,9 @@ class GlossaryTriageProvider(Protocol):
     prompt_version: str
 
     def triage(self, prompt: str) -> dict[str, Any]: ...
+
+
+GlossaryAiProgressCallback = Callable[[dict[str, int | str]], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -521,6 +524,7 @@ def triage_project_glossary_candidates(
     expected_review_sha256: str,
     rows: list[dict[str, Any]],
     provider: GlossaryTriageProvider | None = None,
+    progress: GlossaryAiProgressCallback | None = None,
 ) -> GlossaryAiTriageResult:
     """Triage untouched automatic review rows and cache each suggestion."""
     document, all_records = _candidate_records(
@@ -549,10 +553,37 @@ def triage_project_glossary_candidates(
         source_language=document["project"]["source_language"],
         target_language=document["project"]["target_language"],
     )
+    chunks = _chunks(uncached)
+
+    def report_progress(
+        stage: str,
+        *,
+        processed_candidates: int,
+        request_completed: int,
+    ) -> None:
+        if progress is None:
+            return
+        progress(
+            {
+                "stage": stage,
+                "total_candidates": len(targets),
+                "cached_candidates": len(cached),
+                "processed_candidates": processed_candidates,
+                "request_total": len(chunks),
+                "request_completed": request_completed,
+            }
+        )
+
+    report_progress(
+        "analyzing" if chunks else "finalizing",
+        processed_candidates=len(cached),
+        request_completed=0,
+    )
     active_provider = provider
     usage_before = provider_usage(active_provider) if active_provider else None
     completed = dict(cached)
-    for chunk in _chunks(uncached):
+    processed_candidates = len(cached)
+    for request_index, chunk in enumerate(chunks, start=1):
         prompt = build_glossary_triage_prompt(
             source_language=document["project"]["source_language"],
             target_language=document["project"]["target_language"],
@@ -616,6 +647,12 @@ def triage_project_glossary_candidates(
                 cached=False,
             )
         write_json_atomic(paths.glossary_ai_review_state, cache)
+        processed_candidates += len(chunk)
+        report_progress(
+            "analyzing" if request_index < len(chunks) else "finalizing",
+            processed_candidates=processed_candidates,
+            request_completed=request_index,
+        )
 
     usage = usage_delta(
         usage_before,
