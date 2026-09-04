@@ -452,7 +452,7 @@
           spellcheck="false"></textarea>
         <p class="field-help" id="sourceJobOcrPromptHelp">
           실행 전 확인용 읽기 전용 내용입니다. 변경하려면 취소한 뒤 프로젝트
-          카드의 <strong>OCR 프롬프트 수정</strong>을 사용하세요.
+          카드의 <strong>설정 &gt; OCR 프롬프트 수정</strong>을 사용하세요.
         </p>
       </div>
       <p class="field-help" style="margin-top:14px">
@@ -516,7 +516,7 @@
       </div>
 
       <p class="source-note">
-        최종 승인 원문과 확정 용어집을 Gemini에 보내 초벌 번역과 검수 파일을
+        최종 승인 원문과 확정 용어집을 선택한 AI에 보내 초벌 번역과 검수 파일을
         만듭니다. 청크마다 API를 호출하므로 입력량과 모델에 따라 비용이
         발생할 수 있습니다.
       </p>
@@ -535,13 +535,21 @@
         </div>
       </div>
       <div class="field" style="margin-top:16px">
-        <label for="translationPrompt">번역 문체·표현 지침</label>
+        <div class="field-label-row">
+          <label for="translationPrompt">번역 프롬프트</label>
+          <div class="field-tools">
+            <span class="prompt-source-status"
+              id="translationPromptSourceStatus"></span>
+            <button class="field-reset" id="translationPromptEditFromJob"
+              type="button">수정</button>
+          </div>
+        </div>
         <textarea id="translationPrompt" name="translation_prompt"
           aria-describedby="translationPromptHelp" spellcheck="false"
           required></textarea>
         <div class="field-help-row">
           <p class="field-help" id="translationPromptHelp">
-            카드의 번역 프롬프트 설정에서 저장한 내용을 사용합니다.
+            이번 번역에 적용할 문체와 표현 지침입니다.
           </p>
           <span class="field-count" id="translationPromptCount"></span>
         </div>

@@ -1092,6 +1092,10 @@ function openTranslationJobDialog(projectId) {
       : "새 초벌 번역";
   byId("translationPrompt").value =
     project.translation_prompt?.value || "";
+  byId("translationPromptSourceStatus").textContent =
+    project.translation_prompt?.saved
+      ? "저장한 설정 사용"
+      : "기본값 사용";
   byId("translationPrompt").readOnly = true;
   byId("translationResumeNote").hidden = !resume;
   byId("translationForceNote").hidden = !force;
@@ -1108,6 +1112,13 @@ function openTranslationJobDialog(projectId) {
 
 function closeTranslationJobDialog() {
   byId("translationJobDialog").close();
+}
+
+function editTranslationPromptFromJob() {
+  const projectId = pendingTranslationJobProject?.project_id;
+  if (!projectId) return;
+  closeTranslationJobDialog();
+  openTranslationPromptDialog(projectId);
 }
 
 async function startTranslationJob(event) {
@@ -1956,8 +1967,8 @@ function openSourceDialog(projectId, projectName, replace, sourceType) {
   byId("sourceDialogTitle").textContent =
     replace ? "원본 교체" : "원본 등록";
   byId("sourceDialogNote").innerHTML = replace
-    ? "기존 원본은 삭제되고 선택한 파일로 교체됩니다. 저장된 OCR 프롬프트는 유지되며 별도의 <code>OCR 프롬프트 수정</code> 버튼에서 변경할 수 있습니다. 원문 추출·OCR 시작 전까지만 교체할 수 있습니다."
-    : "선택한 파일은 프로젝트의 <code>01_input</code>에 복사합니다. 이미지 형식은 프로젝트 기본 OCR 프롬프트를 유지하며, 등록 뒤 별도의 <code>OCR 프롬프트 수정</code> 버튼에서 변경할 수 있습니다. 이 단계에서는 AI API 호출을 실행하지 않습니다.";
+    ? "기존 원본은 삭제되고 선택한 파일로 교체됩니다. 저장된 OCR 프롬프트는 유지되며 카드의 <code>설정 &gt; OCR 프롬프트 수정</code>에서 변경할 수 있습니다. 원문 추출·OCR 시작 전까지만 교체할 수 있습니다."
+    : "선택한 파일은 프로젝트의 <code>01_input</code>에 복사합니다. 이미지 형식은 프로젝트 기본 OCR 프롬프트를 유지하며, 등록 뒤 카드의 <code>설정 &gt; OCR 프롬프트 수정</code>에서 변경할 수 있습니다. 이 단계에서는 AI API 호출을 실행하지 않습니다.";
   byId("sourceSubmit").textContent =
     replace ? "기존 원본 교체" : "원본 등록";
   byId("sourceSubmit").classList.toggle(
@@ -2607,6 +2618,10 @@ byId("translationJobForm").addEventListener(
 byId("translationPrompt").addEventListener(
   "input",
   updateTranslationPromptCount,
+);
+byId("translationPromptEditFromJob").addEventListener(
+  "click",
+  editTranslationPromptFromJob,
 );
 byId("translationJobDialog").addEventListener("close", () => {
   pendingTranslationJobProject = null;

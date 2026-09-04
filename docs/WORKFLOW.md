@@ -504,7 +504,9 @@ glk review translation --project sample_rulebook
 
 - block별 원문과 번역을 나란히 비교
 - 원문·번역·block ID 검색
-- 왼쪽 검수 현황의 전체·오류·경고·수정 block 수 필터와 block 이동
+- 왼쪽 검수 현황의 전체·오류·경고·수정 block 수 필터, 숫자·토큰·태그·용어·
+  텍스트·미번역 의심 유형별 필터와 block 이동
+- block 목록의 오류·경고·수정 상태 도트 범례
 - 번역문만 수정하고 `04_translation/review.txt`에 안전하게 저장
 - 저장 후 로컬 QA 실행과 오류 확인
 - QA ERROR가 연결된 block만 선택한 AI로 재번역하고 다시 검수

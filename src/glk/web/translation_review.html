@@ -118,8 +118,8 @@
       border-color: var(--ink);
       background: var(--ink);
     }
-    #filters { display: grid; gap: 2px; margin: 0 0 18px; }
-    #filters .filter {
+    .sidebar-filters { display: grid; gap: 2px; margin: 0 0 18px; }
+    .sidebar-filters .filter {
       display: flex;
       justify-content: space-between;
       gap: 12px;
@@ -133,8 +133,9 @@
       background: transparent;
       font-size: 13px;
     }
-    #filters .filter:hover { color: var(--ink); background: var(--surface-hover); }
-    #filters .filter.active {
+    .sidebar-filters .filter[hidden] { display: none; }
+    .sidebar-filters .filter:hover { color: var(--ink); background: var(--surface-hover); }
+    .sidebar-filters .filter.active {
       color: var(--ink);
       border-color: transparent;
       background: var(--soft);
@@ -147,7 +148,7 @@
       font-variant-numeric: tabular-nums;
       text-align: right;
     }
-    #filters .filter[data-filter="error"] .filter-count.has-items { color: var(--error); }
+    .sidebar-filters .filter[data-filter="error"] .filter-count.has-items { color: var(--error); }
     .sidebar-title {
       margin: 14px 4px 8px;
       color: var(--muted);
@@ -178,6 +179,16 @@
     .dot.error { background: var(--error); }
     .dot.warning { background: var(--warning); }
     .dot.changed { background: var(--ink-soft); }
+    .dot-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px 12px;
+      margin: -2px 8px 10px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+    .dot-legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .dot-legend .dot { width: 6px; height: 6px; }
     main { width: min(1240px, 100%); padding: 26px 30px 80px; margin: 0 auto; }
     .intro {
       display: flex;
@@ -656,7 +667,8 @@
     <aside class="sidebar">
       <input class="search" id="search" type="search" placeholder="원문·번역·block 검색">
       <div class="sidebar-title">검수 현황</div>
-      <div class="filters" id="filters" aria-label="검수 현황 필터">
+      <div class="filters sidebar-filters" id="filters"
+        aria-label="검수 현황 필터">
         <button class="filter active" data-filter="all" type="button">
           <span>전체</span><span class="filter-count">0</span>
         </button>
@@ -670,7 +682,33 @@
           <span>수정됨</span><span class="filter-count">0</span>
         </button>
       </div>
+      <div id="issue-filter-section" hidden>
+        <div class="sidebar-title">문제 유형</div>
+        <div class="filters sidebar-filters" id="issue-filters"
+          aria-label="문제 유형 필터">
+          <button class="filter" data-filter="issue-number" type="button">
+            <span>숫자 불일치</span><span class="filter-count">0</span>
+          </button>
+          <button class="filter" data-filter="issue-token" type="button">
+            <span>토큰·태그 불일치</span><span class="filter-count">0</span>
+          </button>
+          <button class="filter" data-filter="issue-term" type="button">
+            <span>용어 불일치</span><span class="filter-count">0</span>
+          </button>
+          <button class="filter" data-filter="issue-content" type="button">
+            <span>텍스트 오류</span><span class="filter-count">0</span>
+          </button>
+          <button class="filter" data-filter="issue-untranslated" type="button">
+            <span>미번역 의심</span><span class="filter-count">0</span>
+          </button>
+        </div>
+      </div>
       <div class="sidebar-title">표시 중인 블록</div>
+      <div class="dot-legend" aria-label="블록 상태 표시">
+        <span><i class="dot error" aria-hidden="true"></i>오류</span>
+        <span><i class="dot warning" aria-hidden="true"></i>경고</span>
+        <span><i class="dot changed" aria-hidden="true"></i>수정됨</span>
+      </div>
       <nav class="block-nav" id="block-nav"></nav>
     </aside>
     <main>
@@ -791,12 +829,39 @@
       return block.issues.some((issue) => issue.severity === level);
     }
 
+    const issueTypeCodes = {
+      "issue-number": ["number_changed"],
+      "issue-token": [
+        "curly_token_changed",
+        "square_token_changed",
+        "html_tag_changed"
+      ],
+      "issue-term": ["approved_term_missing", "keep_term_changed"],
+      "issue-content": [
+        "empty_translation",
+        "replacement_character",
+        "unresolved_illegible"
+      ],
+      "issue-untranslated": [
+        "unchanged_translation",
+        "target_script_missing"
+      ]
+    };
+
+    function issueTypeMatch(block, filter) {
+      const codes = issueTypeCodes[filter];
+      return Boolean(
+        codes && block.issues.some((issue) => codes.includes(issue.code))
+      );
+    }
+
     function visible(block) {
       const filterMatch =
         state.filter === "all" ||
         (state.filter === "error" && issueLevel(block, "error")) ||
         (state.filter === "warning" && issueLevel(block, "warning")) ||
-        (state.filter === "changed" && block.changed);
+        (state.filter === "changed" && block.changed) ||
+        issueTypeMatch(block, state.filter);
       if (!filterMatch) return false;
       const query = state.search.trim().toLocaleLowerCase();
       if (!query) return true;
@@ -1079,12 +1144,31 @@
         warning: doc.blocks.filter((block) => issueLevel(block, "warning")).length,
         changed
       };
+      Object.keys(issueTypeCodes).forEach((filter) => {
+        filterCounts[filter] = doc.blocks.filter(
+          (block) => issueTypeMatch(block, filter)
+        ).length;
+      });
+      if (
+        Object.hasOwn(issueTypeCodes, state.filter)
+        && filterCounts[state.filter] === 0
+      ) {
+        state.filter = "all";
+      }
+      const hasIssueTypes = Object.keys(issueTypeCodes).some(
+        (filter) => filterCounts[filter] > 0
+      );
+      $("#issue-filter-section").hidden = !hasIssueTypes;
       document.querySelectorAll("[data-filter]").forEach((button) => {
         const count = filterCounts[button.dataset.filter] ?? 0;
         const countNode = button.querySelector(".filter-count");
         if (!countNode) return;
         countNode.textContent = String(count);
         countNode.classList.toggle("has-items", count > 0);
+        button.classList.toggle("active", button.dataset.filter === state.filter);
+        if (Object.hasOwn(issueTypeCodes, button.dataset.filter)) {
+          button.hidden = count === 0;
+        }
       });
       const reviewStatusLabel = {
         not_ready: "준비 전",
@@ -1455,15 +1539,14 @@
       state.search = event.target.value;
       render();
     });
-    $("#filters").addEventListener("click", (event) => {
+    function selectReviewFilter(event) {
       const button = event.target.closest("[data-filter]");
       if (!button) return;
       state.filter = button.dataset.filter;
-      document.querySelectorAll("#filters [data-filter]").forEach((node) => {
-        node.classList.toggle("active", node === button);
-      });
       render();
-    });
+    }
+    $("#filters").addEventListener("click", selectReviewFilter);
+    $("#issue-filters").addEventListener("click", selectReviewFilter);
     document.addEventListener("click", (event) => {
       const menu = $("#more-menu");
       if (menu.open && !menu.contains(event.target)) {

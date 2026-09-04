@@ -155,7 +155,9 @@ PDF 룰북 측정 샘플의 렌더 이미지(787×1187px)와 실제 prompt를 `c
 | 1 | 57 | 3,479 | 1,364 | 약 $0.0077 (≈12원) |
 | 2 | 108 | 5,870 | 1,974 | 약 $0.0118 (≈18원) |
 
-Gemini 3.8 Flash의 기본 thinking level은 `medium`입니다. thinking token을
+[Google Gemini API Thinking 문서](https://ai.google.dev/gemini-api/docs/thinking)
+기준(2026-09-04 확인), Gemini 3.8 Flash의 기본 thinking level은
+`medium`입니다. thinking token을
 1,000~3,000개로 가정하면 페이지당 약 18~36원이며, thinking token 1,000개마다
 약 $0.00375(≈5.8원)가 추가됩니다.
 

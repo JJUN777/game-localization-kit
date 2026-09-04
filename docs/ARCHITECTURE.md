@@ -39,10 +39,10 @@ flowchart LR
 | 계층 | 책임 | 주요 모듈 |
 |---|---|---|
 | CLI | 인자, 대화형 입력, 사람이 읽는 출력, 종료 코드 | `cli.py` |
-| Application | 프로젝트 단위 use case, 캐시, 원자적 출력, 단계 연결 | 각 `*_service`, `translation_prompt_ai_service`, `ai_model_catalog`, `ai_usage_ledger`, 공통 `_io`, `_hashing`, `_translation_context`, `translation_types` |
-| Domain | 외부 SDK와 파일 포맷에 독립적인 모델·검증 | `project.py`, `source_block.py`, `source_qa.py`, `translation_segment.py`, `translation_qa.py`, `approved_translation.py` |
+| Application | 프로젝트 단위 use case, 캐시, 원자적 출력, 단계 연결 | 각 `*_service`, `translation_prompt_ai_service`, `ai_model_catalog`, `ai_usage_ledger`, 공통 `_io`, `_hashing`, `_cache`, `_progress`, `_translation_context`, `translation_types` |
+| Domain | 외부 SDK와 파일 포맷에 독립적인 모델·검증 | `workspace.py`, `project.py`, `source_block.py`, `source_qa.py`, `translation_segment.py`, `translation_qa.py`, `approved_translation.py` |
 | Extraction | PDF layout, 이미지 OCR, PDF 아이콘 검사, 용어 후보 AI 정리와 번역 프롬프트 초안 결과 처리 계약 | `layout.py`, `image_ocr.py`, `pdf_icon_audit.py`, `glossary_triage.py`, `translation_prompt_draft.py` |
-| Infrastructure | 외부 모델 adapter와 로컬 대시보드·검수 서버 | `ai_provider.py`, `ai_usage.py`, `gemini_*`, `openai_*`, `dashboard_server.py`, `dashboard_routes.py`, `source_review_server.py`, `glossary_review_server.py`, `translation_review_server.py` |
+| Infrastructure | 외부 모델 adapter와 로컬 대시보드·검수 서버 | `ai_provider.py`, `ai_usage.py`, `gemini_*`, `openai_*`, `local_http.py`, `dashboard_server.py`, `dashboard_routes.py`, `source_review_server.py`, `glossary_review_server.py`, `translation_review_server.py` |
 
 CLI의 통합 명령(`glk run`)과 개별 명령은 application service를 공유합니다. `glk run`은 별도 추출 구현을 갖지 않고 PDF의 `extract_project_pdf()` 또는 이미지의 `ocr_project_images()`를 호출한 뒤 segmentation과 QA service를 연결합니다.
 
