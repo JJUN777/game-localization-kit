@@ -648,9 +648,9 @@ h1 {
   gap: 9px;
   margin-bottom: 12px;
   padding: 10px 11px;
-  border: 1px solid color-mix(in srgb, var(--success) 35%, var(--line));
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: var(--success-soft);
+  background: var(--soft);
 }
 
 .output-files-head,
@@ -663,7 +663,7 @@ h1 {
 }
 
 .output-files-head strong {
-  color: var(--success-dark);
+  color: var(--ink);
   font-size: 12px;
 }
 
@@ -682,7 +682,7 @@ h1 {
 
 .output-file {
   padding: 8px 9px;
-  border: 1px solid color-mix(in srgb, var(--success) 35%, var(--line));
+  border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface);
 }
@@ -693,13 +693,22 @@ h1 {
   gap: 2px;
 }
 
-.output-file-name {
+.output-file-name,
+.output-file-detail {
   overflow: hidden;
-  color: var(--ink);
+  color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.output-file-name { color: var(--ink); font-size: 11px; }
+
+.output-file-kind {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .output-download-button {
@@ -724,7 +733,6 @@ h1 {
 }
 
 .previous-outputs {
-  margin-bottom: 12px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--soft);
@@ -797,7 +805,7 @@ h1 {
   background: var(--surface);
 }
 
-.previous-output-download-button {
+.secondary-download-button {
   flex-shrink: 0;
   padding: 6px 9px;
   border: 1px solid var(--line-strong);
@@ -808,12 +816,12 @@ h1 {
   font-weight: 600;
 }
 
-.previous-output-download-button:hover:not(:disabled) {
+.secondary-download-button:hover:not(:disabled) {
   border-color: var(--ink-soft);
   background: var(--surface-hover);
 }
 
-.previous-output-download-button:disabled {
+.secondary-download-button:disabled {
   cursor: wait;
   opacity: .55;
 }
@@ -882,8 +890,7 @@ h1 {
   background: var(--soft);
 }
 
-.ocr-prompt-button,
-.source-download-button {
+.ocr-prompt-button {
   padding: 8px 10px;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
@@ -894,15 +901,9 @@ h1 {
   transition: border-color .15s ease, background .15s ease;
 }
 
-.ocr-prompt-button:hover,
-.source-download-button:hover:not(:disabled) {
+.ocr-prompt-button:hover {
   border-color: var(--ink-soft);
   background: var(--line);
-}
-
-.source-download-button:disabled {
-  cursor: not-allowed;
-  opacity: .55;
 }
 
 .translation-prompt-button {

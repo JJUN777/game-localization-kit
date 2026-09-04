@@ -640,18 +640,6 @@ function glossaryJobButton(project) {
   </button>`;
 }
 
-function sourceDownloadButton(project) {
-  const output = project.source_output;
-  if (!output) return "";
-  return `<button class="source-download-button secondary-action" type="button"
-    data-download-source
-    data-project="${escapeHtml(project.project_id)}"
-    data-download-name="${escapeHtml(output.download_name)}"
-    title="저장 위치를 선택해 다운로드">
-    원문 TXT 저장
-  </button>`;
-}
-
 function translationJobStatus(project) {
   const job = translationJobFor(project.project_id);
   if (
@@ -1377,10 +1365,7 @@ function projectSettingsMenu(project) {
 
 function projectActionRow(project) {
   const primary = primaryActionButton(project);
-  const utilities = [
-    sourceDownloadButton(project),
-    projectSettingsMenu(project),
-  ].filter(Boolean).join("");
+  const utilities = projectSettingsMenu(project);
   if (!primary && !utilities) return "";
   return `<div class="action-row">
     <div class="next-actions">${primary}</div>
@@ -1459,10 +1444,9 @@ function outputFiles(project) {
   const outputRow = (output, label) => `
     <div class="output-file">
       <div class="output-file-info">
-        <span class="output-file-name" title="${escapeHtml(output.name)}">
-          ${escapeHtml(output.name)}
-        </span>
-        <span class="output-file-size">
+        <strong class="output-file-kind">${escapeHtml(label)}</strong>
+        <span class="output-file-detail" title="${escapeHtml(output.name)}">
+          ${escapeHtml(output.name)} ·
           ${escapeHtml(formatFileSize(output.size_bytes))}
         </span>
       </div>
@@ -1472,12 +1456,11 @@ function outputFiles(project) {
         data-download-name="${escapeHtml(output.download_name)}"
         title="저장 위치를 선택해 다운로드"
         aria-label="${escapeHtml(output.name)} 저장 위치 선택">
-        ${escapeHtml(label)}
+        저장
       </button>
     </div>`;
 
   let rows;
-  let summary;
   const combined = outputs.find(
     (output) => output.name === "combined_kor.txt",
   );
@@ -1495,14 +1478,11 @@ function outputFiles(project) {
       (sum, output) => sum + output.size_bytes,
       0,
     );
-    rows = outputRow(combined, "통합본 저장") + `
+    rows = outputRow(combined, "통합 번역본") + `
       <div class="output-file">
         <div class="output-file-info">
-          <span class="output-file-name"
-            title="이미지별 번역 파일 전체">
-            이미지별 번역 파일
-          </span>
-          <span class="output-file-size">
+          <strong class="output-file-kind">이미지별 번역본</strong>
+          <span class="output-file-detail">
             ${imageOutputs.length}개 TXT ·
             ${escapeHtml(formatFileSize(totalBytes))}
           </span>
@@ -1513,23 +1493,37 @@ function outputFiles(project) {
           data-download-name="${escapeHtml(archiveName)}"
           title="이미지별 파일을 ZIP으로 저장"
           aria-label="이미지별 파일 ${imageOutputs.length}개 전체 저장">
-          이미지별 파일 전체 저장
+          저장
         </button>
       </div>`;
-    summary = `이미지별 파일 ${imageOutputs.length}개`;
   } else {
     rows = outputs.map(
-      (output) => outputRow(output, "번역본 저장"),
+      (output) => outputRow(output, "최종 번역본"),
     ).join("");
-    summary = outputs.length > 1 ? `${outputs.length}개 파일` : "";
   }
-  return `<section class="output-files" aria-label="최종 번역 결과">
-    <div class="output-files-head">
-      <strong>최종 번역 결과</strong>
-      ${summary ? `<span>${escapeHtml(summary)}</span>` : ""}
+  return rows;
+}
+
+function sourceOutputFile(project) {
+  const output = project.source_output;
+  if (!output) return "";
+  return `<div class="output-file source-output-file">
+    <div class="output-file-info">
+      <strong class="output-file-kind">승인 원문</strong>
+      <span class="output-file-detail" title="${escapeHtml(output.download_name)}">
+        ${escapeHtml(output.download_name)} ·
+        ${escapeHtml(formatFileSize(output.size_bytes))}
+      </span>
     </div>
-    <div class="output-file-list">${rows}</div>
-  </section>`;
+    <button class="secondary-download-button" type="button"
+      data-download-source
+      data-project="${escapeHtml(project.project_id)}"
+      data-download-name="${escapeHtml(output.download_name)}"
+      title="검수를 마친 원문을 저장 위치를 선택해 다운로드"
+      aria-label="${escapeHtml(output.download_name)} 승인 원문 저장">
+      저장
+    </button>
+  </div>`;
 }
 
 function previousOutputFiles(project) {
@@ -1546,7 +1540,7 @@ function previousOutputFiles(project) {
             ${escapeHtml(formatFileSize(output.size_bytes))}
           </span>
         </div>
-        <button class="previous-output-download-button" type="button"
+        <button class="secondary-download-button" type="button"
           data-download-previous-output="${escapeHtml(output.path)}"
           data-revision="${escapeHtml(version.revision_id)}"
           data-project="${escapeHtml(project.project_id)}"
@@ -1577,6 +1571,23 @@ function previousOutputFiles(project) {
     </summary>
     <div class="previous-output-version-list">${versionRows}</div>
   </details>`;
+}
+
+function projectFiles(project) {
+  const currentOutputs = outputFiles(project);
+  const sourceOutput = sourceOutputFile(project);
+  const previousOutputs = previousOutputFiles(project);
+  if (!currentOutputs && !sourceOutput && !previousOutputs) return "";
+  return `<section class="output-files" aria-label="파일 저장">
+    <div class="output-files-head">
+      <strong>파일 저장</strong>
+    </div>
+    <div class="output-file-list">
+      ${currentOutputs}
+      ${sourceOutput}
+    </div>
+    ${previousOutputs}
+  </section>`;
 }
 
 function projectCard(project) {
@@ -1623,8 +1634,7 @@ function projectCard(project) {
       </div>
     </div>
     <div class="project-work">
-      ${outputFiles(project)}
-      ${previousOutputFiles(project)}
+      ${projectFiles(project)}
       <div class="actions">
         ${projectJobStatuses(project)}
         ${translationReviewAttention(project)}
