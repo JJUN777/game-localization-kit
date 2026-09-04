@@ -26,6 +26,9 @@ from glk.application.source_review_service import prepare_project_source_review
 from glk.application.translation_review_service import (
     finalize_project_translation_review,
 )
+from glk.application.translation_prompt_service import (
+    update_project_translation_prompt,
+)
 from glk.application.translation_service import translate_project
 from glk.infrastructure.dashboard_server import (
     _MAX_UPLOAD_BYTES,
@@ -290,13 +293,18 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("누적 AI 비용", script)
         self.assertIn("pipelineTotal(project)", script)
         self.assertIn('pipelineStep(project, "translation_review"', script)
-        self.assertIn('class="pipeline-step ${state}${interactive', script)
+        self.assertIn('class="pipeline-step ${state}"', script)
+        self.assertIn('class="pipeline-step-label pipeline-step-link"', script)
+        self.assertIn('class="pipeline-step-cost"${detail}', script)
         self.assertIn('data-review="${reviewType}"', script)
         self.assertIn("function primaryReviewButton(project)", script)
         self.assertIn("function primaryActionButton(project)", script)
         self.assertIn("function projectActionRow(project)", script)
-        self.assertIn('actionMenu("파일 저장"', script)
+        self.assertIn("function projectFiles(project)", script)
+        self.assertIn("승인 원문", script)
+        self.assertNotIn("원문 TXT 저장", script)
         self.assertIn('actionMenu("설정"', script)
+        self.assertIn('summary>작업 기록 ${completed.length}건', script)
         self.assertIn('class="translation-prompt-button contextual-action"', script)
         self.assertNotIn("다른 백그라운드 작업 실행 중", script)
         self.assertIn("data-usage-detail", script)
@@ -338,6 +346,11 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("초벌 번역 시작", html)
         self.assertIn("번역 문체·표현 지침", html)
         self.assertIn("번역 프롬프트 설정", html)
+        self.assertIn('id="translationPromptSourceStatus"', html)
+        self.assertIn('id="translationPromptEditFromJob"', html)
+        self.assertIn("저장한 설정 사용", html)
+        self.assertIn("기본값 사용", html)
+        self.assertIn("editTranslationPromptFromJob", html)
         self.assertIn("AI로 초안 만들기", html)
         self.assertIn("translationPromptEditorView", html)
         self.assertIn("translationPromptAiPanel", html)
@@ -365,17 +378,20 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("청크마다 API를 호출", html)
         self.assertIn("초벌 번역 완료 ·", html)
         self.assertIn("translation-review-attention", html)
-        self.assertIn("최종 번역 결과", html)
-        self.assertIn("검수 완료 원문 TXT 저장", html)
+        self.assertIn("파일 저장", html)
+        self.assertIn("최종 번역본", html)
+        self.assertIn("승인 원문", html)
         self.assertIn("data-download-source", html)
         self.assertIn("data-download-output", html)
+        self.assertIn("data-download-previous-output", html)
         self.assertIn("data-download-output-archive", html)
-        self.assertIn("통합본 저장", html)
-        self.assertIn("이미지별 파일 전체 저장", html)
+        self.assertIn("통합 번역본", html)
+        self.assertIn("이미지별 번역본", html)
         self.assertIn('id="toast" role="status"', html)
         self.assertIn('document.querySelectorAll("dialog[open]")', html)
         self.assertIn("toastHost.append(toast)", html)
         self.assertIn("/api/output-archive", html)
+        self.assertIn("/api/previous-output", html)
         self.assertIn("/api/source-output", html)
         self.assertIn("window.showSaveFilePicker", html)
         self.assertIn("fileHandle.createWritable()", html)
@@ -391,6 +407,7 @@ class DashboardServerTests(unittest.TestCase):
             maxsplit=1,
         )[1].split("function createProjectCard()", maxsplit=1)[0]
         self.assertIn("${projectActionRow(project)}", project_card)
+        self.assertIn("${projectFiles(project)}", project_card)
         self.assertNotIn('${reviewButton(project, "source")}', project_card)
         self.assertNotIn('${reviewButton(project, "glossary")}', project_card)
         self.assertNotIn('${reviewButton(project, "translation")}', project_card)
@@ -1078,6 +1095,66 @@ class DashboardServerTests(unittest.TestCase):
         status, escaped = self._request(f"/api/output?{escaped_query}")
         self.assertEqual(status, 400)
         self.assertEqual(escaped["code"], "OUTPUT_DOWNLOAD_FAILED")
+
+    def test_downloads_a_previous_approved_output_after_prompt_change(self) -> None:
+        blocks = translation_sample_blocks()
+        create_translation_project(self.workspace_root, blocks)
+        translate_project(
+            project="translation_project",
+            workspace_root=self.workspace_root,
+            provider=SequenceProvider([valid_response(blocks)]),
+        )
+        finalize_project_translation_review(
+            project="translation_project",
+            workspace_root=self.workspace_root,
+        )
+        update_project_translation_prompt(
+            project="translation_project",
+            translation_prompt="새 번역 방향을 적용하세요.",
+            workspace_root=self.workspace_root,
+        )
+        query = urlencode(
+            {
+                "project_id": "translation_project",
+                "revision": "active",
+                "path": "05_output/rulebook_kor.txt",
+            }
+        )
+        path = f"/api/previous-output?{query}"
+
+        status, unauthorized = self._request(path, authorized=False)
+        self.assertEqual(status, 403)
+        self.assertFalse(unauthorized["ok"])
+
+        request = Request(
+            f"{self.server.origin}{path}",
+            headers={"X-GLK-Token": self.server.auth_token},
+        )
+        with urlopen(request, timeout=3) as response:
+            data = response.read()
+            content_disposition = response.headers["Content-Disposition"]
+            self.assertEqual(response.status, 200)
+        self.assertIn("전투", data.decode("utf-8"))
+        self.assertRegex(
+            content_disposition,
+            r"rulebook_kor_\d{8}_\d{6}\.txt",
+        )
+
+        escaped_query = urlencode(
+            {
+                "project_id": "translation_project",
+                "revision": "../escape",
+                "path": "05_output/rulebook_kor.txt",
+            }
+        )
+        status, escaped = self._request(
+            f"/api/previous-output?{escaped_query}"
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            escaped["code"],
+            "PREVIOUS_OUTPUT_DOWNLOAD_FAILED",
+        )
 
     def test_downloads_all_per_image_outputs_as_one_archive(self) -> None:
         pdf_blocks = translation_sample_blocks()

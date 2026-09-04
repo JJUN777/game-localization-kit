@@ -396,8 +396,9 @@ function pipelineTotal(project) {
   const detail = total?.requests > 0
     ? ` tabindex="0" data-usage-detail="${escapeHtml(cumulativeUsageTitle(total))}"`
     : "";
-  return `<div class="pipeline-total"${detail}>
-    <span>누적 AI 비용</span><strong>${escapeHtml(totalCost)}</strong>
+  return `<div class="pipeline-total">
+    <span>누적 AI 비용</span>
+    <strong class="pipeline-total-cost"${detail}>${escapeHtml(totalCost)}</strong>
   </div>`;
 }
 
@@ -636,18 +637,6 @@ function glossaryJobButton(project) {
   return `<button class="${actionClass(project, "glossary-job", "glossary-job-button")}" type="button"
     data-start-glossary-job="${escapeHtml(project.project_id)}">
     용어 후보 생성${retry ? " 다시 시도" : " 시작"}
-  </button>`;
-}
-
-function sourceDownloadButton(project) {
-  const output = project.source_output;
-  if (!output) return "";
-  return `<button class="source-download-button secondary-action" type="button"
-    data-download-source
-    data-project="${escapeHtml(project.project_id)}"
-    data-download-name="${escapeHtml(output.download_name)}"
-    title="저장 위치를 선택해 다운로드">
-    검수 완료 원문 TXT 저장
   </button>`;
 }
 
@@ -1103,6 +1092,10 @@ function openTranslationJobDialog(projectId) {
       : "새 초벌 번역";
   byId("translationPrompt").value =
     project.translation_prompt?.value || "";
+  byId("translationPromptSourceStatus").textContent =
+    project.translation_prompt?.saved
+      ? "저장한 설정 사용"
+      : "기본값 사용";
   byId("translationPrompt").readOnly = true;
   byId("translationResumeNote").hidden = !resume;
   byId("translationForceNote").hidden = !force;
@@ -1119,6 +1112,13 @@ function openTranslationJobDialog(projectId) {
 
 function closeTranslationJobDialog() {
   byId("translationJobDialog").close();
+}
+
+function editTranslationPromptFromJob() {
+  const projectId = pendingTranslationJobProject?.project_id;
+  if (!projectId) return;
+  closeTranslationJobDialog();
+  openTranslationPromptDialog(projectId);
 }
 
 async function startTranslationJob(event) {
@@ -1201,26 +1201,26 @@ function pipelineStep(project, key, label) {
   }[key];
   const review = reviewType ? project.reviews[reviewType] : null;
   const interactive = Boolean(review?.enabled);
-  const tag = interactive ? "button" : "span";
-  const interaction = interactive
-    ? ` type="button" data-project="${escapeHtml(project.project_id)}"
-        data-review="${reviewType}" title="${escapeHtml(review.reason)}"`
-    : "";
+  const labelMarkup = interactive
+    ? `<button class="pipeline-step-label pipeline-step-link"
+        type="button" data-project="${escapeHtml(project.project_id)}"
+        data-review="${reviewType}" title="${escapeHtml(review.reason)}">${escapeHtml(label)}</button>`
+    : `<span class="pipeline-step-label">${escapeHtml(label)}</span>`;
   const detail = usage?.requests > 0
-    ? `${interactive ? "" : ' tabindex="0"'} data-usage-detail="${escapeHtml(cumulativeUsageTitle(usage))}"`
+    ? ` tabindex="0" data-usage-detail="${escapeHtml(cumulativeUsageTitle(usage))}"`
     : "";
   const stateLabel = state === "done"
     ? "완료"
     : state === "current"
     ? "현재"
     : "대기";
-  return `<${tag} class="pipeline-step ${state}${interactive ? " interactive" : ""}"${interaction}${detail}>
-    <span>${label}</span>
+  return `<div class="pipeline-step ${state}">
+    ${labelMarkup}
     <span class="pipeline-step-meta">
       <span class="pipeline-step-state">${stateLabel}</span>
-      <strong class="pipeline-step-cost">${escapeHtml(cost)}</strong>
+      <strong class="pipeline-step-cost"${detail}>${escapeHtml(cost)}</strong>
     </span>
-  </${tag}>`;
+  </div>`;
 }
 
 function projectNeedsAttention(project) {
@@ -1365,12 +1365,9 @@ function actionMenu(label, items, className = "") {
   </details>`;
 }
 
-function projectFileMenu(project) {
-  return actionMenu("파일 저장", sourceDownloadButton(project), "file-menu");
-}
-
 function projectSettingsMenu(project) {
   const items = [
+    translationPromptEditButton(project),
     sourceReplacementButton(project),
     ocrPromptEditButton(project),
   ].filter(Boolean).join("");
@@ -1379,16 +1376,34 @@ function projectSettingsMenu(project) {
 
 function projectActionRow(project) {
   const primary = primaryActionButton(project);
-  const contextual = translationPromptEditButton(project);
-  const utilities = [
-    projectFileMenu(project),
-    projectSettingsMenu(project),
-  ].filter(Boolean).join("");
-  if (!primary && !contextual && !utilities) return "";
+  const utilities = projectSettingsMenu(project);
+  if (!primary && !utilities) return "";
   return `<div class="action-row">
-    <div class="next-actions">${primary}${contextual}</div>
+    <div class="next-actions">${primary}</div>
     <div class="utility-actions">${utilities}</div>
   </div>`;
+}
+
+function projectJobStatuses(project) {
+  const entries = [
+    [sourceJobFor(project.project_id), sourceJobStatus(project)],
+    [glossaryJobFor(project.project_id), glossaryJobStatus(project)],
+    [translationJobFor(project.project_id), translationJobStatus(project)],
+  ].filter(([, html]) => Boolean(html));
+  const current = entries
+    .filter(([job]) => job.status !== "succeeded")
+    .map(([, html]) => html)
+    .join("");
+  const completed = entries
+    .filter(([job]) => job.status === "succeeded")
+    .map(([, html]) => html);
+  const history = completed.length
+    ? `<details class="job-history">
+        <summary>작업 기록 ${completed.length}건</summary>
+        <div class="job-history-list">${completed.join("")}</div>
+      </details>`
+    : "";
+  return `${current}${history}`;
 }
 
 function sourceFileSummary(project) {
@@ -1421,16 +1436,28 @@ function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatPreviousOutputTime(value) {
+  if (!value) return "날짜 정보 없음";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "날짜 정보 없음";
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function outputFiles(project) {
   const outputs = project.outputs || [];
   if (!outputs.length) return "";
   const outputRow = (output, label) => `
     <div class="output-file">
       <div class="output-file-info">
-        <span class="output-file-name" title="${escapeHtml(output.name)}">
-          ${escapeHtml(output.name)}
-        </span>
-        <span class="output-file-size">
+        <strong class="output-file-kind">${escapeHtml(label)}</strong>
+        <span class="output-file-detail" title="${escapeHtml(output.name)}">
+          ${escapeHtml(output.name)} ·
           ${escapeHtml(formatFileSize(output.size_bytes))}
         </span>
       </div>
@@ -1440,12 +1467,11 @@ function outputFiles(project) {
         data-download-name="${escapeHtml(output.download_name)}"
         title="저장 위치를 선택해 다운로드"
         aria-label="${escapeHtml(output.name)} 저장 위치 선택">
-        ${escapeHtml(label)}
+        저장
       </button>
     </div>`;
 
   let rows;
-  let summary;
   const combined = outputs.find(
     (output) => output.name === "combined_kor.txt",
   );
@@ -1463,14 +1489,11 @@ function outputFiles(project) {
       (sum, output) => sum + output.size_bytes,
       0,
     );
-    rows = outputRow(combined, "통합본 저장") + `
+    rows = outputRow(combined, "통합 번역본") + `
       <div class="output-file">
         <div class="output-file-info">
-          <span class="output-file-name"
-            title="이미지별 번역 파일 전체">
-            이미지별 번역 파일
-          </span>
-          <span class="output-file-size">
+          <strong class="output-file-kind">이미지별 번역본</strong>
+          <span class="output-file-detail">
             ${imageOutputs.length}개 TXT ·
             ${escapeHtml(formatFileSize(totalBytes))}
           </span>
@@ -1481,22 +1504,100 @@ function outputFiles(project) {
           data-download-name="${escapeHtml(archiveName)}"
           title="이미지별 파일을 ZIP으로 저장"
           aria-label="이미지별 파일 ${imageOutputs.length}개 전체 저장">
-          이미지별 파일 전체 저장
+          저장
         </button>
       </div>`;
-    summary = `이미지별 파일 ${imageOutputs.length}개`;
   } else {
     rows = outputs.map(
-      (output) => outputRow(output, "번역본 저장"),
+      (output) => outputRow(output, "최종 번역본"),
     ).join("");
-    summary = `${outputs.length}개 파일`;
   }
-  return `<section class="output-files" aria-label="최종 번역 결과">
-    <div class="output-files-head">
-      <strong>최종 번역 결과</strong>
-      <span>${escapeHtml(summary)}</span>
+  return rows;
+}
+
+function sourceOutputFile(project) {
+  const output = project.source_output;
+  if (!output) return "";
+  return `<div class="output-file source-output-file">
+    <div class="output-file-info">
+      <strong class="output-file-kind">승인 원문</strong>
+      <span class="output-file-detail" title="${escapeHtml(output.download_name)}">
+        ${escapeHtml(output.download_name)} ·
+        ${escapeHtml(formatFileSize(output.size_bytes))}
+      </span>
     </div>
-    <div class="output-file-list">${rows}</div>
+    <button class="secondary-download-button" type="button"
+      data-download-source
+      data-project="${escapeHtml(project.project_id)}"
+      data-download-name="${escapeHtml(output.download_name)}"
+      title="검수를 마친 원문을 저장 위치를 선택해 다운로드"
+      aria-label="${escapeHtml(output.download_name)} 승인 원문 저장">
+      저장
+    </button>
+  </div>`;
+}
+
+function previousOutputFiles(project) {
+  const versions = project.previous_outputs || [];
+  if (!versions.length) return "";
+  const versionRows = versions.map((version) => {
+    const outputRows = (version.outputs || []).map((output) => `
+      <div class="previous-output-file">
+        <div class="output-file-info">
+          <span class="output-file-name" title="${escapeHtml(output.name)}">
+            ${escapeHtml(output.name)}
+          </span>
+          <span class="output-file-size">
+            ${escapeHtml(formatFileSize(output.size_bytes))}
+          </span>
+        </div>
+        <button class="secondary-download-button" type="button"
+          data-download-previous-output="${escapeHtml(output.path)}"
+          data-revision="${escapeHtml(version.revision_id)}"
+          data-project="${escapeHtml(project.project_id)}"
+          data-download-name="${escapeHtml(output.download_name)}"
+          title="이전 승인본을 저장"
+          aria-label="${escapeHtml(output.name)} 이전 승인본 저장">
+          이전본 저장
+        </button>
+      </div>`).join("");
+    const versionLabel = version.revision_id === "active"
+      ? "프롬프트 변경 전 승인본"
+      : "재번역 전 승인본";
+    const versionTime = formatPreviousOutputTime(
+      version.approved_at || version.archived_at,
+    );
+    return `<section class="previous-output-version">
+      <div class="previous-output-version-head">
+        <strong>${versionLabel}</strong>
+        <span>${escapeHtml(versionTime)}</span>
+      </div>
+      <div class="previous-output-file-list">${outputRows}</div>
+    </section>`;
+  }).join("");
+  return `<details class="previous-outputs">
+    <summary>
+      <strong>이전 번역본</strong>
+      <span>${versions.length}개</span>
+    </summary>
+    <div class="previous-output-version-list">${versionRows}</div>
+  </details>`;
+}
+
+function projectFiles(project) {
+  const currentOutputs = outputFiles(project);
+  const sourceOutput = sourceOutputFile(project);
+  const previousOutputs = previousOutputFiles(project);
+  if (!currentOutputs && !sourceOutput && !previousOutputs) return "";
+  return `<section class="output-files" aria-label="파일 저장">
+    <div class="output-files-head">
+      <strong>파일 저장</strong>
+    </div>
+    <div class="output-file-list">
+      ${currentOutputs}
+      ${sourceOutput}
+    </div>
+    ${previousOutputs}
   </section>`;
 }
 
@@ -1544,11 +1645,9 @@ function projectCard(project) {
       </div>
     </div>
     <div class="project-work">
-      ${outputFiles(project)}
+      ${projectFiles(project)}
       <div class="actions">
-        ${sourceJobStatus(project)}
-        ${glossaryJobStatus(project)}
-        ${translationJobStatus(project)}
+        ${projectJobStatuses(project)}
         ${translationReviewAttention(project)}
         ${projectActionRow(project)}
       </div>
@@ -1746,6 +1845,22 @@ async function downloadOutput(button) {
   });
 }
 
+async function downloadPreviousOutput(button) {
+  const query = new URLSearchParams({
+    project_id: button.dataset.project,
+    revision: button.dataset.revision,
+    path: button.dataset.downloadPreviousOutput,
+  });
+  await saveDownload(button, {
+    requestUrl: `/api/previous-output?${query}`,
+    downloadName:
+      button.dataset.downloadName || "previous_translation.txt",
+    description: "텍스트 파일",
+    mimeType: "text/plain",
+    extensions: [".txt"],
+  });
+}
+
 async function downloadSourceOutput(button) {
   const query = new URLSearchParams({
     project_id: button.dataset.project,
@@ -1852,8 +1967,8 @@ function openSourceDialog(projectId, projectName, replace, sourceType) {
   byId("sourceDialogTitle").textContent =
     replace ? "원본 교체" : "원본 등록";
   byId("sourceDialogNote").innerHTML = replace
-    ? "기존 원본은 삭제되고 선택한 파일로 교체됩니다. 저장된 OCR 프롬프트는 유지되며 별도의 <code>OCR 프롬프트 수정</code> 버튼에서 변경할 수 있습니다. 원문 추출·OCR 시작 전까지만 교체할 수 있습니다."
-    : "선택한 파일은 프로젝트의 <code>01_input</code>에 복사합니다. 이미지 형식은 프로젝트 기본 OCR 프롬프트를 유지하며, 등록 뒤 별도의 <code>OCR 프롬프트 수정</code> 버튼에서 변경할 수 있습니다. 이 단계에서는 AI API 호출을 실행하지 않습니다.";
+    ? "기존 원본은 삭제되고 선택한 파일로 교체됩니다. 저장된 OCR 프롬프트는 유지되며 카드의 <code>설정 &gt; OCR 프롬프트 수정</code>에서 변경할 수 있습니다. 원문 추출·OCR 시작 전까지만 교체할 수 있습니다."
+    : "선택한 파일은 프로젝트의 <code>01_input</code>에 복사합니다. 이미지 형식은 프로젝트 기본 OCR 프롬프트를 유지하며, 등록 뒤 카드의 <code>설정 &gt; OCR 프롬프트 수정</code>에서 변경할 수 있습니다. 이 단계에서는 AI API 호출을 실행하지 않습니다.";
   byId("sourceSubmit").textContent =
     replace ? "기존 원본 교체" : "원본 등록";
   byId("sourceSubmit").classList.toggle(
@@ -2504,6 +2619,10 @@ byId("translationPrompt").addEventListener(
   "input",
   updateTranslationPromptCount,
 );
+byId("translationPromptEditFromJob").addEventListener(
+  "click",
+  editTranslationPromptFromJob,
+);
 byId("translationJobDialog").addEventListener("close", () => {
   pendingTranslationJobProject = null;
   pendingTranslationForce = false;
@@ -2672,6 +2791,13 @@ byId("projectGrid").addEventListener("click", (event) => {
   );
   if (archiveButton) {
     downloadOutputArchive(archiveButton);
+    return;
+  }
+  const previousDownloadButton = event.target.closest(
+    "[data-download-previous-output]",
+  );
+  if (previousDownloadButton) {
+    downloadPreviousOutput(previousDownloadButton);
     return;
   }
   const downloadButton = event.target.closest("[data-download-output]");

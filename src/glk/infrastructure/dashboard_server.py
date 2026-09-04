@@ -41,6 +41,7 @@ from glk.application.dashboard_service import (
     get_dashboard_document,
     get_project_dashboard_image_output_archive,
     get_project_dashboard_output,
+    get_project_dashboard_previous_output,
     get_project_dashboard_source_output,
 )
 from glk.application.project_service import (
@@ -247,6 +248,7 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 "ai_settings",
                 "source_output",
                 "output",
+                "previous_output",
                 "output_archive",
             }
         ),
@@ -725,6 +727,53 @@ class _DashboardHandler(LocalHttpRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                     error,
                     code="OUTPUT_DOWNLOAD_FAILED",
+                )
+                return
+            encoded_name = quote(output.download_name, safe="")
+            self._send_bytes(
+                HTTPStatus.OK,
+                data,
+                "application/octet-stream",
+                extra_headers={
+                    "Content-Disposition": (
+                        "attachment; filename=\"translation.txt\"; "
+                        f"filename*=UTF-8''{encoded_name}"
+                    ),
+                },
+            )
+            return
+        if route.name == "previous_output":
+            try:
+                query = parse_qs(
+                    route.query,
+                    keep_blank_values=True,
+                    strict_parsing=True,
+                )
+                if (
+                    set(query) != {"project_id", "revision", "path"}
+                    or len(query["project_id"]) != 1
+                    or len(query["revision"]) != 1
+                    or len(query["path"]) != 1
+                ):
+                    raise DashboardOutputError(
+                        "프로젝트와 이전 번역 파일을 정확히 하나씩 선택하세요."
+                    )
+                output = get_project_dashboard_previous_output(
+                    project_id=query["project_id"][0],
+                    revision_id=query["revision"][0],
+                    output_path=query["path"][0],
+                    workspace_root=self.server.workspace_root,
+                )
+                data = output.path.read_bytes()
+                if hashlib.sha256(data).hexdigest() != output.sha256:
+                    raise DashboardOutputError(
+                        "이전 번역 파일이 보관 이후 변경되었습니다."
+                    )
+            except (DashboardOutputError, OSError, ValueError) as error:
+                self._send_error_json(
+                    HTTPStatus.BAD_REQUEST,
+                    error,
+                    code="PREVIOUS_OUTPUT_DOWNLOAD_FAILED",
                 )
                 return
             encoded_name = quote(output.download_name, safe="")

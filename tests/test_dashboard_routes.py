@@ -61,6 +61,12 @@ class DashboardRouteTests(unittest.TestCase):
             ("GET", "/api/output", "output", "session"),
             (
                 "GET",
+                "/api/previous-output",
+                "previous_output",
+                "session",
+            ),
+            (
+                "GET",
                 "/api/output-archive",
                 "output_archive",
                 "session",
@@ -146,6 +152,18 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(
             route.query,
             "project_id=demo&path=output%2Ftranslated.txt",
+        )
+
+        previous_route = match_dashboard_route(
+            "GET",
+            "/api/previous-output?project_id=demo&revision=active&path=05_output%2Ftranslated.txt",
+        )
+        self.assertIsNotNone(previous_route)
+        assert previous_route is not None
+        self.assertEqual(previous_route.path, "/api/previous-output")
+        self.assertEqual(
+            previous_route.query,
+            "project_id=demo&revision=active&path=05_output%2Ftranslated.txt",
         )
 
         archive_route = match_dashboard_route(

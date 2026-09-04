@@ -41,7 +41,7 @@ class CliTests(unittest.TestCase):
         with redirect_stdout(output):
             exit_code = main(["version"])
         self.assertEqual(exit_code, 0)
-        self.assertEqual(output.getvalue(), "glk 2.0.0\n")
+        self.assertEqual(output.getvalue(), "glk 2.5.0\n")
 
     def test_ui_command_starts_local_dashboard(self) -> None:
         with patch("glk.cli.serve_dashboard") as serve:
