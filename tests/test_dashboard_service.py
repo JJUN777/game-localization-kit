@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -14,9 +15,10 @@ from glk.application.dashboard_service import (
     DashboardOutputError,
     get_dashboard_document,
     get_project_dashboard_output,
+    get_project_dashboard_previous_output,
     get_project_dashboard_source_output,
 )
-from glk.application.project_service import create_project
+from glk.application.project_service import create_project, load_project
 from glk.application.source_registration_service import (
     register_project_images,
     register_project_pdf,
@@ -24,6 +26,13 @@ from glk.application.source_registration_service import (
 from glk.application.translation_review_service import (
     finalize_project_translation_review,
     run_project_translation_qa,
+)
+from glk.application.translation_prompt_service import (
+    update_project_translation_prompt,
+)
+from glk.application.translation_restart_service import (
+    archive_translation_restart,
+    clear_stale_translation_review_artifacts,
 )
 from glk.application.translation_service import translate_project
 from tests.test_glossary_service import (
@@ -286,6 +295,7 @@ class DashboardServiceTests(unittest.TestCase):
                 project["outputs"][0]["download_name"],
                 "rulebook_kor.txt",
             )
+            self.assertEqual(project["previous_outputs"], [])
             output = get_project_dashboard_output(
                 project_id="translation_project",
                 output_path="05_output/rulebook_kor.txt",
@@ -301,6 +311,91 @@ class DashboardServiceTests(unittest.TestCase):
             ):
                 get_project_dashboard_output(
                     project_id="translation_project",
+                    output_path="05_output/rulebook_kor.txt",
+                    workspace_root=workspace_root,
+                )
+
+    def test_preserves_previous_approved_outputs_across_retranslation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace_root = Path(temporary) / "workspaces"
+            blocks = sample_blocks()
+            project_path = create_translation_project(
+                workspace_root,
+                blocks,
+            )
+            translate_project(
+                project="translation_project",
+                workspace_root=workspace_root,
+                provider=SequenceProvider([valid_response(blocks)]),
+            )
+            finalize_project_translation_review(
+                project="translation_project",
+                workspace_root=workspace_root,
+            )
+            update_project_translation_prompt(
+                project="translation_project",
+                translation_prompt="새 번역 방향을 적용하세요.",
+                workspace_root=workspace_root,
+            )
+
+            stale_project = get_dashboard_document(workspace_root)["projects"][0]
+
+            self.assertEqual(stale_project["outputs"], [])
+            self.assertEqual(len(stale_project["previous_outputs"]), 1)
+            active = stale_project["previous_outputs"][0]
+            self.assertEqual(active["revision_id"], "active")
+            self.assertEqual(
+                [output["path"] for output in active["outputs"]],
+                ["05_output/rulebook_kor.txt"],
+            )
+            self.assertRegex(
+                active["outputs"][0]["download_name"],
+                r"^rulebook_kor_\d{8}_\d{6}\.txt$",
+            )
+            active_output = get_project_dashboard_previous_output(
+                project_id="translation_project",
+                revision_id="active",
+                output_path="05_output/rulebook_kor.txt",
+                workspace_root=workspace_root,
+            )
+            self.assertEqual(
+                active_output.path,
+                project_path / active_output.relative_path,
+            )
+
+            location = load_project("translation_project", workspace_root)
+            revision_root = archive_translation_restart(location)
+            self.assertIsNotNone(revision_root)
+            clear_stale_translation_review_artifacts(location)
+            archived_project = get_dashboard_document(workspace_root)["projects"][0]
+
+            self.assertEqual(len(archived_project["previous_outputs"]), 1)
+            archived = archived_project["previous_outputs"][0]
+            assert revision_root is not None
+            self.assertEqual(archived["revision_id"], revision_root.name)
+            archived_output = get_project_dashboard_previous_output(
+                project_id="translation_project",
+                revision_id=revision_root.name,
+                output_path="05_output/rulebook_kor.txt",
+                workspace_root=workspace_root,
+            )
+            self.assertEqual(
+                archived_output.path,
+                revision_root / "05_output/rulebook_kor.txt",
+            )
+            self.assertTrue(
+                re.fullmatch(
+                    r"rulebook_kor_\d{8}_\d{6}\.txt",
+                    archived_output.download_name,
+                )
+            )
+            with self.assertRaisesRegex(
+                DashboardOutputError,
+                "찾지 못했습니다|올바르지 않습니다",
+            ):
+                get_project_dashboard_previous_output(
+                    project_id="translation_project",
+                    revision_id="../translation_restart_escape",
                     output_path="05_output/rulebook_kor.txt",
                     workspace_root=workspace_root,
                 )

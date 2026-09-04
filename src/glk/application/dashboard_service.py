@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import hashlib
 from io import BytesIO
 import json
 from pathlib import Path
 from pathlib import PurePosixPath
+import re
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -32,6 +34,10 @@ from glk.domain.workspace import WorkspacePaths, is_pdf_source_file
 
 DASHBOARD_SCHEMA_VERSION = 1
 _SOURCE_SECTION_SEPARATOR = "======================"
+_ACTIVE_PREVIOUS_OUTPUT_ID = "active"
+_TRANSLATION_RESTART_REVISION_PATTERN = re.compile(
+    r"translation_restart_\d{8}T\d{6}\.\d{6}Z"
+)
 
 _STAGE_LABELS = {
     "not_started": "시작 전",
@@ -87,6 +93,22 @@ class DashboardOutput:
             "download_name": self.download_name,
             "size_bytes": self.size_bytes,
             "sha256": self.sha256,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardPreviousOutputVersion:
+    revision_id: str
+    approved_at: str | None
+    archived_at: str | None
+    outputs: tuple[DashboardOutput, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "revision_id": self.revision_id,
+            "approved_at": self.approved_at,
+            "archived_at": self.archived_at,
+            "outputs": [output.to_dict() for output in self.outputs],
         }
 
 
@@ -192,6 +214,163 @@ def _approved_outputs(
             ),
         )
     )
+
+
+def _approved_output_time(project_path: Path) -> str | None:
+    try:
+        state = json.loads(
+            WorkspacePaths(project_path).translation_review_state.read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    approved_at = state.get("approved_at") if isinstance(state, dict) else None
+    return approved_at if isinstance(approved_at, str) else None
+
+
+def _timestamped_previous_outputs(
+    outputs: tuple[DashboardOutput, ...],
+    timestamp: str | None,
+) -> tuple[DashboardOutput, ...]:
+    try:
+        parsed = datetime.fromisoformat((timestamp or "").replace("Z", "+00:00"))
+        stamp = parsed.astimezone().strftime("%Y%m%d_%H%M%S")
+    except ValueError:
+        stamp = "previous"
+    timestamped: list[DashboardOutput] = []
+    for output in outputs:
+        name = PurePosixPath(output.download_name)
+        timestamped.append(
+            DashboardOutput(
+                path=output.path,
+                relative_path=output.relative_path,
+                name=output.name,
+                download_name=f"{name.stem}_{stamp}{name.suffix}",
+                size_bytes=output.size_bytes,
+                sha256=output.sha256,
+            )
+        )
+    return tuple(timestamped)
+
+
+def _translation_restart_revision(
+    project_path: Path,
+    project_id: str,
+    revision_id: str,
+) -> tuple[Path, str | None]:
+    if not _TRANSLATION_RESTART_REVISION_PATTERN.fullmatch(revision_id):
+        raise DashboardOutputError("이전 번역본 이력이 올바르지 않습니다.")
+    revisions_root = WorkspacePaths(project_path).translation_revisions.resolve()
+    unresolved_revision = revisions_root / revision_id
+    if unresolved_revision.is_symlink():
+        raise DashboardOutputError("이전 번역본 이력이 올바르지 않습니다.")
+    revision_root = unresolved_revision.resolve()
+    try:
+        revision_root.relative_to(revisions_root)
+    except ValueError as error:
+        raise DashboardOutputError(
+            "이전 번역본 이력이 프로젝트 폴더 밖에 있습니다."
+        ) from error
+    if revision_root.parent != revisions_root or not revision_root.is_dir():
+        raise DashboardOutputError("이전 번역본 이력을 찾지 못했습니다.")
+    try:
+        manifest = json.loads(
+            (revision_root / "manifest.json").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise DashboardOutputError(
+            "이전 번역본 이력을 확인할 수 없습니다."
+        ) from error
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != 1
+        or manifest.get("project_id") != project_id
+        or manifest.get("reason") != "full_translation_restart"
+    ):
+        raise DashboardOutputError("이전 번역본 이력이 올바르지 않습니다.")
+    archived_at = manifest.get("created_at")
+    return (
+        revision_root,
+        archived_at if isinstance(archived_at, str) else None,
+    )
+
+
+def _previous_output_versions(
+    project_path: Path,
+    project_id: str,
+    *,
+    current_is_approved: bool,
+    hash_cache: FileHashCache | None = None,
+) -> tuple[DashboardPreviousOutputVersion, ...]:
+    versions: list[DashboardPreviousOutputVersion] = []
+    active_signature: tuple[tuple[str, str], ...] | None = None
+    if not current_is_approved:
+        try:
+            outputs = _approved_outputs(project_path, hash_cache=hash_cache)
+        except DashboardOutputError:
+            pass
+        else:
+            approved_at = _approved_output_time(project_path)
+            active_signature = tuple(
+                (output.relative_path, output.sha256) for output in outputs
+            )
+            versions.append(
+                DashboardPreviousOutputVersion(
+                    revision_id=_ACTIVE_PREVIOUS_OUTPUT_ID,
+                    approved_at=approved_at,
+                    archived_at=None,
+                    outputs=_timestamped_previous_outputs(
+                        outputs,
+                        approved_at,
+                    ),
+                )
+            )
+
+    revisions_root = WorkspacePaths(project_path).translation_revisions
+    if not revisions_root.is_dir():
+        return tuple(versions)
+    revision_ids = sorted(
+        (
+            path.name
+            for path in revisions_root.iterdir()
+            if path.is_dir()
+            and not path.is_symlink()
+            and _TRANSLATION_RESTART_REVISION_PATTERN.fullmatch(path.name)
+        ),
+        reverse=True,
+    )
+    for revision_id in revision_ids:
+        try:
+            revision_root, archived_at = _translation_restart_revision(
+                project_path,
+                project_id,
+                revision_id,
+            )
+            outputs = _approved_outputs(
+                revision_root,
+                hash_cache=hash_cache,
+            )
+        except DashboardOutputError:
+            continue
+        signature = tuple(
+            (output.relative_path, output.sha256) for output in outputs
+        )
+        if active_signature is not None and signature == active_signature:
+            continue
+        approved_at = _approved_output_time(revision_root)
+        versions.append(
+            DashboardPreviousOutputVersion(
+                revision_id=revision_id,
+                approved_at=approved_at,
+                archived_at=archived_at,
+                outputs=_timestamped_previous_outputs(
+                    outputs,
+                    approved_at or archived_at,
+                ),
+            )
+        )
+    return tuple(versions)
 
 
 def _parse_approved_source_blocks(data: bytes) -> list[SourceBlock]:
@@ -337,6 +516,39 @@ def get_project_dashboard_output(
         if output.relative_path == output_path:
             return output
     raise DashboardOutputError("다운로드할 결과 파일을 찾지 못했습니다.")
+
+
+def get_project_dashboard_previous_output(
+    *,
+    project_id: str,
+    revision_id: str,
+    output_path: str,
+    workspace_root: str | Path = "workspaces",
+) -> DashboardOutput:
+    """Resolve one previous approved output selected from the dashboard."""
+    if not isinstance(revision_id, str) or not revision_id:
+        raise DashboardOutputError("이전 번역본 이력을 선택하세요.")
+    if not isinstance(output_path, str) or not output_path:
+        raise DashboardOutputError("다운로드할 이전 번역 파일을 선택하세요.")
+    location = load_workspace_project_id(project_id, workspace_root)
+    hash_cache = FileHashCache()
+    status = inspect_project(location.path, hash_cache=hash_cache)
+    versions = _previous_output_versions(
+        location.path,
+        project_id,
+        current_is_approved=bool(
+            status["pipeline"]["final_translation_approved"]
+        ),
+        hash_cache=hash_cache,
+    )
+    for version in versions:
+        if version.revision_id != revision_id:
+            continue
+        for output in version.outputs:
+            if output.relative_path == output_path:
+                return output
+        break
+    raise DashboardOutputError("다운로드할 이전 번역 파일을 찾지 못했습니다.")
 
 
 def get_project_dashboard_image_output_archive(
@@ -493,6 +705,12 @@ def _project_document(
             )
         except DashboardOutputError:
             outputs = ()
+    previous_outputs = _previous_output_versions(
+        Path(summary.path),
+        summary.project_id,
+        current_is_approved=bool(pipeline["final_translation_approved"]),
+        hash_cache=hash_cache,
+    )
     source_output: DashboardSourceOutput | None = None
     if pipeline["final_source_approved"]:
         try:
@@ -547,6 +765,9 @@ def _project_document(
             source_output.to_dict() if source_output is not None else None
         ),
         "outputs": [output.to_dict() for output in outputs],
+        "previous_outputs": [
+            version.to_dict() for version in previous_outputs
+        ],
         "ai_usage": summarize_project_ai_usage(Path(summary.path)),
         "stage": summary.stage,
         "stage_label": _STAGE_LABELS.get(summary.stage, summary.stage),
