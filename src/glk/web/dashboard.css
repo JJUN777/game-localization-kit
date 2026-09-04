@@ -505,14 +505,27 @@ h1 {
   font-weight: 600;
 }
 
-.pipeline-step.interactive {
-  cursor: pointer;
-  transition: color .15s ease, background .15s ease;
+.pipeline-step-label {
+  min-width: 0;
 }
 
-.pipeline-step.interactive:hover {
+.pipeline-step-link {
+  padding: 0;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color .15s ease, text-decoration-color .15s ease;
+}
+
+.pipeline-step-link:hover {
   color: var(--ink);
-  background: var(--soft);
+  text-decoration-color: currentColor;
 }
 
 .pipeline-step-state {
@@ -547,7 +560,7 @@ h1 {
   font-weight: 700;
 }
 
-.pipeline-step.current > span:first-child::before {
+.pipeline-step.current .pipeline-step-label::before {
   content: "";
   display: inline-block;
   width: 6px;
@@ -580,14 +593,17 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
-.pipeline-step[data-usage-detail],
-.pipeline-total[data-usage-detail] {
+.pipeline-step-cost[data-usage-detail],
+.pipeline-total-cost[data-usage-detail] {
   position: relative;
   cursor: help;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
 }
 
-.pipeline-step[data-usage-detail]::after,
-.pipeline-total[data-usage-detail]::after {
+.pipeline-step-cost[data-usage-detail]::after,
+.pipeline-total-cost[data-usage-detail]::after {
   position: absolute;
   right: 0;
   bottom: calc(100% + 6px);
@@ -611,10 +627,10 @@ h1 {
   white-space: normal;
 }
 
-.pipeline-step[data-usage-detail]:hover::after,
-.pipeline-step[data-usage-detail]:focus-visible::after,
-.pipeline-total[data-usage-detail]:hover::after,
-.pipeline-total[data-usage-detail]:focus-visible::after {
+.pipeline-step-cost[data-usage-detail]:hover::after,
+.pipeline-step-cost[data-usage-detail]:focus-visible::after,
+.pipeline-total-cost[data-usage-detail]:hover::after,
+.pipeline-total-cost[data-usage-detail]:focus-visible::after {
   opacity: 1;
   transform: translateY(0);
 }

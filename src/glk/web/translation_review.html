@@ -32,7 +32,13 @@
       backdrop-filter: none;
       box-shadow: none;
     }
-    .brand { min-width: 230px; }
+    .brand { min-width: 0; flex: 1; }
+    .brand-main {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      min-width: 0;
+    }
     .eyebrow {
       color: var(--muted);
       font-size: 11px;
@@ -40,26 +46,21 @@
       letter-spacing: .16em;
       text-transform: uppercase;
     }
-    h1 { margin: 1px 0 0; font-size: 19px; line-height: 1.2; }
-    .header-summary {
+    h1 {
+      min-width: 0;
+      margin: 1px 0 0;
+      overflow: hidden;
+      font-size: 19px;
+      line-height: 1.2;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .header-actions {
       display: flex;
-      flex: 1;
       gap: 8px;
       align-items: center;
-      overflow-x: auto;
+      flex-shrink: 0;
     }
-    .metric {
-      min-width: 76px;
-      padding: 7px 10px;
-      border: 1px solid var(--line);
-      border-radius: 0;
-      border-width: 0 1px 0 0;
-      border-color: var(--line);
-      background: transparent;
-    }
-    .metric strong { display: block; font-size: 16px; }
-    .metric span { color: var(--muted); font-size: 11px; }
-    .header-actions { display: flex; gap: 8px; }
     .button {
       border: 1px solid transparent;
       border-radius: 6px;
@@ -103,7 +104,6 @@
       background: var(--surface);
     }
     .search:focus { border-color: var(--line-strong); box-shadow: none; }
-    .filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 18px; }
     .filter {
       padding: 5px 9px;
       color: var(--muted);
@@ -111,8 +111,43 @@
       border-radius: 999px;
       background: var(--surface);
       font-size: 12px;
+      white-space: nowrap;
     }
-    .filter.active { color: var(--on-solid); border-color: var(--ink); background: var(--ink); }
+    .filter.active {
+      color: var(--on-solid);
+      border-color: var(--ink);
+      background: var(--ink);
+    }
+    #filters { display: grid; gap: 2px; margin: 0 0 18px; }
+    #filters .filter {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      width: 100%;
+      padding: 8px 10px;
+      color: var(--muted);
+      border: 0;
+      border-radius: 6px;
+      text-align: left;
+      background: transparent;
+      font-size: 13px;
+    }
+    #filters .filter:hover { color: var(--ink); background: var(--surface-hover); }
+    #filters .filter.active {
+      color: var(--ink);
+      border-color: transparent;
+      background: var(--soft);
+      font-weight: 700;
+    }
+    .filter-count {
+      min-width: 24px;
+      color: var(--muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+    #filters .filter[data-filter="error"] .filter-count.has-items { color: var(--error); }
     .sidebar-title {
       margin: 14px 4px 8px;
       color: var(--muted);
@@ -121,6 +156,7 @@
       letter-spacing: .12em;
       text-transform: uppercase;
     }
+    .sidebar-title:first-of-type { margin-top: 16px; }
     .block-nav { display: grid; gap: 5px; }
     .block-link {
       display: grid;
@@ -164,6 +200,51 @@
       font-weight: 600;
       white-space: nowrap;
     }
+    .more-menu { position: relative; }
+    .more-menu summary {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      padding: 9px 11px;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      font-weight: 700;
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+    }
+    .more-menu summary::-webkit-details-marker { display: none; }
+    .more-menu summary:hover { background: var(--surface-hover); }
+    .more-menu-dots { color: var(--muted); letter-spacing: .05em; }
+    .more-menu-panel {
+      position: absolute;
+      top: calc(100% + 7px);
+      right: 0;
+      z-index: 30;
+      display: grid;
+      width: 210px;
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow-dialog);
+    }
+    .more-menu:not([open]) .more-menu-panel { display: none; }
+    .menu-button {
+      width: 100%;
+      padding: 9px 10px;
+      color: var(--ink);
+      border: 0;
+      border-radius: 6px;
+      text-align: left;
+      background: transparent;
+      font-weight: 600;
+    }
+    .menu-button:hover { background: var(--surface-hover); }
+    .menu-button:disabled { color: var(--muted); cursor: not-allowed; }
+    .menu-button.attention { color: var(--error); }
     .general-issues { margin-bottom: 16px; }
     .retry-job {
       display: grid;
@@ -404,14 +485,32 @@
     .termbase-row {
       display: grid;
       grid-template-columns: minmax(140px, .8fr) minmax(160px, 1fr);
-      gap: 12px;
       padding: 12px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--surface-hover);
     }
+    .termbase-cell { min-width: 0; }
+    .termbase-source { padding-right: 16px; }
+    .termbase-target {
+      padding-left: 16px;
+      border-left: 1px solid var(--line);
+    }
+    .termbase-cell-label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+    }
     .termbase-row strong { display: block; overflow-wrap: anywhere; }
-    .termbase-row-target { color: var(--ink-soft); font-weight: 700; }
+    .termbase-target-head {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .termbase-target-value { color: var(--ink); font-weight: 700; }
     .termbase-meta {
       margin-top: 5px;
       color: var(--muted);
@@ -499,7 +598,6 @@
     @media (max-width: 900px) {
       .app-header { align-items: flex-start; flex-wrap: wrap; }
       .brand { min-width: 0; flex: 1; }
-      .header-summary { order: 3; width: 100%; }
       .layout { grid-template-columns: 1fr; }
       .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
       .block-nav { display: none; }
@@ -507,9 +605,19 @@
       .columns { grid-template-columns: 1fr; }
       .pane + .pane { border-left: 0; border-top: 1px solid var(--line); }
       .header-actions { width: 100%; }
-      .header-actions .button { flex: 1; }
+      .header-actions > .button { flex: 1; }
+      .more-menu { flex: 1; }
+      .more-menu summary { justify-content: center; }
+      .more-menu-panel { width: min(260px, calc(100vw - 28px)); }
       .termbase-tools, .termbase-row { grid-template-columns: 1fr; }
       .termbase-filters { flex-wrap: wrap; }
+      .termbase-source { padding-right: 0; padding-bottom: 12px; }
+      .termbase-target {
+        padding-top: 12px;
+        padding-left: 0;
+        border-top: 1px solid var(--line);
+        border-left: 0;
+      }
     }
   </style>
 </head>
@@ -517,30 +625,52 @@
   <header class="app-header">
     <div class="brand">
       <div class="eyebrow">Game Localization Kit</div>
-      <h1 id="project-name">번역 검수</h1>
+      <div class="brand-main">
+        <h1 id="project-name">번역 검수</h1>
+        <span class="status-pill" id="review-status">불러오는 중</span>
+      </div>
     </div>
-    <div class="header-summary" id="header-summary"></div>
     <div class="header-actions">
       <button class="button button-secondary" id="termbase-button">용어집</button>
       <button class="button button-secondary" id="save-button">저장</button>
-      <button class="button button-primary" id="qa-button">저장 후 QA</button>
-      <button class="button button-secondary" id="retry-button">오류만 재번역</button>
-      <button class="button button-warning hidden" id="qa-override-button">
-        QA 오류 예외 승인
-      </button>
-      <button class="button button-success" id="finalize-button">최종 승인</button>
+      <button class="button button-primary" id="qa-button">검증</button>
+      <button class="button button-primary hidden" id="finalize-button">최종 승인</button>
+      <details class="more-menu hidden" id="more-menu">
+        <summary aria-label="더보기 메뉴">
+          <span class="more-menu-dots" aria-hidden="true">•••</span>
+          <span>더보기</span>
+        </summary>
+        <div class="more-menu-panel">
+          <button class="menu-button hidden" id="retry-button" type="button">
+            오류만 재번역
+          </button>
+          <button class="menu-button attention hidden" id="qa-override-button"
+            type="button">
+            예외로 승인…
+          </button>
+        </div>
+      </details>
     </div>
   </header>
   <div class="layout">
     <aside class="sidebar">
       <input class="search" id="search" type="search" placeholder="원문·번역·block 검색">
-      <div class="filters" id="filters">
-        <button class="filter active" data-filter="all">전체</button>
-        <button class="filter" data-filter="error">오류</button>
-        <button class="filter" data-filter="warning">경고</button>
-        <button class="filter" data-filter="changed">수정됨</button>
+      <div class="sidebar-title">검수 현황</div>
+      <div class="filters" id="filters" aria-label="검수 현황 필터">
+        <button class="filter active" data-filter="all" type="button">
+          <span>전체</span><span class="filter-count">0</span>
+        </button>
+        <button class="filter" data-filter="error" type="button">
+          <span>오류</span><span class="filter-count">0</span>
+        </button>
+        <button class="filter" data-filter="warning" type="button">
+          <span>경고</span><span class="filter-count">0</span>
+        </button>
+        <button class="filter" data-filter="changed" type="button">
+          <span>수정됨</span><span class="filter-count">0</span>
+        </button>
       </div>
-      <div class="sidebar-title">Visible blocks</div>
+      <div class="sidebar-title">표시 중인 블록</div>
       <nav class="block-nav" id="block-nav"></nav>
     </aside>
     <main>
@@ -549,7 +679,6 @@
           <h2>원문과 번역을 함께 검수하세요</h2>
           <p>원문은 읽기 전용입니다. 번역문 저장 시 marker 구조는 프로그램이 다시 생성합니다.</p>
         </div>
-        <span class="status-pill" id="review-status">불러오는 중</span>
       </div>
       <div class="general-issues" id="general-issues"></div>
       <section class="retry-job hidden" id="retry-job" aria-live="polite">
@@ -812,30 +941,39 @@
       }
       terms.forEach((term) => {
         const row = make("article", "termbase-row");
-        const source = make("div");
+        const source = make("div", "termbase-cell termbase-source");
         source.append(
-          make(
-            "span",
-            `term-rule-status ${term.status}`,
-            termStatusLabel(term.status)
-          ),
+          make("span", "termbase-cell-label", "원문 용어"),
           make("strong", "", term.source_term)
         );
         const variants = (term.variants || []).join(" · ");
         if (variants) {
           source.append(make("div", "termbase-meta", `표기 변형: ${variants}`));
         }
-        const target = make("div");
-        target.append(
+        const target = make("div", "termbase-cell termbase-target");
+        const targetHead = make("div", "termbase-target-head");
+        targetHead.append(
           make(
             "div",
-            "termbase-row-target",
+            "termbase-target-value",
             term.status === "keep"
               ? "원문 표기를 그대로 유지"
               : term.translation || "(번역어 없음)"
+          ),
+          make(
+            "span",
+            `term-rule-status ${term.status}`,
+            termStatusLabel(term.status)
           )
         );
-        const metadata = [term.category, term.note].filter(Boolean).join(" · ");
+        target.append(
+          make("span", "termbase-cell-label", "확정 표기"),
+          targetHead
+        );
+        const metadata = [
+          term.category ? `분류: ${term.category}` : "",
+          term.note ? `메모: ${term.note}` : ""
+        ].filter(Boolean).join(" · ");
         if (metadata) target.append(make("div", "termbase-meta", metadata));
         row.append(source, target);
         list.append(row);
@@ -843,15 +981,10 @@
     }
 
     function openTermbase() {
+      $("#more-menu").removeAttribute("open");
       renderTermbase();
       $("#termbaseDialog").showModal();
       $("#termbase-search").focus();
-    }
-
-    function metric(value, label) {
-      const node = make("div", "metric");
-      node.append(make("strong", "", String(value)), make("span", "", label));
-      return node;
     }
 
     const issueLabels = {
@@ -940,13 +1073,19 @@
       const interactionBusy = state.busy || retryJobActive();
       const changed = doc.blocks.filter((block) => block.changed).length;
       doc.summary.changed = changed;
-      const summary = $("#header-summary");
-      summary.replaceChildren(
-        metric(doc.summary.blocks, "blocks"),
-        metric(changed, "수정됨"),
-        metric(doc.summary.errors, "오류"),
-        metric(doc.summary.warnings, "경고")
-      );
+      const filterCounts = {
+        all: doc.blocks.length,
+        error: doc.blocks.filter((block) => issueLevel(block, "error")).length,
+        warning: doc.blocks.filter((block) => issueLevel(block, "warning")).length,
+        changed
+      };
+      document.querySelectorAll("[data-filter]").forEach((button) => {
+        const count = filterCounts[button.dataset.filter] ?? 0;
+        const countNode = button.querySelector(".filter-count");
+        if (!countNode) return;
+        countNode.textContent = String(count);
+        countNode.classList.toggle("has-items", count > 0);
+      });
       const reviewStatusLabel = {
         not_ready: "준비 전",
         pending: "검수 대기",
@@ -958,26 +1097,39 @@
       }[doc.review_status] || "상태 확인 필요";
       $("#review-status").textContent =
         `${reviewStatusLabel}${state.dirty ? " · 저장 안 됨" : ""}`;
-      $("#finalize-button").disabled =
-        interactionBusy || state.dirty || doc.summary.errors > 0;
+      const qaButton = $("#qa-button");
+      const finalizeButton = $("#finalize-button");
+      const readyToFinalize =
+        !state.dirty &&
+        doc.review_status === "qa_passed" &&
+        doc.summary.errors === 0;
+      const approved =
+        !state.dirty &&
+        (doc.review_status === "approved" || doc.final_translation_approved);
+      qaButton.classList.toggle("hidden", readyToFinalize || approved);
+      finalizeButton.classList.toggle("hidden", !readyToFinalize);
+      finalizeButton.disabled = interactionBusy;
       const overrideButton = $("#qa-override-button");
       const hasErrors = doc.summary.errors > 0;
       const overrideAllowed =
         hasErrors && doc.summary.blocking_errors === 0;
-      overrideButton.classList.toggle("hidden", !hasErrors);
-      overrideButton.disabled =
-        interactionBusy || state.dirty || !overrideAllowed;
-      overrideButton.textContent = doc.summary.blocking_errors > 0
-        ? `빈 번역 ${doc.summary.blocking_errors}개 입력 필요`
-        : `QA 오류 ${doc.summary.overridable_errors}개 예외 승인`;
+      const moreMenu = $("#more-menu");
+      moreMenu.classList.toggle("hidden", !hasErrors);
+      if (!hasErrors) moreMenu.removeAttribute("open");
+      overrideButton.classList.toggle("hidden", !overrideAllowed);
+      overrideButton.disabled = interactionBusy || state.dirty;
+      overrideButton.textContent =
+        `QA 오류 ${doc.summary.overridable_errors}개 예외로 승인…`;
       $("#save-button").disabled = interactionBusy || !state.dirty;
-      $("#qa-button").disabled = interactionBusy;
-      $("#retry-button").disabled =
-        interactionBusy || doc.summary.errors === 0;
-      $("#retry-button").textContent =
+      qaButton.disabled = interactionBusy;
+      qaButton.textContent = state.dirty ? "저장하고 검증" : "검증";
+      const retryButton = $("#retry-button");
+      retryButton.classList.toggle("hidden", !hasErrors);
+      retryButton.disabled = interactionBusy;
+      retryButton.textContent =
         retryJobActive() ? "재번역 진행 중…" :
         state.retryJob?.status === "failed" ? "오류 재번역 다시 시도" :
-        "오류만 재번역";
+        `오류 ${doc.summary.errors}개 재번역`;
       document.querySelectorAll(".translation-input").forEach((node) => {
         node.disabled = interactionBusy;
       });
@@ -1242,6 +1394,7 @@
 
     async function startRetry() {
       if (state.busy || retryJobActive()) return;
+      $("#more-menu").removeAttribute("open");
       state.busy = true;
       refreshSummary();
       try {
@@ -1268,6 +1421,7 @@
     $("#qa-button").addEventListener("click", () => runAction("qa"));
     $("#retry-button").addEventListener("click", startRetry);
     $("#qa-override-button").addEventListener("click", () => {
+      $("#more-menu").removeAttribute("open");
       const count = state.document.summary.overridable_errors;
       $("#qaOverrideSummary").textContent =
         `QA 오류 ${count}개가 남아 있습니다. ` +
@@ -1305,10 +1459,16 @@
       const button = event.target.closest("[data-filter]");
       if (!button) return;
       state.filter = button.dataset.filter;
-      document.querySelectorAll(".filter").forEach((node) => {
+      document.querySelectorAll("#filters [data-filter]").forEach((node) => {
         node.classList.toggle("active", node === button);
       });
       render();
+    });
+    document.addEventListener("click", (event) => {
+      const menu = $("#more-menu");
+      if (menu.open && !menu.contains(event.target)) {
+        menu.removeAttribute("open");
+      }
     });
     $("#termbase-button").addEventListener("click", openTermbase);
     $("#termbaseDialogClose").addEventListener("click", () => {

@@ -396,8 +396,9 @@ function pipelineTotal(project) {
   const detail = total?.requests > 0
     ? ` tabindex="0" data-usage-detail="${escapeHtml(cumulativeUsageTitle(total))}"`
     : "";
-  return `<div class="pipeline-total"${detail}>
-    <span>누적 AI 비용</span><strong>${escapeHtml(totalCost)}</strong>
+  return `<div class="pipeline-total">
+    <span>누적 AI 비용</span>
+    <strong class="pipeline-total-cost"${detail}>${escapeHtml(totalCost)}</strong>
   </div>`;
 }
 
@@ -1201,26 +1202,26 @@ function pipelineStep(project, key, label) {
   }[key];
   const review = reviewType ? project.reviews[reviewType] : null;
   const interactive = Boolean(review?.enabled);
-  const tag = interactive ? "button" : "span";
-  const interaction = interactive
-    ? ` type="button" data-project="${escapeHtml(project.project_id)}"
-        data-review="${reviewType}" title="${escapeHtml(review.reason)}"`
-    : "";
+  const labelMarkup = interactive
+    ? `<button class="pipeline-step-label pipeline-step-link"
+        type="button" data-project="${escapeHtml(project.project_id)}"
+        data-review="${reviewType}" title="${escapeHtml(review.reason)}">${escapeHtml(label)}</button>`
+    : `<span class="pipeline-step-label">${escapeHtml(label)}</span>`;
   const detail = usage?.requests > 0
-    ? `${interactive ? "" : ' tabindex="0"'} data-usage-detail="${escapeHtml(cumulativeUsageTitle(usage))}"`
+    ? ` tabindex="0" data-usage-detail="${escapeHtml(cumulativeUsageTitle(usage))}"`
     : "";
   const stateLabel = state === "done"
     ? "완료"
     : state === "current"
     ? "현재"
     : "대기";
-  return `<${tag} class="pipeline-step ${state}${interactive ? " interactive" : ""}"${interaction}${detail}>
-    <span>${label}</span>
+  return `<div class="pipeline-step ${state}">
+    ${labelMarkup}
     <span class="pipeline-step-meta">
       <span class="pipeline-step-state">${stateLabel}</span>
-      <strong class="pipeline-step-cost">${escapeHtml(cost)}</strong>
+      <strong class="pipeline-step-cost"${detail}>${escapeHtml(cost)}</strong>
     </span>
-  </${tag}>`;
+  </div>`;
 }
 
 function projectNeedsAttention(project) {

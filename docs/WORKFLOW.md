@@ -504,12 +504,17 @@ glk review translation --project sample_rulebook
 
 - block별 원문과 번역을 나란히 비교
 - 원문·번역·block ID 검색
-- 오류·경고·수정됨 필터와 block 이동
+- 왼쪽 검수 현황의 전체·오류·경고·수정 block 수 필터와 block 이동
 - 번역문만 수정하고 `04_translation/review.txt`에 안전하게 저장
 - 저장 후 로컬 QA 실행과 오류 확인
 - QA ERROR가 연결된 block만 선택한 AI로 재번역하고 다시 검수
 - 오류가 0개인 결과의 최종 승인
 - 검토 가능한 QA 오류의 사유 기록 후 예외 승인
+
+상단에는 자주 참고하는 `용어집`, `저장`과 현재 단계의 `검증` 또는 `최종 승인`을
+표시합니다. 오류 재번역·예외 승인은 오류가 있을 때만 나타나는 `더보기` 메뉴에서
+실행합니다. 저장하지 않은 수정이 있으면 `검증` 버튼이 `저장하고 검증`으로
+바뀝니다.
 
 PASS block을 포함한 모든 번역문을 수정할 수 있습니다. PASS는 결정적 QA 규칙을 통과했다는 뜻이며 번역 품질 승인이나 편집 잠금이 아닙니다.
 
@@ -569,7 +574,7 @@ glk translation finalize --project sample_rulebook --dry-run
 glk translation finalize --project sample_rulebook
 ```
 
-`glk retry --failed`는 ERROR block만 한 개씩 재번역합니다. 정상 block과 사람이 수정한 다른 block은 그대로 유지합니다. 교체 전·후 번역은 `04_translation/revisions/translation_retry_*.json`에 기록됩니다. 검수 UI의 `오류만 재번역`은 현재 편집을 먼저 저장하고 같은 작업을 background job으로 시작합니다. 화면을 기다리게 하지 않고 진행률과 실패 사유를 표시하며, 실패한 작업은 같은 버튼으로 다시 시도할 수 있습니다.
+`glk retry --failed`는 ERROR block만 한 개씩 재번역합니다. 정상 block과 사람이 수정한 다른 block은 그대로 유지합니다. 교체 전·후 번역은 `04_translation/revisions/translation_retry_*.json`에 기록됩니다. 검수 UI의 `오류 N개 재번역`은 현재 편집을 먼저 저장하고 같은 작업을 background job으로 시작합니다. 화면을 기다리게 하지 않고 진행률과 실패 사유를 표시하며, 실패한 작업은 같은 버튼으로 다시 시도할 수 있습니다.
 
 ### 최종 결과 파일
 
