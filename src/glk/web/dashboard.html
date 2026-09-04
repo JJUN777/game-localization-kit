@@ -215,47 +215,91 @@
     <form class="modal-form" id="translationPromptForm">
       <div class="modal-head">
         <div>
-          <p class="modal-kicker">Edit translation prompt</p>
+          <p class="modal-kicker" id="translationPromptDialogKicker">
+            Edit translation prompt
+          </p>
           <h2 id="translationPromptDialogTitle">번역 프롬프트 설정</h2>
         </div>
         <button class="modal-close" id="translationPromptDialogClose"
           type="button" aria-label="닫기">×</button>
       </div>
 
-      <p class="source-note">
-        Gemini를 호출하지 않고 프로젝트 공통 번역 지침만
-        <code>04_translation/prompt.txt</code>에 저장합니다.
-      </p>
       <div class="delete-identity">
         <strong id="translationPromptProjectName"></strong>
         <code id="translationPromptProjectId"></code>
       </div>
 
-      <p class="source-note" id="translationPromptImpact" hidden></p>
+      <section class="translation-prompt-view"
+        id="translationPromptEditorView">
+        <p class="source-note">
+          직접 수정한 내용은 API 호출 없이 저장합니다. AI 초안은 승인 원문의 대표
+          문장을 분석하며, 확인 후 선택해야 편집창에 반영됩니다.
+        </p>
 
-      <div class="field">
-        <div class="field-label-row">
-          <label for="translationPromptEdit">번역 문체·표현 지침</label>
-          <button class="field-reset" id="translationPromptEditReset"
-            type="button">편집 전 내용으로 되돌리기</button>
-        </div>
-        <textarea id="translationPromptEdit" name="translation_prompt"
-          aria-describedby="translationPromptEditHelp" spellcheck="false"
-          required></textarea>
-        <div class="field-help-row">
-          <p class="field-help" id="translationPromptEditHelp">
-            용어집, 숫자, token과 블록 보존 규칙보다 우선할 수 없습니다.
-          </p>
-          <span class="field-count" id="translationPromptEditCount"></span>
-        </div>
-      </div>
+        <p class="source-note" id="translationPromptImpact" hidden></p>
 
-      <div class="modal-actions">
-        <button class="modal-button modal-cancel"
-          id="translationPromptDialogCancel" type="button">취소</button>
-        <button class="modal-button modal-submit"
-          id="translationPromptSave" type="submit">프롬프트 저장</button>
-      </div>
+        <div class="field">
+          <div class="field-label-row">
+            <label for="translationPromptEdit">번역 문체·표현 지침</label>
+            <div class="field-tools">
+              <button class="field-reset" id="translationPromptAiDraft"
+                type="button">AI로 초안 만들기</button>
+              <button class="field-reset" id="translationPromptEditReset"
+                type="button">편집 전 내용으로 되돌리기</button>
+            </div>
+          </div>
+          <textarea id="translationPromptEdit" name="translation_prompt"
+            aria-describedby="translationPromptEditHelp" spellcheck="false"
+            required></textarea>
+          <div class="field-help-row">
+            <p class="field-help" id="translationPromptEditHelp">
+              용어집, 숫자, token과 블록 보존 규칙보다 우선할 수 없습니다.
+            </p>
+            <span class="field-count" id="translationPromptEditCount"></span>
+          </div>
+        </div>
+
+        <p class="translation-prompt-applied"
+          id="translationPromptAiApplied" hidden>
+          AI 초안이 입력되었습니다. 내용을 확인한 뒤 프롬프트를 저장하세요.
+        </p>
+
+        <div class="modal-actions">
+          <button class="modal-button modal-cancel"
+            id="translationPromptDialogCancel" type="button">취소</button>
+          <button class="modal-button modal-submit"
+            id="translationPromptSave" type="submit">프롬프트 저장</button>
+        </div>
+      </section>
+
+      <section class="translation-prompt-view prompt-ai-panel"
+        id="translationPromptAiPanel" hidden aria-live="polite">
+        <p class="source-note">
+          승인한 원문의 앞부분과 일부 규칙 문장을 참고해 번역 지침 초안을
+          만듭니다. 초안을 적용한 뒤 <strong>프롬프트 저장</strong>을 눌러야
+          저장됩니다.
+        </p>
+        <div class="prompt-ai-summary">
+          <div class="prompt-ai-head">
+            <strong id="translationPromptAiTitle">AI 초안 예상 사용량</strong>
+            <span id="translationPromptAiModel"></span>
+          </div>
+          <p class="prompt-ai-meta" id="translationPromptAiMeta"></p>
+          <p class="prompt-ai-rationale" id="translationPromptAiRationale"
+            hidden></p>
+        </div>
+        <pre class="prompt-ai-draft" id="translationPromptAiPreview" hidden></pre>
+        <div class="prompt-ai-actions">
+          <button class="button-quiet" id="translationPromptAiClose"
+            type="button">돌아가기</button>
+          <button class="button-secondary" id="translationPromptAiNew"
+            type="button" hidden>새로 만들기</button>
+          <button class="button-secondary" id="translationPromptAiRun"
+            type="button">초안 생성</button>
+          <button class="button-primary" id="translationPromptAiUse"
+            type="button" hidden>이 초안 사용</button>
+        </div>
+      </section>
     </form>
   </dialog>
 

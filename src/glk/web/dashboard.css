@@ -490,16 +490,29 @@ h1 {
 
 .pipeline-step {
   display: flex;
+  width: 100%;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 7px 0;
+  border: 0;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   background: transparent;
+  font-family: inherit;
   text-align: left;
   font-size: 11px;
   font-weight: 600;
+}
+
+.pipeline-step.interactive {
+  cursor: pointer;
+  transition: color .15s ease, background .15s ease;
+}
+
+.pipeline-step.interactive:hover {
+  color: var(--ink);
+  background: var(--soft);
 }
 
 .pipeline-step-state {
@@ -690,13 +703,32 @@ h1 {
 }
 
 .actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+  display: grid;
+  gap: 8px;
 }
 
-.actions button { flex: 0 1 auto; }
+.action-row,
+.next-actions,
+.utility-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.action-row {
+  min-width: 0;
+  justify-content: space-between;
+}
+
+.next-actions {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.utility-actions {
+  flex-shrink: 0;
+  margin-left: auto;
+}
 
 .review-button {
   min-width: 0;
@@ -735,7 +767,6 @@ h1 {
 }
 
 .ocr-prompt-button,
-.translation-prompt-button,
 .source-download-button {
   padding: 8px 10px;
   border: 1px solid var(--line-strong);
@@ -748,16 +779,100 @@ h1 {
 }
 
 .ocr-prompt-button:hover,
-.translation-prompt-button:hover:not(:disabled),
 .source-download-button:hover:not(:disabled) {
   border-color: var(--ink-soft);
   background: var(--line);
 }
 
-.translation-prompt-button:disabled,
 .source-download-button:disabled {
   cursor: not-allowed;
   opacity: .55;
+}
+
+.translation-prompt-button {
+  padding: 7px 4px;
+  border: 0;
+  color: var(--ink-soft);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  transition: color .15s ease, text-decoration-color .15s ease;
+}
+
+.translation-prompt-button:hover:not(:disabled) {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+
+.translation-prompt-button:disabled {
+  cursor: not-allowed;
+  color: var(--muted);
+  opacity: .55;
+}
+
+.card-action-menu {
+  position: relative;
+}
+
+.card-action-menu summary {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink-soft);
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.card-action-menu summary::-webkit-details-marker { display: none; }
+
+.card-action-menu summary:hover,
+.card-action-menu[open] summary {
+  border-color: var(--line-strong);
+  color: var(--ink);
+  background: var(--soft);
+}
+
+.card-action-menu-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 25;
+  display: grid;
+  width: max-content;
+  min-width: 190px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.card-action-menu-popover button {
+  width: 100%;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--ink);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.card-action-menu-popover button:hover:not(:disabled) {
+  background: var(--soft);
+}
+
+.card-action-menu-popover button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
 }
 
 .source-job-button,
@@ -1036,12 +1151,14 @@ dialog {
 
 #sourceDialog,
 #ocrPromptDialog,
+#translationPromptDialog,
 #sourceJobDialog {
   max-height: calc(100vh - 28px);
 }
 
 #sourceDialog .modal-form,
 #ocrPromptDialog .modal-form,
+#translationPromptDialog .modal-form,
 #sourceJobDialog .modal-form {
   max-height: calc(100vh - 28px);
   overflow-y: auto;
@@ -1155,6 +1272,14 @@ dialog::backdrop {
   gap: 12px;
 }
 
+.field-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px 12px;
+}
+
 .field-reset {
   padding: 0;
   border: 0;
@@ -1183,6 +1308,121 @@ dialog::backdrop {
 .field-count.limit {
   color: var(--accent-dark);
   font-weight: 700;
+}
+
+.translation-prompt-view[hidden] { display: none; }
+
+#translationPromptDialog .delete-identity {
+  margin: 0 0 17px;
+}
+
+.translation-prompt-view > .source-note + .source-note {
+  margin-top: 10px;
+}
+
+.translation-prompt-applied {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1px solid rgb(207 75 47 / 24%);
+  border-radius: 6px;
+  color: var(--accent-dark);
+  background: rgb(207 75 47 / 7%);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.prompt-ai-panel {
+  display: grid;
+  gap: 14px;
+  min-height: 300px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.prompt-ai-summary {
+  display: grid;
+  gap: 10px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+}
+
+.prompt-ai-panel[hidden] { display: none; }
+
+.prompt-ai-head,
+.prompt-ai-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.prompt-ai-head strong { font-size: 12px; }
+
+.prompt-ai-head span,
+.prompt-ai-meta,
+.prompt-ai-rationale {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.prompt-ai-rationale {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-soft);
+}
+
+.prompt-ai-draft {
+  max-height: 260px;
+  margin: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.65;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.prompt-ai-actions {
+  justify-content: flex-end;
+  margin-top: auto;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.prompt-ai-actions button {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.prompt-ai-actions button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+#translationPromptAiUse {
+  border-color: var(--ink);
+  color: var(--on-solid);
+  background: var(--ink);
+}
+
+.prompt-ai-actions button:disabled {
+  cursor: wait;
+  opacity: .55;
 }
 
 .ai-settings-status {

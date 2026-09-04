@@ -126,7 +126,7 @@ class DashboardServiceTests(unittest.TestCase):
             self.assertFalse(project["translation_prompt"]["saved"])
             self.assertEqual(len(project["translation_prompt"]["sha256"]), 64)
             self.assertIn(
-                "natural Korean",
+                "게임 규칙서에 어울리는 자연스러운 한국어",
                 project["translation_prompt"]["value"],
             )
 

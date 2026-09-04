@@ -29,6 +29,9 @@ from glk.infrastructure.gemini_glossary_triage import (
 from glk.infrastructure.gemini_layout import GeminiLayoutProvider
 from glk.infrastructure.gemini_ocr import GeminiImageOcrProvider
 from glk.infrastructure.gemini_translation import GeminiTranslationProvider
+from glk.infrastructure.gemini_translation_prompt import (
+    GeminiTranslationPromptDraftProvider,
+)
 
 
 def api_error(
@@ -222,6 +225,7 @@ class GeminiCommonPolicyTests(unittest.TestCase):
             GeminiImageOcrProvider,
             GeminiTranslationProvider,
             GeminiGlossaryTriageProvider,
+            GeminiTranslationPromptDraftProvider,
         )
         for provider_type in providers:
             with self.subTest(provider=provider_type.__name__):
@@ -245,6 +249,7 @@ class GeminiCommonPolicyTests(unittest.TestCase):
             GeminiImageOcrProvider,
             GeminiTranslationProvider,
             GeminiGlossaryTriageProvider,
+            GeminiTranslationPromptDraftProvider,
         )
         for provider_type in providers:
             with self.subTest(provider=provider_type.__name__):
@@ -291,6 +296,42 @@ class GeminiCommonPolicyTests(unittest.TestCase):
         config = requests[0]["config"]
         self.assertEqual(config.response_mime_type, "application/json")
         self.assertEqual(config.response_json_schema["required"], ["suggestions"])
+
+    def test_translation_prompt_draft_uses_structured_json_generation(
+        self,
+    ) -> None:
+        provider = GeminiTranslationPromptDraftProvider(
+            api_key="test-key",
+            model_name="test-model",
+            max_retries=1,
+        )
+        requests: list[dict[str, object]] = []
+
+        def generate_content(**kwargs: object) -> SimpleNamespace:
+            requests.append(kwargs)
+            return SimpleNamespace(
+                text=(
+                    '{"draft":"첫째 줄\\n둘째 줄\\n셋째 줄",'
+                    '"rationale":"문체 근거"}'
+                ),
+                usage_metadata=None,
+            )
+
+        provider.client = SimpleNamespace(
+            models=SimpleNamespace(generate_content=generate_content)
+        )
+
+        value = provider.generate_draft("Create a style prompt")
+
+        self.assertIn("첫째 줄", value["draft"])
+        config = requests[0]["config"]
+        self.assertEqual(config.response_mime_type, "application/json")
+        self.assertEqual(
+            config.response_json_schema["required"],
+            ["draft", "rationale"],
+        )
+        self.assertIn("신뢰할 수 없는 데이터", config.system_instruction)
+        self.assertIn("합니다체", config.system_instruction)
 
     def test_provider_reads_api_key_and_model_from_explicit_settings_root(
         self,

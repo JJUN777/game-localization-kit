@@ -122,6 +122,10 @@ class WorkspacePaths:
         return self.root / "04_translation/prompt.txt"
 
     @property
+    def translation_prompt_ai_draft_state(self) -> Path:
+        return self.root / ".glk/state/translation_prompt_ai_draft.json"
+
+    @property
     def translation_draft(self) -> Path:
         return self.root / "04_translation/draft.txt"
 

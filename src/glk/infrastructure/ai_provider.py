@@ -15,6 +15,9 @@ from glk.infrastructure.gemini_layout import GeminiLayoutProvider
 from glk.infrastructure.gemini_ocr import GeminiImageOcrProvider
 from glk.infrastructure.gemini_pdf_icon_audit import GeminiPdfIconAuditProvider
 from glk.infrastructure.gemini_translation import GeminiTranslationProvider
+from glk.infrastructure.gemini_translation_prompt import (
+    GeminiTranslationPromptDraftProvider,
+)
 from glk.infrastructure.openai_common import (
     openai_failure_code,
     resolve_openai_model_name,
@@ -24,6 +27,9 @@ from glk.infrastructure.openai_layout import OpenAILayoutProvider
 from glk.infrastructure.openai_ocr import OpenAIImageOcrProvider
 from glk.infrastructure.openai_pdf_icon_audit import OpenAIPdfIconAuditProvider
 from glk.infrastructure.openai_translation import OpenAITranslationProvider
+from glk.infrastructure.openai_translation_prompt import (
+    OpenAITranslationPromptDraftProvider,
+)
 
 
 AiProviderName = Literal["gemini", "openai"]
@@ -77,6 +83,14 @@ def glossary_triage_provider_prompt_version(
     if provider_name == "openai":
         return OpenAIGlossaryTriageProvider.prompt_version
     return GeminiGlossaryTriageProvider.prompt_version
+
+
+def translation_prompt_draft_provider_prompt_version(
+    provider_name: AiProviderName,
+) -> str:
+    if provider_name == "openai":
+        return OpenAITranslationPromptDraftProvider.prompt_version
+    return GeminiTranslationPromptDraftProvider.prompt_version
 
 
 def create_layout_provider(
@@ -138,6 +152,22 @@ def create_glossary_triage_provider(
             settings_root=settings_root,
         )
     return GeminiGlossaryTriageProvider.from_environment(
+        model_name,
+        settings_root=settings_root,
+    )
+
+
+def create_translation_prompt_draft_provider(
+    model_name: str | None = None,
+    *,
+    settings_root: str | os.PathLike[str] | None = None,
+):
+    if resolve_ai_provider_name(settings_root) == "openai":
+        return OpenAITranslationPromptDraftProvider.from_environment(
+            model_name,
+            settings_root=settings_root,
+        )
+    return GeminiTranslationPromptDraftProvider.from_environment(
         model_name,
         settings_root=settings_root,
     )

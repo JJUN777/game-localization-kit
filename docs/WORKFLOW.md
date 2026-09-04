@@ -425,6 +425,19 @@ GUI의 prompt 편집, background job, 이어하기와 전체 재번역 화면은
 아래의 prompt 우선순위, 청크 checkpoint와 revision 보존 규칙을 그대로
 사용합니다.
 
+GUI의 `AI로 초안 만들기`는 프로젝트명과 보드게임 규칙서 문맥을 함께 전달하고,
+승인 원문의 앞 4페이지를 최대 12,000자까지 연속 문맥으로 전달합니다. 나머지
+페이지에서는 문서 전체에 분산된 규칙 문체 표본을 최대 8개·4,000자까지 더해 한
+번의 요청으로 문체 지침을 제안합니다. `합니다체` 설명문과 의무·가능·금지 표현은
+고정 규칙이며, 용어집은
+보내지 않습니다. 생성 prompt의 첫 줄은 근거가 있으면 `이 게임은 …`으로 게임
+맥락을 요약합니다. 메타 프롬프트는 프로젝트의 게임명과 대표 원문을 함께 제공해
+확인 가능한 주제와 핵심 플레이 방식만 이 문장에 포함하도록 합니다. 호출 전 예상
+token과 비용, 호출 후 실제 사용량을 보여줍니다. 결과는
+`.glk/state/translation_prompt_ai_draft.json`에 저장해 승인 원문·현재 prompt·모델
+등이 같으면 다시 호출하지 않습니다. 초안은 사용자가 선택해 입력란에 복사하고
+별도로 저장해야 실제 project prompt가 됩니다.
+
 처음 실행할 때 기본 지침을 `04_translation/prompt.txt`에 기록합니다. 게임별 지침을 사용하려면:
 
 ```bash
@@ -651,6 +664,7 @@ workspaces/<project_id>/
     │   ├── ai_usage.jsonl            # 단계별 AI 사용량 원장
     │   ├── pdf_icon_audit.json       # PDF 아이콘 검사 cache
     │   ├── glossary_ai_review.json   # 용어 후보 AI 추천 cache
+    │   ├── translation_prompt_ai_draft.json # 번역 prompt AI 초안 cache
     │   └── ...
     └── reports/
 ```

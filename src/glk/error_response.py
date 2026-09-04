@@ -70,6 +70,8 @@ _CODE_MESSAGES = {
     "GLOSSARY_AI_RESPONSE_INVALID": "AI 응답 형식이 올바르지 않아 추천을 반영하지 않았습니다.",
     "GLOSSARY_REVIEW_SERVER_FAILED": "용어 검수 페이지를 열지 못했습니다.",
     "TRANSLATION_FAILED": "초벌 번역에 실패했습니다.",
+    "TRANSLATION_PROMPT_AI_FAILED": "AI 번역 프롬프트 초안을 만들지 못했습니다.",
+    "TRANSLATION_PROMPT_AI_RESPONSE_INVALID": "AI 응답 형식이 올바르지 않아 프롬프트 초안을 반영하지 않았습니다.",
     "TRANSLATION_REVIEW_PREPARE_FAILED": "번역 검수 파일을 준비하지 못했습니다.",
     "TRANSLATION_QA_FAILED": "번역 자동 QA를 실행하지 못했습니다.",
     "TRANSLATION_FINALIZE_FAILED": "최종 번역본을 만들지 못했습니다.",
