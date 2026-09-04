@@ -12,6 +12,7 @@ from pathlib import Path
 from glk.application.glossary_service import (
     GlossaryBuildError,
     GlossaryImportError,
+    GlossaryManualTermsMissingError,
     GLOSSARY_REVIEW_COLUMNS,
     build_project_glossary_candidates,
     extract_glossary_candidates,
@@ -464,14 +465,32 @@ class GlossaryImportServiceTests(unittest.TestCase):
                     "candidate_id": "",
                 }
             )
+            rows.append(
+                {
+                    "status": "keep",
+                    "source_term": "Expansion Name",
+                    "translation": "",
+                    "category": "proper_noun",
+                    "note": "확장판 선등록",
+                    "variants": "",
+                    "occurrences": "",
+                    "locations": "",
+                    "example": "",
+                    "candidate_id": "",
+                }
+            )
             write_review_rows(review_path, rows)
 
-            with self.assertRaisesRegex(GlossaryImportError, "was not found"):
+            with self.assertRaises(GlossaryManualTermsMissingError) as raised:
                 import_project_glossary(
                     project="glossary_project",
                     file=review_path,
                     workspace_root=workspace_root,
                 )
+            self.assertEqual(
+                raised.exception.source_terms,
+                ("Future Keyword", "Expansion Name"),
+            )
             self.assertFalse((project_path / "03_terminology/termbase.json").exists())
 
             result = import_project_glossary(
@@ -480,7 +499,7 @@ class GlossaryImportServiceTests(unittest.TestCase):
                 workspace_root=workspace_root,
                 allow_missing_terms=True,
             )
-            self.assertEqual(result.unverified_count, 1)
+            self.assertEqual(result.unverified_count, 2)
             self.assertTrue(result.warnings)
             termbase = json.loads(
                 (project_path / "03_terminology/termbase.json").read_text(encoding="utf-8")

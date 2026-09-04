@@ -32,7 +32,7 @@ from glk.infrastructure.ai_provider import (
     resolve_ai_model_name,
     resolve_ai_provider_name,
 )
-from glk.infrastructure.ai_usage import provider_usage
+from glk.infrastructure.ai_usage import provider_usage, usage_delta
 
 
 MAX_ICON_AUDIT_BLOCKS = 24
@@ -155,36 +155,6 @@ def _audit_fingerprint(
     )
     digest.update(crop.tobytes())
     return "sha256:" + digest.hexdigest()
-
-
-def _usage_delta(
-    before: dict[str, Any] | None,
-    after: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    if after is None:
-        return None
-    result = dict(after)
-    for name in (
-        "requests",
-        "input_tokens",
-        "output_tokens",
-        "thinking_tokens",
-        "cached_input_tokens",
-        "total_tokens",
-    ):
-        current = after.get(name)
-        prior = before.get(name, 0) if before else 0
-        if isinstance(current, int) and isinstance(prior, int):
-            result[name] = max(0, current - prior)
-    current_cost = after.get("estimated_cost_usd")
-    prior_cost = before.get("estimated_cost_usd", 0.0) if before else 0.0
-    if isinstance(current_cost, (int, float)) and isinstance(
-        prior_cost, (int, float)
-    ):
-        result["estimated_cost_usd"] = round(
-            max(0.0, float(current_cost) - float(prior_cost)), 8
-        )
-    return result
 
 
 def _load_prompt_definitions(paths: WorkspacePaths) -> dict[str, str]:
@@ -391,7 +361,7 @@ def audit_project_pdf_icons(
                     stage="source_review",
                     operation="pdf_block_inspection",
                     status="failed",
-                    usage=_usage_delta(
+                    usage=usage_delta(
                         block_usage_before,
                         provider_usage(active_provider),
                     ),
@@ -404,7 +374,7 @@ def audit_project_pdf_icons(
                     stage="source_review",
                     operation="pdf_block_inspection",
                     status="failed",
-                    usage=_usage_delta(
+                    usage=usage_delta(
                         block_usage_before,
                         provider_usage(active_provider),
                     ),
@@ -417,7 +387,7 @@ def audit_project_pdf_icons(
                 location.path,
                 stage="source_review",
                 operation="pdf_block_inspection",
-                usage=_usage_delta(
+                usage=usage_delta(
                     block_usage_before,
                     provider_usage(active_provider),
                 ),
@@ -452,7 +422,7 @@ def audit_project_pdf_icons(
             )
         )
     usage_after = provider_usage(active_provider) if active_provider else None
-    usage = _usage_delta(usage_before, usage_after)
+    usage = usage_delta(usage_before, usage_after)
     return PdfIconAuditResult(
         results=results,
         inspected_blocks=len(results),

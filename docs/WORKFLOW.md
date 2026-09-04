@@ -365,11 +365,15 @@ glk glossary build --project sample_rulebook --force
 glk review glossary --project sample_rulebook
 ```
 
-HTML 표에서 모든 자동 후보를 `approved`, `keep`, `rejected` 중 하나로 확정합니다. 검색·필터, 첫 등장 위치·출현 횟수·원문 용어·상태 정렬, 여러 행 선택 후 상태 일괄 변경, 실제 문맥 펼쳐보기와 수동 용어 추가를 지원합니다. 저장은 기존 `glossary_review.tsv`를 갱신합니다. 정확한 컬럼과 상태값은 [용어집 검토 사양](GLOSSARY.md)을 따릅니다.
+HTML 표에서 모든 자동 후보를 `approved`, `keep`, `rejected` 중 하나로 확정합니다. 검색·필터, 첫 등장 위치·출현 횟수·원문 용어·상태 정렬, 여러 행 선택 후 상태 일괄 변경, 실제 문맥 펼쳐보기와 수동 용어 추가를 지원합니다. 선택 기능인 `후보 1차 정리(AI)`는 아직 `review`인 자동 후보만 최대 25개씩 요청하고, 실행 전 예상 비용, 실행 중 후보·요청 진행률과 경과 시간, 실행 후 추천 근거를 보여줍니다. 추천 반영은 저장과 분리되며 한 번 취소할 수 있습니다. 저장은 기존 `glossary_review.tsv`를 갱신합니다. 정확한 컬럼과 상태값은 [용어집 검토 사양](GLOSSARY.md)을 따릅니다.
+
+AI 결과는 후보별 fingerprint와 함께 `.glk/state/glossary_ai_review.json`에 저장합니다.
+같은 원문·후보·언어·provider·model·prompt version이면 저장된 결과를 재사용하고,
+실제 새 요청만 `.glk/state/ai_usage.jsonl`의 `glossary` 단계에 기록합니다.
 
 ### Termbase 생성
 
-화면의 `검증 및 termbase 생성`을 누르거나, TSV를 직접 편집했다면:
+화면의 `용어집 확정`을 누르거나, TSV를 직접 편집했다면:
 
 ```bash
 glk glossary import \
@@ -420,6 +424,19 @@ GUI의 prompt 편집, background job, 이어하기와 전체 재번역 화면은
 [GUI 사용 가이드](GUI.md#7-번역-프롬프트와-초벌-번역)를 참고합니다. GUI도
 아래의 prompt 우선순위, 청크 checkpoint와 revision 보존 규칙을 그대로
 사용합니다.
+
+GUI의 `AI로 초안 만들기`는 프로젝트명과 보드게임 규칙서 문맥을 함께 전달하고,
+승인 원문의 앞 4페이지를 최대 12,000자까지 연속 문맥으로 전달합니다. 나머지
+페이지에서는 문서 전체에 분산된 규칙 문체 표본을 최대 8개·4,000자까지 더해 한
+번의 요청으로 문체 지침을 제안합니다. `합니다체` 설명문과 의무·가능·금지 표현은
+고정 규칙이며, 용어집은
+보내지 않습니다. 생성 prompt의 첫 줄은 근거가 있으면 `이 게임은 …`으로 게임
+맥락을 요약합니다. 메타 프롬프트는 프로젝트의 게임명과 대표 원문을 함께 제공해
+확인 가능한 주제와 핵심 플레이 방식만 이 문장에 포함하도록 합니다. 호출 전 예상
+token과 비용, 호출 후 실제 사용량을 보여줍니다. 결과는
+`.glk/state/translation_prompt_ai_draft.json`에 저장해 승인 원문·현재 prompt·모델
+등이 같으면 다시 호출하지 않습니다. 초안은 사용자가 선택해 입력란에 복사하고
+별도로 저장해야 실제 project prompt가 됩니다.
 
 처음 실행할 때 기본 지침을 `04_translation/prompt.txt`에 기록합니다. 게임별 지침을 사용하려면:
 
@@ -646,6 +663,8 @@ workspaces/<project_id>/
     ├── state/
     │   ├── ai_usage.jsonl            # 단계별 AI 사용량 원장
     │   ├── pdf_icon_audit.json       # PDF 아이콘 검사 cache
+    │   ├── glossary_ai_review.json   # 용어 후보 AI 추천 cache
+    │   ├── translation_prompt_ai_draft.json # 번역 prompt AI 초안 cache
     │   └── ...
     └── reports/
 ```

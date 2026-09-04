@@ -27,6 +27,23 @@ _PRICES_USD_PER_MILLION: dict[str, tuple[float, float, float | None]] = {
 }
 
 
+def estimate_ai_cost(
+    model: str,
+    *,
+    input_tokens: int,
+    output_tokens: int,
+) -> float | None:
+    """Estimate an uncached request cost from bounded local token estimates."""
+    prices = _PRICES_USD_PER_MILLION.get(model)
+    if prices is None:
+        return None
+    input_price, output_price, _cached_price = prices
+    return round(
+        (input_tokens * input_price + output_tokens * output_price) / 1_000_000,
+        8,
+    )
+
+
 def _value(source: Any, name: str, default: int = 0) -> int:
     raw = source.get(name, default) if isinstance(source, dict) else getattr(
         source, name, default
@@ -99,3 +116,34 @@ def provider_usage(provider: Any) -> dict[str, Any] | None:
     if not isinstance(usage, AiUsageAccumulator):
         return None
     return usage.to_dict()
+
+
+def usage_delta(
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Return the non-negative usage accumulated by one logical operation."""
+    if after is None:
+        return None
+    result = dict(after)
+    for name in (
+        "requests",
+        "input_tokens",
+        "output_tokens",
+        "thinking_tokens",
+        "cached_input_tokens",
+        "total_tokens",
+    ):
+        current = after.get(name)
+        prior = before.get(name, 0) if before else 0
+        if isinstance(current, int) and isinstance(prior, int):
+            result[name] = max(0, current - prior)
+    current_cost = after.get("estimated_cost_usd")
+    prior_cost = before.get("estimated_cost_usd", 0.0) if before else 0.0
+    if isinstance(current_cost, (int, float)) and isinstance(
+        prior_cost, (int, float)
+    ):
+        result["estimated_cost_usd"] = round(
+            max(0.0, float(current_cost) - float(prior_cost)), 8
+        )
+    return result

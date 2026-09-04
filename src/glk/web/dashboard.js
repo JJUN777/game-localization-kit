@@ -26,6 +26,9 @@ let pendingSourceProject = null;
 let pendingSourceFilesProject = null;
 let pendingOcrPromptProject = null;
 let pendingTranslationPromptProject = null;
+let translationPromptAiEstimate = null;
+let translationPromptAiDraft = null;
+let translationPromptAiBusy = false;
 let pendingDeleteProject = null;
 let pendingTranslationForce = false;
 
@@ -553,12 +556,7 @@ function sourceJobButton(project) {
   }
   const active = activeBackgroundJob();
   if (sourceJobIsActive(project.project_id)) return "";
-  if (active) {
-    return `<button class="${actionClass(project, "source-job", "source-job-button")}" type="button" disabled
-      title="${escapeHtml(active.project_id)} 백그라운드 작업이 실행 중입니다.">
-      다른 백그라운드 작업 실행 중
-    </button>`;
-  }
+  if (active) return "";
   if (!aiSettings?.api_key_configured) {
     return `<button class="${actionClass(project, "source-job", "source-job-button")}" type="button"
       data-require-ai-settings>
@@ -632,12 +630,7 @@ function glossaryJobButton(project) {
     </button>`;
   }
   const active = activeBackgroundJob();
-  if (active) {
-    return `<button class="${actionClass(project, "glossary-job", "glossary-job-button")}" type="button" disabled
-      title="${escapeHtml(active.project_id)} 백그라운드 작업이 실행 중입니다.">
-      다른 백그라운드 작업 실행 중
-    </button>`;
-  }
+  if (active) return "";
   const previous = glossaryJobFor(project.project_id);
   const retry = ["failed", "interrupted"].includes(previous?.status);
   return `<button class="${actionClass(project, "glossary-job", "glossary-job-button")}" type="button"
@@ -720,12 +713,7 @@ function translationJobButton(project) {
   }
   if (!["not_run", "partial", "stale"].includes(status)) return "";
   const active = activeBackgroundJob();
-  if (active) {
-    return `<button class="${actionClass(project, "translation-job", "translation-job-button")}" type="button" disabled
-      title="${escapeHtml(active.project_id)} 백그라운드 작업이 실행 중입니다.">
-      다른 백그라운드 작업 실행 중
-    </button>`;
-  }
+  if (active) return "";
   if (!aiSettings?.api_key_configured) {
     return `<button class="${actionClass(project, "translation-job", "translation-job-button")}" type="button"
       data-require-ai-settings>
@@ -1206,21 +1194,33 @@ function pipelineStep(project, key, label) {
   const state = stepState(project, key);
   const usage = pipelineUsage(project, key);
   const cost = cumulativeUsageCost(usage) || emptyStageCost(project, key);
+  const reviewType = {
+    review: "source",
+    glossary: "glossary",
+    translation_review: "translation",
+  }[key];
+  const review = reviewType ? project.reviews[reviewType] : null;
+  const interactive = Boolean(review?.enabled);
+  const tag = interactive ? "button" : "span";
+  const interaction = interactive
+    ? ` type="button" data-project="${escapeHtml(project.project_id)}"
+        data-review="${reviewType}" title="${escapeHtml(review.reason)}"`
+    : "";
   const detail = usage?.requests > 0
-    ? ` tabindex="0" data-usage-detail="${escapeHtml(cumulativeUsageTitle(usage))}"`
+    ? `${interactive ? "" : ' tabindex="0"'} data-usage-detail="${escapeHtml(cumulativeUsageTitle(usage))}"`
     : "";
   const stateLabel = state === "done"
     ? "완료"
     : state === "current"
     ? "현재"
     : "대기";
-  return `<span class="pipeline-step ${state}"${detail}>
+  return `<${tag} class="pipeline-step ${state}${interactive ? " interactive" : ""}"${interaction}${detail}>
     <span>${label}</span>
     <span class="pipeline-step-meta">
       <span class="pipeline-step-state">${stateLabel}</span>
       <strong class="pipeline-step-cost">${escapeHtml(cost)}</strong>
     </span>
-  </span>`;
+  </${tag}>`;
 }
 
 function projectNeedsAttention(project) {
@@ -1275,26 +1275,53 @@ function reviewButton(project, type) {
   </button>`;
 }
 
+function primaryReviewButton(project) {
+  const type = {
+    "source-review": "source",
+    "glossary-review": "glossary",
+    "translation-review": "translation",
+  }[primaryActionKey(project)];
+  return type ? reviewButton(project, type) : "";
+}
+
+function primaryActionButton(project) {
+  return {
+    "source-registration": sourceRegistrationButton,
+    "source-job": sourceJobButton,
+    "source-review": primaryReviewButton,
+    "glossary-job": glossaryJobButton,
+    "glossary-review": primaryReviewButton,
+    "translation-job": translationJobButton,
+    "translation-review": primaryReviewButton,
+  }[primaryActionKey(project)]?.(project) || "";
+}
+
 function sourceRegistrationButton(project) {
   if (sourceJobIsActive(project.project_id)) return "";
-  if (project.source_type) {
-    if (!project.source_replacement?.allowed) return "";
-    const sourceJob = sourceJobFor(project.project_id);
-    if (partialSourceReviewPages(sourceJob).length) return "";
-    return `<button class="source-register-button replace" type="button"
-      data-register-source="${escapeHtml(project.project_id)}"
-      data-project-name="${escapeHtml(project.name)}"
-      data-source-type="${escapeHtml(project.source_type)}"
-      data-replace-source="true"
-      title="${escapeHtml(project.source_replacement.reason)}">
-      원본 교체
-    </button>`;
-  }
+  if (project.source_type) return "";
   return `<button class="${actionClass(project, "source-registration", "source-register-button")}" type="button"
     data-register-source="${escapeHtml(project.project_id)}"
     data-project-name="${escapeHtml(project.name)}"
     data-replace-source="false">
     PDF 또는 이미지 원본 등록
+  </button>`;
+}
+
+function sourceReplacementButton(project) {
+  if (
+    !project.source_type
+    || !project.source_replacement?.allowed
+    || sourceJobIsActive(project.project_id)
+  ) return "";
+  const sourceJob = sourceJobFor(project.project_id);
+  if (partialSourceReviewPages(sourceJob).length) return "";
+  return `<button type="button"
+    data-register-source="${escapeHtml(project.project_id)}"
+    data-project-name="${escapeHtml(project.name)}"
+    data-source-type="${escapeHtml(project.source_type)}"
+    data-replace-source="true"
+    title="${escapeHtml(project.source_replacement.reason)}">
+    원본 교체
   </button>`;
 }
 
@@ -1323,11 +1350,45 @@ function translationPromptEditButton(project) {
   const label = project.translation_prompt?.saved
     ? "번역 프롬프트 수정"
     : "번역 프롬프트 설정";
-  return `<button class="translation-prompt-button secondary-action" type="button"
+  return `<button class="translation-prompt-button contextual-action" type="button"
     data-edit-translation-prompt="${escapeHtml(project.project_id)}"
     title="${escapeHtml(title)}"${disabled}>
     ${label}
   </button>`;
+}
+
+function actionMenu(label, items, className = "") {
+  if (!items) return "";
+  return `<details class="card-action-menu ${className}">
+    <summary>${escapeHtml(label)}</summary>
+    <div class="card-action-menu-popover">${items}</div>
+  </details>`;
+}
+
+function projectFileMenu(project) {
+  return actionMenu("파일 저장", sourceDownloadButton(project), "file-menu");
+}
+
+function projectSettingsMenu(project) {
+  const items = [
+    sourceReplacementButton(project),
+    ocrPromptEditButton(project),
+  ].filter(Boolean).join("");
+  return actionMenu("설정", items, "settings-menu");
+}
+
+function projectActionRow(project) {
+  const primary = primaryActionButton(project);
+  const contextual = translationPromptEditButton(project);
+  const utilities = [
+    projectFileMenu(project),
+    projectSettingsMenu(project),
+  ].filter(Boolean).join("");
+  if (!primary && !contextual && !utilities) return "";
+  return `<div class="action-row">
+    <div class="next-actions">${primary}${contextual}</div>
+    <div class="utility-actions">${utilities}</div>
+  </div>`;
 }
 
 function sourceFileSummary(project) {
@@ -1489,16 +1550,7 @@ function projectCard(project) {
         ${glossaryJobStatus(project)}
         ${translationJobStatus(project)}
         ${translationReviewAttention(project)}
-        ${sourceJobButton(project)}
-        ${glossaryJobButton(project)}
-        ${sourceDownloadButton(project)}
-        ${translationPromptEditButton(project)}
-        ${translationJobButton(project)}
-        ${ocrPromptEditButton(project)}
-        ${reviewButton(project, "source")}
-        ${reviewButton(project, "glossary")}
-        ${reviewButton(project, "translation")}
-        ${sourceRegistrationButton(project)}
+        ${projectActionRow(project)}
       </div>
     </div>
   </article>`;
@@ -1859,6 +1911,237 @@ function updateTranslationPromptEditCount() {
     overLimit || !value.trim();
 }
 
+function showTranslationPromptEditorView(focus = false) {
+  byId("translationPromptEditorView").hidden = false;
+  byId("translationPromptAiPanel").hidden = true;
+  byId("translationPromptDialogKicker").textContent =
+    "Edit translation prompt";
+  byId("translationPromptDialogTitle").textContent =
+    "번역 프롬프트 설정";
+  if (focus) byId("translationPromptEdit").focus();
+}
+
+function showTranslationPromptAiView() {
+  byId("translationPromptEditorView").hidden = true;
+  byId("translationPromptAiPanel").hidden = false;
+  byId("translationPromptDialogKicker").textContent =
+    "Draft translation prompt";
+  byId("translationPromptDialogTitle").textContent =
+    "AI 번역 프롬프트 초안";
+}
+
+function resetTranslationPromptAiPanel() {
+  translationPromptAiEstimate = null;
+  translationPromptAiDraft = null;
+  translationPromptAiBusy = false;
+  showTranslationPromptEditorView();
+  byId("translationPromptAiPreview").hidden = true;
+  byId("translationPromptAiPreview").textContent = "";
+  byId("translationPromptAiRationale").hidden = true;
+  byId("translationPromptAiRationale").textContent = "";
+  byId("translationPromptAiNew").hidden = true;
+  byId("translationPromptAiNew").disabled = false;
+  byId("translationPromptAiRun").hidden = false;
+  byId("translationPromptAiUse").hidden = true;
+  byId("translationPromptAiClose").disabled = false;
+  byId("translationPromptAiDraft").disabled = false;
+  byId("translationPromptAiDraft").textContent = "AI로 초안 만들기";
+  byId("translationPromptAiApplied").hidden = true;
+}
+
+function formatPromptDraftCost(low, high) {
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return "단가 미등록";
+  if (low === 0 && high === 0) return "$0 · 저장된 초안";
+  return `${formatEstimatedUsd(low)}–${formatEstimatedUsd(high)}`;
+}
+
+function showTranslationPromptAiResult(result) {
+  translationPromptAiDraft = result;
+  const usage = result.usage;
+  const usageMeta = usage
+    ? [
+        `${result.model}`,
+        `API ${usage.requests}회`,
+        `입력 ${Number(usage.input_tokens || 0).toLocaleString()} 토큰`,
+        `출력 ${Number(usage.output_tokens || 0).toLocaleString()} 토큰`,
+        formatEstimatedUsd(usage.estimated_cost_usd) || "단가 미등록",
+      ]
+    : [
+        `${result.model}`,
+        "저장된 초안",
+        `대표 원문 ${result.sample_count}개`,
+        "추가 토큰 0",
+      ];
+  byId("translationPromptAiTitle").textContent = result.cached
+    ? "저장된 AI 초안"
+    : "AI 초안 미리보기";
+  byId("translationPromptAiModel").textContent = result.cached
+    ? "캐시 사용"
+    : "새로 생성";
+  byId("translationPromptAiMeta").textContent = usageMeta.join(" / ");
+  byId("translationPromptAiRationale").textContent = result.rationale;
+  byId("translationPromptAiRationale").hidden = false;
+  byId("translationPromptAiPreview").textContent = result.draft;
+  byId("translationPromptAiPreview").hidden = false;
+  byId("translationPromptAiRun").hidden = true;
+  byId("translationPromptAiNew").hidden = false;
+  byId("translationPromptAiUse").hidden = false;
+}
+
+async function estimateTranslationPromptAiDraft(force = false) {
+  if (!pendingTranslationPromptProject || translationPromptAiBusy) return;
+  if (!aiSettings?.api_key_configured) {
+    showToast("먼저 AI 설정에서 API 키를 저장하세요.", true);
+    return;
+  }
+  if (!byId("translationPromptEdit").value.trim()) {
+    showToast("먼저 번역 프롬프트 내용을 입력하세요.", true);
+    byId("translationPromptEdit").focus();
+    return;
+  }
+  const requestProject = pendingTranslationPromptProject;
+  const button = byId("translationPromptAiDraft");
+  const currentPrompt = byId("translationPromptEdit").value;
+  translationPromptAiBusy = true;
+  button.disabled = true;
+  showTranslationPromptAiView();
+  byId("translationPromptAiTitle").textContent = "예상 사용량 계산 중…";
+  byId("translationPromptAiModel").textContent = "";
+  byId("translationPromptAiMeta").textContent =
+    "승인 원문에서 대표 문장을 고르고 있습니다.";
+  byId("translationPromptAiRationale").hidden = true;
+  byId("translationPromptAiPreview").hidden = true;
+  byId("translationPromptAiNew").hidden = true;
+  byId("translationPromptAiRun").hidden = true;
+  byId("translationPromptAiUse").hidden = true;
+  byId("translationPromptAiClose").disabled = true;
+  try {
+    const projectId = encodeURIComponent(
+      pendingTranslationPromptProject.projectId,
+    );
+    const estimate = await api(
+      `/api/projects/${projectId}/translation-prompt-ai-estimate`,
+      {
+        method: "POST",
+        body: JSON.stringify({current_prompt: currentPrompt, force}),
+      },
+    );
+    if (pendingTranslationPromptProject !== requestProject) return;
+    translationPromptAiEstimate = {estimate, currentPrompt, force};
+    translationPromptAiDraft = null;
+    if (estimate.cached && estimate.cached_result) {
+      showTranslationPromptAiResult({
+        ...estimate.cached_result,
+        provider: estimate.provider,
+        model: estimate.model,
+        sample_count: estimate.sample_count,
+        cached: true,
+        usage: null,
+      });
+      return;
+    }
+    byId("translationPromptAiTitle").textContent = force
+      ? "새 AI 초안 예상 사용량"
+      : "AI 초안 예상 사용량";
+    byId("translationPromptAiModel").textContent = estimate.model;
+    byId("translationPromptAiMeta").textContent = [
+      `대표 원문 ${estimate.sample_count}개`,
+      `API ${estimate.request_count}회`,
+      estimate.request_count
+        ? `입력 약 ${estimate.estimated_input_tokens.toLocaleString()} 토큰`
+        : "입력 0 토큰",
+      estimate.request_count
+        ? `출력 ${estimate.estimated_output_tokens_low.toLocaleString()}–${estimate.estimated_output_tokens_high.toLocaleString()} 토큰`
+        : "출력 0 토큰",
+      formatPromptDraftCost(
+        estimate.estimated_cost_usd_low,
+        estimate.estimated_cost_usd_high,
+      ),
+    ].join(" / ");
+    byId("translationPromptAiRationale").hidden = true;
+    byId("translationPromptAiPreview").hidden = true;
+    byId("translationPromptAiRun").hidden = false;
+    byId("translationPromptAiRun").textContent = force
+      ? "새 초안 생성"
+      : "초안 생성";
+    byId("translationPromptAiNew").hidden = true;
+    byId("translationPromptAiUse").hidden = true;
+  } catch (error) {
+    if (pendingTranslationPromptProject === requestProject) {
+      showTranslationPromptEditorView(true);
+      showToast(error.message, true);
+    }
+  } finally {
+    translationPromptAiBusy = false;
+    button.disabled = false;
+    byId("translationPromptAiClose").disabled = false;
+  }
+}
+
+async function runTranslationPromptAiDraft() {
+  if (
+    !pendingTranslationPromptProject
+    || !translationPromptAiEstimate
+    || translationPromptAiBusy
+  ) return;
+  const requestProject = pendingTranslationPromptProject;
+  const currentPrompt = byId("translationPromptEdit").value;
+  if (currentPrompt !== translationPromptAiEstimate.currentPrompt) {
+    showToast("프롬프트가 바뀌어 예상 사용량을 다시 계산합니다.");
+    await estimateTranslationPromptAiDraft(
+      translationPromptAiEstimate.force,
+    );
+    return;
+  }
+  translationPromptAiBusy = true;
+  const run = byId("translationPromptAiRun");
+  const createNew = byId("translationPromptAiNew");
+  const close = byId("translationPromptAiClose");
+  run.disabled = true;
+  createNew.disabled = true;
+  close.disabled = true;
+  run.textContent = "AI 초안 생성 중…";
+  try {
+    const projectId = encodeURIComponent(
+      pendingTranslationPromptProject.projectId,
+    );
+    const result = await api(
+      `/api/projects/${projectId}/translation-prompt-ai-draft`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          current_prompt: currentPrompt,
+          force: translationPromptAiEstimate.force,
+        }),
+      },
+    );
+    if (pendingTranslationPromptProject !== requestProject) return;
+    showTranslationPromptAiResult(result);
+  } catch (error) {
+    if (pendingTranslationPromptProject === requestProject) {
+      showToast(error.message, true);
+    }
+  } finally {
+    translationPromptAiBusy = false;
+    run.disabled = false;
+    createNew.disabled = false;
+    close.disabled = false;
+    if (!run.hidden && translationPromptAiEstimate) {
+      run.textContent = translationPromptAiEstimate.force
+        ? "새 초안 생성"
+        : "초안 생성";
+    }
+  }
+}
+
+function useTranslationPromptAiDraft() {
+  if (!translationPromptAiDraft) return;
+  byId("translationPromptEdit").value = translationPromptAiDraft.draft;
+  updateTranslationPromptEditCount();
+  byId("translationPromptAiApplied").hidden = false;
+  showTranslationPromptEditorView(true);
+}
+
 function openTranslationPromptDialog(projectId) {
   const project = dashboard?.projects.find(
     (value) => value.project_id === projectId,
@@ -1883,6 +2166,7 @@ function openTranslationPromptDialog(projectId) {
   byId("translationPromptProjectName").textContent = project.name;
   byId("translationPromptProjectId").textContent = project.project_id;
   byId("translationPromptEdit").value = savedPrompt;
+  resetTranslationPromptAiPanel();
   const status = project.pipeline.translation_status;
   const impact = byId("translationPromptImpact");
   impact.hidden = !["partial", "current", "stale"].includes(status);
@@ -2291,14 +2575,35 @@ byId("translationPromptEdit").addEventListener(
   "input",
   updateTranslationPromptEditCount,
 );
+byId("translationPromptAiDraft").addEventListener(
+  "click",
+  () => estimateTranslationPromptAiDraft(false),
+);
+byId("translationPromptAiNew").addEventListener(
+  "click",
+  () => estimateTranslationPromptAiDraft(true),
+);
+byId("translationPromptAiRun").addEventListener(
+  "click",
+  runTranslationPromptAiDraft,
+);
+byId("translationPromptAiUse").addEventListener(
+  "click",
+  useTranslationPromptAiDraft,
+);
+byId("translationPromptAiClose").addEventListener("click", () => {
+  if (!translationPromptAiBusy) showTranslationPromptEditorView(true);
+});
 byId("translationPromptEditReset").addEventListener("click", () => {
   byId("translationPromptEdit").value =
     pendingTranslationPromptProject?.savedPrompt || "";
+  byId("translationPromptAiApplied").hidden = true;
   updateTranslationPromptEditCount();
   byId("translationPromptEdit").focus();
 });
 byId("translationPromptDialog").addEventListener("close", () => {
   pendingTranslationPromptProject = null;
+  resetTranslationPromptAiPanel();
   byId("translationPromptForm").reset();
   byId("translationPromptImpact").hidden = true;
   byId("translationPromptSave").disabled = false;
@@ -2328,6 +2633,15 @@ byId("deleteDialog").addEventListener("close", () => {
   byId("deleteSubmit").disabled = false;
 });
 byId("searchInput").addEventListener("input", render);
+document.addEventListener("click", (event) => {
+  const menu = event.target.closest(".card-action-menu");
+  document.querySelectorAll(".card-action-menu[open]").forEach((item) => {
+    if (item !== menu) item.removeAttribute("open");
+  });
+  if (event.target.closest(".card-action-menu-popover button")) {
+    menu?.removeAttribute("open");
+  }
+});
 document.querySelector(".filters").addEventListener("click", (event) => {
   const button = event.target.closest("[data-filter]");
   if (!button) return;

@@ -65,6 +65,12 @@ from glk.application.translation_prompt_service import (
     TranslationPromptError,
     save_project_translation_prompt,
 )
+from glk.application.translation_prompt_ai_service import (
+    TranslationPromptAiError,
+    TranslationPromptDraftProvider,
+    estimate_translation_prompt_draft,
+    generate_translation_prompt_draft,
+)
 from glk.config import resolve_settings_root
 from glk.error_response import localized_detail_message
 from glk.infrastructure.dashboard_routes import (
@@ -129,6 +135,9 @@ class DashboardHttpServer(LocalHttpServer):
         source_job_runner: SourceJobRunner | None = None,
         glossary_job_runner: GlossaryJobRunner | None = None,
         translation_job_runner: TranslationJobRunner | None = None,
+        translation_prompt_draft_provider: (
+            TranslationPromptDraftProvider | None
+        ) = None,
     ) -> None:
         self._review_lock = threading.Lock()
         self._review_servers: dict[
@@ -139,6 +148,9 @@ class DashboardHttpServer(LocalHttpServer):
             self.workspace_root = str(workspace_root)
             self.settings_root = Path(settings_root).expanduser().resolve()
             self.ai_settings = AiSettingsService(self.settings_root)
+            self.translation_prompt_draft_provider = (
+                translation_prompt_draft_provider
+            )
             self.job_manager = DashboardJobManager(
                 workspace_root,
                 settings_root=self.settings_root,
@@ -182,6 +194,7 @@ class DashboardHttpServer(LocalHttpServer):
                 review_server = create_glossary_review_server(
                     project=location.path,
                     workspace_root=self.workspace_root,
+                    settings_root=self.settings_root,
                     port=0,
                     return_url=self.dashboard_url,
                 )
@@ -244,6 +257,8 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 "source_continue",
                 "glossary_job",
                 "translation_job",
+                "translation_prompt_ai_estimate",
+                "translation_prompt_ai_draft",
                 "projects",
                 "review_open",
             }
@@ -775,6 +790,67 @@ class _DashboardHandler(LocalHttpRequestHandler):
             return
         try:
             request = self._read_request_json(max_bytes=_MAX_REQUEST_BYTES)
+            if route.name in {
+                "translation_prompt_ai_estimate",
+                "translation_prompt_ai_draft",
+            }:
+                assert route.project_id is not None
+                prompt_project_id = route.project_id
+                current_prompt = request.get("current_prompt")
+                force = request.get("force", False)
+                if (
+                    not prompt_project_id
+                    or "/" in prompt_project_id
+                    or "\\" in prompt_project_id
+                ):
+                    raise TranslationPromptAiError(
+                        "Project ID must not contain path separators."
+                    )
+                if not isinstance(current_prompt, str):
+                    raise TranslationPromptAiError(
+                        "current_prompt must be a string."
+                    )
+                if not isinstance(force, bool):
+                    raise TranslationPromptAiError(
+                        "force must be a boolean."
+                    )
+                if self.server.job_manager.is_project_active(
+                    prompt_project_id
+                ):
+                    self._send_error_json(
+                        HTTPStatus.CONFLICT,
+                        "번역 작업 중에는 AI 프롬프트 초안을 만들 수 없습니다.",
+                        code="TRANSLATION_JOB_CONFLICT",
+                    )
+                    return
+                with self.server.mutation_lock:
+                    if self.server.job_manager.is_project_active(
+                        prompt_project_id
+                    ):
+                        self._send_error_json(
+                            HTTPStatus.CONFLICT,
+                            "번역 작업 중에는 AI 프롬프트 초안을 만들 수 없습니다.",
+                            code="TRANSLATION_JOB_CONFLICT",
+                        )
+                        return
+                    operation = (
+                        estimate_translation_prompt_draft
+                        if route.name == "translation_prompt_ai_estimate"
+                        else generate_translation_prompt_draft
+                    )
+                    result = operation(
+                        project=prompt_project_id,
+                        workspace_root=self.server.workspace_root,
+                        settings_root=self.server.settings_root,
+                        current_prompt=current_prompt,
+                        provider=self.server.translation_prompt_draft_provider,
+                        force=force,
+                    )
+                self._send_json(
+                    HTTPStatus.OK,
+                    {"ok": True, **result.to_dict()},
+                )
+                return
             if route.name == "source_job":
                 project_id = request.get("project_id")
                 if not isinstance(project_id, str) or not project_id.strip():
@@ -933,6 +1009,11 @@ class _DashboardHandler(LocalHttpRequestHandler):
                 if route.name == "glossary_job"
                 else "TRANSLATION_JOB_START_FAILED"
                 if route.name == "translation_job"
+                else getattr(error, "code", "TRANSLATION_PROMPT_AI_FAILED")
+                if route.name in {
+                    "translation_prompt_ai_estimate",
+                    "translation_prompt_ai_draft",
+                }
                 else "INVALID_REQUEST"
             )
             self._send_error_json(
@@ -1222,6 +1303,9 @@ def create_dashboard_server(
     source_job_runner: SourceJobRunner | None = None,
     glossary_job_runner: GlossaryJobRunner | None = None,
     translation_job_runner: TranslationJobRunner | None = None,
+    translation_prompt_draft_provider: (
+        TranslationPromptDraftProvider | None
+    ) = None,
     port: int = 0,
 ) -> DashboardHttpServer:
     validate_local_port(port, error_type=DashboardError)
@@ -1234,6 +1318,7 @@ def create_dashboard_server(
         source_job_runner=source_job_runner,
         glossary_job_runner=glossary_job_runner,
         translation_job_runner=translation_job_runner,
+        translation_prompt_draft_provider=translation_prompt_draft_provider,
     )
 
 

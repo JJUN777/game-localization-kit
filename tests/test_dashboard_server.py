@@ -41,6 +41,9 @@ from tests.test_translation_service import (
     sample_blocks as translation_sample_blocks,
     valid_response,
 )
+from tests.test_translation_prompt_ai_service import (
+    FakeTranslationPromptDraftProvider,
+)
 
 
 class DashboardServerTests(unittest.TestCase):
@@ -58,6 +61,9 @@ class DashboardServerTests(unittest.TestCase):
         self.translation_job_calls: list[
             tuple[str, Path, str, bool, bool]
         ] = []
+        self.translation_prompt_draft_provider = (
+            FakeTranslationPromptDraftProvider()
+        )
         location = create_project(
             name="Dashboard Review",
             workspace_root=self.workspace_root,
@@ -76,6 +82,9 @@ class DashboardServerTests(unittest.TestCase):
             source_job_runner=self._run_source_job,
             glossary_job_runner=self._run_glossary_job,
             translation_job_runner=self._run_translation_job,
+            translation_prompt_draft_provider=(
+                self.translation_prompt_draft_provider
+            ),
         )
         self.thread = threading.Thread(
             target=self.server.serve_forever,
@@ -281,6 +290,15 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("누적 AI 비용", script)
         self.assertIn("pipelineTotal(project)", script)
         self.assertIn('pipelineStep(project, "translation_review"', script)
+        self.assertIn('class="pipeline-step ${state}${interactive', script)
+        self.assertIn('data-review="${reviewType}"', script)
+        self.assertIn("function primaryReviewButton(project)", script)
+        self.assertIn("function primaryActionButton(project)", script)
+        self.assertIn("function projectActionRow(project)", script)
+        self.assertIn('actionMenu("파일 저장"', script)
+        self.assertIn('actionMenu("설정"', script)
+        self.assertIn('class="translation-prompt-button contextual-action"', script)
+        self.assertNotIn("다른 백그라운드 작업 실행 중", script)
         self.assertIn("data-usage-detail", script)
         self.assertIn('data-project-id="${escapeHtml(project.project_id)}"', script)
         self.assertIn(
@@ -320,6 +338,24 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("초벌 번역 시작", html)
         self.assertIn("번역 문체·표현 지침", html)
         self.assertIn("번역 프롬프트 설정", html)
+        self.assertIn("AI로 초안 만들기", html)
+        self.assertIn("translationPromptEditorView", html)
+        self.assertIn("translationPromptAiPanel", html)
+        self.assertIn("translationPromptAiNew", html)
+        self.assertIn("AI 번역 프롬프트 초안", html)
+        self.assertIn("저장된 AI 초안", html)
+        self.assertIn("승인한 원문의 앞부분과 일부 규칙 문장", html)
+        self.assertIn("프롬프트 저장</strong>을 눌러야", html)
+        self.assertIn("showTranslationPromptAiView()", html)
+        self.assertIn("showTranslationPromptEditorView(true)", html)
+        self.assertIn("translation-prompt-ai-estimate", html)
+        self.assertIn("translation-prompt-ai-draft", html)
+        self.assertIn("이 초안 사용", html)
+        self.assertIn("돌아가기", html)
+        self.assertIn("AI 초안이 입력되었습니다", html)
+        self.assertIn("입력 약", html)
+        self.assertIn("usage.input_tokens", html)
+        self.assertIn("usage.output_tokens", html)
         self.assertIn("data-edit-translation-prompt", html)
         self.assertIn(
             'project.pipeline.termbase_status !== "current"',
@@ -345,7 +381,7 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn("fileHandle.createWritable()", html)
         self.assertIn('error?.name === "AbortError"', html)
         self.assertIn("저장 위치를 선택해 다운로드", html)
-        self.assertIn('class="source-register-button replace"', html)
+        self.assertIn('data-replace-source="true"', html)
         self.assertIn('"source-replace-submit"', html)
         self.assertIn("휴지통으로 이동", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
@@ -354,18 +390,10 @@ class DashboardServerTests(unittest.TestCase):
             "function projectCard(project)",
             maxsplit=1,
         )[1].split("function createProjectCard()", maxsplit=1)[0]
-        self.assertLess(
-            project_card.index('${reviewButton(project, "translation")}'),
-            project_card.index("${sourceRegistrationButton(project)}"),
-        )
-        self.assertLess(
-            project_card.index("${glossaryJobButton(project)}"),
-            project_card.index("${sourceDownloadButton(project)}"),
-        )
-        self.assertLess(
-            project_card.index("${sourceDownloadButton(project)}"),
-            project_card.index('${reviewButton(project, "source")}'),
-        )
+        self.assertIn("${projectActionRow(project)}", project_card)
+        self.assertNotIn('${reviewButton(project, "source")}', project_card)
+        self.assertNotIn('${reviewButton(project, "glossary")}', project_card)
+        self.assertNotIn('${reviewButton(project, "translation")}', project_card)
 
         status, unauthorized = self._request(
             "/api/dashboard",
@@ -387,6 +415,74 @@ class DashboardServerTests(unittest.TestCase):
         project = dashboard["projects"][0]
         self.assertEqual(project["project_id"], "dashboard_review")
         self.assertTrue(project["reviews"]["source"]["enabled"])
+
+    def test_estimates_and_generates_translation_prompt_ai_draft(self) -> None:
+        project_path = create_approved_project(
+            self.workspace_root,
+            sample_blocks(),
+        )
+        current_prompt = "자연스러운 한국어 규칙서 문체로 번역하세요."
+
+        status, estimate = self._request(
+            "/api/projects/glossary_project/translation-prompt-ai-estimate",
+            method="POST",
+            payload={"current_prompt": current_prompt},
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(estimate["request_count"], 1)
+        self.assertGreater(estimate["estimated_input_tokens"], 0)
+        self.assertGreater(estimate["estimated_output_tokens_high"], 0)
+
+        status, result = self._request(
+            "/api/projects/glossary_project/translation-prompt-ai-draft",
+            method="POST",
+            payload={"current_prompt": current_prompt},
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertFalse(result["cached"])
+        self.assertEqual(result["usage"]["requests"], 1)
+        self.assertEqual(result["usage"]["input_tokens"], 320)
+        self.assertEqual(result["usage"]["output_tokens"], 140)
+        self.assertFalse(
+            (project_path / "04_translation/prompt.txt").is_file()
+        )
+
+        status, cached = self._request(
+            "/api/projects/glossary_project/translation-prompt-ai-estimate",
+            method="POST",
+            payload={"current_prompt": current_prompt},
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertTrue(cached["cached"])
+        self.assertIn("draft", cached["cached_result"])
+        self.assertEqual(cached["request_count"], 0)
+        self.assertEqual(cached["estimated_input_tokens"], 0)
+
+        status, forced_estimate = self._request(
+            "/api/projects/glossary_project/translation-prompt-ai-estimate",
+            method="POST",
+            payload={"current_prompt": current_prompt, "force": True},
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertFalse(forced_estimate["cached"])
+        self.assertEqual(forced_estimate["request_count"], 1)
+
+        status, forced = self._request(
+            "/api/projects/glossary_project/translation-prompt-ai-draft",
+            method="POST",
+            payload={"current_prompt": current_prompt, "force": True},
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertFalse(forced["cached"])
+        self.assertEqual(
+            len(self.translation_prompt_draft_provider.prompts),
+            2,
+        )
 
     def test_reads_and_updates_ai_settings_without_returning_the_key(
         self,
@@ -837,7 +933,7 @@ class DashboardServerTests(unittest.TestCase):
         self.assertTrue(glossary_opened["ok"])
         with urlopen(str(glossary_opened["url"]), timeout=3) as response:
             glossary_html = response.read().decode("utf-8")
-        self.assertIn("용어집 생성이 완료되었습니다", glossary_html)
+        self.assertIn("용어집 확정 완료", glossary_html)
         self.assertIn(
             f"const RETURN_URL = {json.dumps(self.server.dashboard_url)};",
             glossary_html,

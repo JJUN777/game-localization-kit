@@ -179,6 +179,24 @@ class GlossaryReviewIncompleteError(GlossaryImportError):
     code = "GLOSSARY_REVIEW_INCOMPLETE"
 
 
+class GlossaryManualTermsMissingError(GlossaryImportError):
+    """Raised when manual terms need confirmation without source evidence."""
+
+    code = "GLOSSARY_MANUAL_TERMS_MISSING"
+
+    def __init__(self, source_terms: tuple[str, ...]) -> None:
+        self.source_terms = tuple(dict.fromkeys(source_terms))
+        if len(self.source_terms) == 1:
+            message = (
+                f"Manual term {self.source_terms[0]!r} was not found "
+                "in the approved source."
+            )
+        else:
+            rendered = ", ".join(repr(term) for term in self.source_terms)
+            message = f"Manual terms were not found in the approved source: {rendered}."
+        super().__init__(message)
+
+
 @dataclass(frozen=True, slots=True)
 class GlossaryCandidate:
     candidate_id: str
@@ -250,6 +268,7 @@ class _GlossaryImportContext:
     paths: WorkspacePaths
     blocks: tuple[SourceBlock, ...]
     approved_hash: str
+    expected_candidates: tuple[GlossaryCandidate, ...]
     expected_candidate_ids: frozenset[str]
 
 
@@ -994,10 +1013,20 @@ def _prepare_glossary_import(
         paths=paths,
         blocks=tuple(blocks),
         approved_hash=approved_hash,
+        expected_candidates=tuple(expected_candidates),
         expected_candidate_ids=frozenset(
             candidate.candidate_id for candidate in expected_candidates
         ),
     )
+
+
+def load_project_glossary_candidate_baseline(
+    *,
+    project: str | Path,
+    workspace_root: str | Path = "workspaces",
+) -> tuple[GlossaryCandidate, ...]:
+    """Return the deterministic generated candidates behind a current review."""
+    return _prepare_glossary_import(project, workspace_root).expected_candidates
 
 
 def _normalize_glossary_row_fields(
@@ -1138,6 +1167,33 @@ def _resolve_glossary_row_evidence(
     )
 
 
+def _missing_manual_terms(
+    input_rows: list[tuple[int, dict[str, str]]],
+    *,
+    expected_candidate_ids: frozenset[str],
+    occurrence_index: dict[str, list[_Occurrence]],
+) -> tuple[str, ...]:
+    normalized = [
+        (record_number, _normalize_glossary_row_fields(record_number, raw_row))
+        for record_number, raw_row in input_rows
+    ]
+    tracker = _GlossaryImportTracker({}, {}, {}, set())
+    missing: list[str] = []
+    for record_number, fields in normalized:
+        _candidate_id, origin = _register_glossary_row_identity(
+            record_number,
+            fields,
+            expected_candidate_ids=expected_candidate_ids,
+            tracker=tracker,
+        )
+        if (
+            origin == "manual"
+            and _term_evidence(occurrence_index, fields.source_term) is None
+        ):
+            missing.append(fields.source_term)
+    return tuple(dict.fromkeys(missing))
+
+
 def _normalize_glossary_import_row(
     record_number: int,
     raw_row: dict[str, str],
@@ -1213,6 +1269,14 @@ def _normalize_glossary_import(
         list(context.blocks),
         max_words=max(evidence_max_words, 1),
     )
+    if not allow_missing_terms:
+        missing_manual_terms = _missing_manual_terms(
+            input_rows,
+            expected_candidate_ids=context.expected_candidate_ids,
+            occurrence_index=occurrence_index,
+        )
+        if missing_manual_terms:
+            raise GlossaryManualTermsMissingError(missing_manual_terms)
     tracker = _GlossaryImportTracker({}, {}, {}, set())
     normalized_rows: list[dict[str, str]] = []
     entries: list[dict[str, Any]] = []

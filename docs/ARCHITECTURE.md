@@ -39,9 +39,9 @@ flowchart LR
 | 계층 | 책임 | 주요 모듈 |
 |---|---|---|
 | CLI | 인자, 대화형 입력, 사람이 읽는 출력, 종료 코드 | `cli.py` |
-| Application | 프로젝트 단위 use case, 캐시, 원자적 출력, 단계 연결 | 각 `*_service`, `ai_model_catalog`, `ai_usage_ledger`, 공통 `_io`, `_hashing`, `_translation_context`, `translation_types` |
+| Application | 프로젝트 단위 use case, 캐시, 원자적 출력, 단계 연결 | 각 `*_service`, `translation_prompt_ai_service`, `ai_model_catalog`, `ai_usage_ledger`, 공통 `_io`, `_hashing`, `_translation_context`, `translation_types` |
 | Domain | 외부 SDK와 파일 포맷에 독립적인 모델·검증 | `project.py`, `source_block.py`, `source_qa.py`, `translation_segment.py`, `translation_qa.py`, `approved_translation.py` |
-| Extraction | PDF layout, 이미지 OCR과 PDF 아이콘 검사 결과 처리 계약 | `layout.py`, `image_ocr.py`, `pdf_icon_audit.py` |
+| Extraction | PDF layout, 이미지 OCR, PDF 아이콘 검사, 용어 후보 AI 정리와 번역 프롬프트 초안 결과 처리 계약 | `layout.py`, `image_ocr.py`, `pdf_icon_audit.py`, `glossary_triage.py`, `translation_prompt_draft.py` |
 | Infrastructure | 외부 모델 adapter와 로컬 대시보드·검수 서버 | `ai_provider.py`, `ai_usage.py`, `gemini_*`, `openai_*`, `dashboard_server.py`, `dashboard_routes.py`, `source_review_server.py`, `glossary_review_server.py`, `translation_review_server.py` |
 
 CLI의 통합 명령(`glk run`)과 개별 명령은 application service를 공유합니다. `glk run`은 별도 추출 구현을 갖지 않고 PDF의 `extract_project_pdf()` 또는 이미지의 `ocr_project_images()`를 호출한 뒤 segmentation과 QA service를 연결합니다.
@@ -154,7 +154,9 @@ review TXT는 `[PAGE]` 또는 `[SOURCE]`, `[BLOCK]`, `[[GLK_END ...]]` marker로
 | 사람 승인 | draft/review/final/approved 파일 hash | `source_review.json` |
 | PDF 아이콘 검사 | block 원문·bbox, 페이지 이미지, 아이콘 정의, provider·model, prompt version | `pdf_icon_audit.json` |
 | 용어 후보 | approved JSONL, 후보 생성 파라미터 | `glossary_build.json` |
+| 용어 후보 AI 정리 | 후보 원문·근거, 언어, provider·model, prompt version | `glossary_ai_review.json` |
 | Termbase import | approved JSONL, 정규화된 검토 TSV, termbase hash | `glossary_import.json` |
+| 번역 프롬프트 AI 초안 | approved JSONL, 현재 prompt, provider·model, prompt version | `translation_prompt_ai_draft.json` |
 | 초벌 번역 | approved JSONL, termbase, project prompt, 모델, hard rule·청크 설정 | `translation.json` |
 | 번역 승인 | translation JSONL, draft/review, termbase, QA/final 파일 hash | `translation_review.json` |
 
@@ -245,6 +247,7 @@ PDF layout·이미지 OCR·번역 provider의 옵션 호환성을 먼저 확인�
 ```text
 03_terminology/glossary_review.tsv
         ↕ localhost HTML 표 편집
+        ↕ 선택적 AI 추천 cache (.glk/state/glossary_ai_review.json)
         ↓ 구조·ID·원문 근거 검증
 03_terminology/termbase.json
 .glk/state/glossary_import.json
@@ -253,6 +256,12 @@ PDF layout·이미지 OCR·번역 provider의 옵션 호환성을 먼저 확인�
 `glk glossary import`는 자동 후보를 다시 생성해 TSV의 candidate ID 집합과 비교합니다. 행을 삭제하는 대신 `rejected`로 남겨야 하며, ID가 비어 있는 행만 수동 용어로 판정합니다.
 
 수동 용어는 승인 원문에서 대소문자와 보수적인 단수·복수 변형을 검색해 ID, 빈도, block ID, 위치와 예문을 다시 계산합니다. `--allow-missing-terms` 없이는 근거가 없는 용어를 허용하지 않습니다.
+
+`glossary_ai_service`는 브라우저의 현재 행과 저장된 review hash를 검증한 뒤,
+수동 행을 제외하고 상태가 `review`인 자동 후보만 25개 단위로 Gemini 또는 OpenAI
+adapter에 전달합니다. 응답은 고정 JSON schema로 검증하며 낮은 신뢰도는 기존
+`review` 상태로 정규화합니다. 캐시는 후보별 fingerprint로 재사용하되 추천 반영과
+TSV 저장은 브라우저에서 명시적으로 분리합니다.
 
 termbase entry는 source term, translation, category, status, note, variants, occurrences, block IDs, locations, example, origin과 source 검증 여부를 보존합니다. `approved`와 `keep`만 번역 prompt의 활성 용어가 되고 `rejected`는 검토 이력으로 유지됩니다.
 
@@ -314,6 +323,16 @@ ID·순서·숫자·token·HTML·용어 검증
 
 `glk ui` 대시보드는 `dashboard_service`가 만든 읽기 전용 프로젝트 상태를 표시하고, 준비된 기존 `source`, `glossary`, `translation` 검수 서버를 필요할 때 실행합니다. 프로젝트 생성과 삭제 요청은 application service의 규칙을 재사용합니다. PDF·이미지 최초 등록은 `source_registration_service`가 CLI와 GUI에 같은 복사·manifest 규칙을 제공하며 AI 작업은 실행하지 않습니다. `dashboard_job_service`는 등록 원본의 acquisition·segmentation·source QA, 승인 원문 기반 용어 후보 생성과 termbase 기반 초벌 번역을 HTTP 요청과 분리된 단일 active worker 정책으로 실행합니다. 최신 실행 상태는 각각 `.glk/state/dashboard_source_job.json`, `.glk/state/dashboard_glossary_job.json`, `.glk/state/dashboard_translation_job.json`에 저장하며 schema와 상위 프로젝트 경로를 검증한 뒤 복원합니다. 용어 후보 생성은 기존 `glossary_service`의 로컬 규칙만 재사용하며 AI API를 호출하지 않습니다. `translation_prompt_service`는 초벌 번역과 분리해 프로젝트 prompt를 저장하고 개행 정규화 SHA-256으로 동시 편집 충돌을 차단합니다. 초벌 번역은 기존 `translation_service`의 청크 저장과 resume 규칙을 재사용하고, partial 상태에서 prompt가 바뀌면 이어하기 대신 명시적 전체 재번역만 허용합니다. 전체 재번역은 `translation_restart_service`가 기존 번역·검수·승인·최종 출력 snapshot을 먼저 revisions에 보관하고 성공한 경우에만 새 draft로 검수 상태를 초기화합니다. 번역 검수의 오류 문장 선택 재번역은 `translation_retry_job_service`가 검수 HTTP 요청과 분리해 실행합니다. 시작 요청은 현재 편집을 저장한 뒤 즉시 반환하고 검수 화면은 진행 상태를 조회하며, 실행 중 동시 편집은 잠그지 않고 UI에서 차단한 뒤 최종 저장 시 review hash로 변경 충돌을 거부합니다. 최종 번역이 current이면 승인 state의 `final_files`를 다시 검사해 다운로드 가능한 출력 목록을 read model에 포함합니다. `ai_settings_service`와 AI provider는 `config.resolve_settings_root`가 선택한 동일한 `.env`를 사용합니다. 명시적 경로, `GLK_SETTINGS_ROOT`, 검증된 editable checkout, OS별 사용자 설정 디렉터리 순으로 해석하며 제공자, 제공자별 키와 모델만 원자적으로 갱신하고 다른 항목과 주석을 보존합니다. `ai_model_catalog`는 패키지의 `data/gemini_models.json`과 `data/openai_models.json`을 검증해 선택한 제공자의 모델 ID와 설명을 제공합니다. API 응답에는 키 값이 아니라 설정 여부와 적용 출처만 포함합니다. 삭제할 때는 정규화된 ID, workspace 바로 아래 경로와 manifest ID를 다시 확인한 뒤 검증된 프로젝트 폴더만 `send2trash`로 운영체제 휴지통에 이동합니다. 대시보드에서 연 검수 서버는 같은 프로젝트와 종류에 대해 재사용하며 대시보드 종료 시 함께 종료합니다.
 
+`translation_prompt_ai_service`는 프로젝트명·보드게임 규칙서 문맥, 승인 원문의
+제한된 대표 block과 현재 prompt만 Gemini 또는 OpenAI adapter에 전달하고 호출 전
+system instruction을 포함한 예상 token·비용을 계산합니다. adapter의 고정 system
+instruction은 한국어 규칙 본문의 `합니다체`와 의무·가능·금지 표현을 보장하고,
+모델에는 앞 4페이지의 연속 문맥에서 게임 소개·목표·구성물을 파악하고 후반의
+분산 표본에서는 규칙 문체만 보완하도록 요구합니다.
+결과는 `.glk/state/translation_prompt_ai_draft.json`에 fingerprint cache하며,
+사용자가 초안을 편집창에 반영하고 별도로 저장하기 전에는 prompt 파일을 바꾸지
+않습니다.
+
 PDF 원문 준비가 일부 실패하면 `DashboardJobManager.continue_partial_source_review()`가
 성공한 acquisition과 실패 페이지 이미지를 partial segmentation에 넘깁니다.
 실패 페이지는 `unresolved_page` 유형과 `[ILLEGIBLE]` 본문을 가진 SourceBlock으로
@@ -325,7 +344,14 @@ PDF 원문 준비가 일부 실패하면 `DashboardJobManager.continue_partial_s
 service는 최대 요청 수, block ID와 현재 source hash를 검증하고 선택한 bbox의
 페이지 crop만 Gemini 또는 OpenAI icon audit adapter에 전달합니다. 검증된 결과는
 `.glk/state/pdf_icon_audit.json`에 cache하며, 사용자가 적용하기 전에는 review를
-바꾸지 않습니다. `ai_usage_ledger`는 원문 준비·아이콘 검사·번역·선택 재번역의
+바꾸지 않습니다. 용어 검수 서버의 `POST /api/ai-triage/estimate`는 현재 후보와
+cache로 새 요청 수·token·비용 범위를 계산하고, `POST /api/ai-triage`는 검증한
+추천 작업을 background thread에서 시작합니다. 브라우저는 `GET /api/ai-triage/job`을
+polling해 청크별 후보·요청 진행률과 terminal 결과를 받고, 추천은 cache하되 TSV를
+저장하지 않습니다. 대시보드의 번역 prompt 초안 estimate·generate route는 같은
+service로 대표 원문의 범위와 cache를 계산하고 실제 결과만 편집창에 반환합니다.
+`ai_usage_ledger`는 원문 준비·아이콘
+검사·용어 후보 정리·번역 prompt 초안·번역·선택 재번역의
 provider usage를 `.glk/state/ai_usage.jsonl`에 append하고 `dashboard_service`가
 단계별 누적 사용량과 예상 비용으로 집계합니다.
 

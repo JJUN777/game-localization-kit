@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
@@ -13,6 +14,7 @@ from glk.infrastructure.glossary_review_server import (
     GlossaryReviewHttpServer,
     create_glossary_review_server,
 )
+from tests.test_glossary_ai_service import FakeGlossaryTriageProvider
 from tests.test_glossary_service import create_approved_project, sample_blocks
 
 
@@ -30,6 +32,8 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.server: GlossaryReviewHttpServer = create_glossary_review_server(
             project="glossary_project",
             workspace_root=self.workspace_root,
+            settings_root=self.temporary_directory.name,
+            glossary_ai_provider=FakeGlossaryTriageProvider(),
         )
         self.thread = threading.Thread(
             target=self.server.serve_forever,
@@ -99,19 +103,42 @@ class GlossaryReviewServerTests(unittest.TestCase):
         status, html, headers = self._request("/", authorized=False)
         self.assertEqual(status, 200)
         self.assertIsInstance(html, str)
-        self.assertIn("용어 후보를 표처럼 검수하세요", html)
-        self.assertIn("검증 및 termbase 생성", html)
+        self.assertIn("번역에 사용할 용어를 정리하세요", html)
+        self.assertIn(
+            "용어별 상태·번역어·분류를 확인하고, 검수가 끝나면 용어집을 확정하세요.",
+            html,
+        )
+        self.assertNotIn("glossary_review.tsv에 그대로 저장", html)
+        self.assertIn("용어집 확정", html)
+        self.assertIn("후보 1차 정리(AI)", html)
+        self.assertIn("아직 검토하지 않은 자동 후보만 AI가 분류합니다.", html)
+        self.assertIn("AI 적용 취소", html)
+        self.assertIn('id="aiResultDialog"', html)
+        self.assertIn('id="aiProgressDialog"', html)
+        self.assertIn('id="aiProgressCandidates"', html)
+        self.assertIn('id="aiProgressRequests"', html)
+        self.assertIn('id="aiProgressElapsed"', html)
+        self.assertIn('api("/api/ai-triage/job")', html)
+        self.assertIn("750", html)
+        self.assertIn('body: requestBody()', html)
+        self.assertIn('row.status !== "review"', html)
+        self.assertIn("입력과 다른 추천 ${conflictCount}", html)
+        self.assertIn('conflicts.length ? " · 입력과 다름" : ""', html)
+        self.assertIn("현재 번역어 '${currentTranslation}' 유지", html)
+        self.assertIn("현재 분류 '${CATEGORY_LABELS[item.current_category]}' 유지", html)
+        self.assertIn("AI 추천으로 변경", html)
+        self.assertIn("state.aiConflictSelections.has(", html)
+        self.assertIn("추천 반영 · AI 값 ${selected}개 포함", html)
         self.assertIn("실패 항목: ${payload.detail}", html)
-        self.assertIn("원문에 없는 수동 용어라면 화면 상단의", html)
-        self.assertIn("승인 원문에 없는 수동 용어 허용", html)
+        self.assertNotIn('id="allow-missing"', html)
+        self.assertIn("원문에서 찾을 수 없는 수동 용어가 있습니다", html)
+        self.assertIn("돌아가서 수정", html)
+        self.assertIn("그대로 포함하고 확정", html)
+        self.assertIn('payload.code === "GLOSSARY_MANUAL_TERMS_MISSING"', html)
         self.assertIn('current: "최신 상태"', html)
         self.assertIn('not_built: "미생성"', html)
         self.assertIn('stale: "업데이트 필요"', html)
         self.assertIn('not_ready: "준비 전"', html)
-        self.assertLess(
-            html.index('id="allow-missing"'),
-            html.index('class="toolbar-row search-row"'),
-        )
         self.assertIn('id="search-field"', html)
         self.assertIn('<option value="source">원문 용어</option>', html)
         self.assertIn('<option value="translation">번역어</option>', html)
@@ -122,12 +149,15 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertNotIn("<th>메모</th>", html)
         self.assertLess(
             html.index('class="toolbar-row search-row"'),
-            html.index('class="toolbar-row bulk-row"'),
+            html.index('class="toolbar-row bulk-row hidden"'),
         )
         self.assertLess(
-            html.index('id="status-filter"'),
+            html.index('id="status-filters"'),
             html.index('id="category-filter"'),
         )
+        self.assertNotIn('<select class="control" id="status-filter"', html)
+        self.assertIn('button.dataset.statusFilter = value;', html)
+        self.assertIn('button.setAttribute("aria-pressed", String(active));', html)
         self.assertLess(
             html.index('id="category-filter"'),
             html.index('id="sort-order"'),
@@ -141,14 +171,42 @@ class GlossaryReviewServerTests(unittest.TestCase):
             html.index('id="search"'),
         )
         self.assertLess(
-            html.index('id="bulk-apply"'),
             html.index('id="add-button"'),
+            html.index('class="toolbar-row bulk-row hidden"'),
         )
+        self.assertIn(
+            'class="button button-primary" id="import-button"',
+            html,
+        )
+        self.assertNotIn(
+            'class="button button-success" id="import-button"',
+            html,
+        )
+        self.assertIn('id="clear-selection"', html)
+        self.assertIn(
+            'id="bulk-apply" type="button" disabled',
+            html,
+        )
+        self.assertIn('item.manual ? "확정 시 원문 확인"', html)
+        self.assertNotIn('"저장 후 확인"', html)
+        self.assertIn(
+            '$("#search-row").classList.toggle("hidden", hasSelection);',
+            html,
+        )
+        self.assertIn(
+            '$("#bulk-row").classList.toggle("hidden", !hasSelection);',
+            html,
+        )
+        self.assertIn(
+            '$("#bulk-apply").disabled = !hasSelection || !$("#bulk-status").value;',
+            html,
+        )
+        self.assertIn('state.selected.clear();\n      renderRows();', html)
         self.assertIn('id="sort-order"', html)
         self.assertIn("첫 등장 위치 순", html)
         self.assertIn("출현 많은 순", html)
         self.assertIn("출현 적은 순", html)
-        self.assertIn("용어집 생성이 완료되었습니다", html)
+        self.assertIn("용어집 확정 완료", html)
         self.assertNotIn("__GLK_TOKEN_JSON__", html)
         self.assertNotIn("__GLK_RETURN_URL_JSON__", html)
         self.assertIn("const RETURN_URL = null;", html)
@@ -156,6 +214,17 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertEqual(self.server.server_address[0], "127.0.0.1")
 
         status, payload, _ = self._request("/api/review", authorized=False)
+        self.assertEqual(status, 403)
+        self.assertFalse(payload["ok"])
+
+        status, payload, _ = self._request("/api/ai-triage", authorized=False)
+        self.assertEqual(status, 403)
+        self.assertFalse(payload["ok"])
+
+        status, payload, _ = self._request(
+            "/api/ai-triage/job",
+            authorized=False,
+        )
         self.assertEqual(status, 403)
         self.assertFalse(payload["ok"])
 
@@ -206,6 +275,118 @@ class GlossaryReviewServerTests(unittest.TestCase):
         self.assertEqual(conflict["code"], "REVIEW_CONFLICT")
         self.assertIn("새로고침", conflict["message"])
         self.assertIn("changed after", conflict["detail"])
+
+    def test_estimates_runs_and_reloads_cached_ai_triage_without_saving(self) -> None:
+        _, document, _ = self._request("/api/review")
+        rows = self._editable_rows(document)
+
+        status, estimate, _ = self._request(
+            "/api/ai-triage/estimate",
+            method="POST",
+            payload={
+                "review_sha256": document["review_sha256"],
+                "rows": rows,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(estimate["target_count"], len(rows))
+        self.assertEqual(estimate["request_count"], 1)
+        self.assertEqual(estimate["model"], "gemini-3.8-flash")
+
+        status, result, _ = self._request(
+            "/api/ai-triage",
+            method="POST",
+            payload={
+                "review_sha256": document["review_sha256"],
+                "rows": rows,
+            },
+        )
+        self.assertEqual(status, 202)
+        job = result["job"]
+        self.assertIn(job["status"], {"running", "completed"})
+        self.assertTrue(job["job_id"])
+        for _ in range(100):
+            status, progress, _ = self._request("/api/ai-triage/job")
+            self.assertEqual(status, 200)
+            job = progress["job"]
+            if job["status"] != "running":
+                break
+            time.sleep(0.01)
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(job["stage"], "completed")
+        self.assertEqual(job["processed_candidates"], len(rows))
+        self.assertEqual(job["request_completed"], 1)
+        self.assertEqual(job["request_total"], 1)
+        self.assertGreaterEqual(job["elapsed_seconds"], 0)
+        result = job["result"]
+        self.assertEqual(len(result["suggestions"]), len(rows))
+        self.assertEqual(result["usage"]["requests"], 1)
+
+        _, after, _ = self._request("/api/review")
+        self.assertEqual(after["review_sha256"], document["review_sha256"])
+        self.assertTrue(all(row["status"] == "review" for row in after["rows"]))
+
+        status, cached, _ = self._request("/api/ai-triage")
+        self.assertEqual(status, 200)
+        self.assertEqual(cached["cached_count"], len(rows))
+        self.assertTrue(all(item["cached"] for item in cached["suggestions"]))
+
+    def test_reports_running_ai_triage_progress_and_rejects_duplicate_start(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        base_provider = FakeGlossaryTriageProvider()
+
+        class BlockingProvider:
+            model_name = base_provider.model_name
+            prompt_version = base_provider.prompt_version
+            usage = base_provider.usage
+
+            def triage(self, prompt: str) -> dict[str, object]:
+                started.set()
+                release.wait(timeout=2)
+                return base_provider.triage(prompt)
+
+        self.server.glossary_ai_provider = BlockingProvider()
+        _, document, _ = self._request("/api/review")
+        rows = self._editable_rows(document)
+        request = {
+            "review_sha256": document["review_sha256"],
+            "rows": rows,
+        }
+
+        status, payload, _ = self._request(
+            "/api/ai-triage",
+            method="POST",
+            payload=request,
+        )
+        self.assertEqual(status, 202)
+        self.assertTrue(started.wait(timeout=1))
+
+        status, progress, _ = self._request("/api/ai-triage/job")
+        self.assertEqual(status, 200)
+        job = progress["job"]
+        self.assertEqual(job["status"], "running")
+        self.assertEqual(job["stage"], "analyzing")
+        self.assertEqual(job["total_candidates"], len(rows))
+        self.assertEqual(job["processed_candidates"], 0)
+        self.assertEqual(job["request_completed"], 0)
+        self.assertEqual(job["request_total"], 1)
+
+        status, duplicate, _ = self._request(
+            "/api/ai-triage",
+            method="POST",
+            payload=request,
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(duplicate["code"], "GLOSSARY_AI_JOB_ACTIVE")
+
+        release.set()
+        for _ in range(100):
+            _, progress, _ = self._request("/api/ai-triage/job")
+            if progress["job"]["status"] == "completed":
+                break
+            time.sleep(0.01)
+        self.assertEqual(progress["job"]["status"], "completed")
 
     def test_generated_rows_cannot_be_deleted_and_review_can_be_imported(self) -> None:
         _, document, _ = self._request("/api/review")
@@ -272,7 +453,7 @@ class GlossaryReviewServerTests(unittest.TestCase):
             document["review_sha256"],
         )
 
-    def test_import_error_exposes_the_failed_row_detail(self) -> None:
+    def test_import_requires_confirmation_for_manual_term_without_evidence(self) -> None:
         _, document, _ = self._request("/api/review")
         rows = self._editable_rows(document)
         for row in rows:
@@ -300,9 +481,24 @@ class GlossaryReviewServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertFalse(payload["ok"])
-        self.assertIn("Record 2", payload["detail"])
+        self.assertEqual(payload["code"], "GLOSSARY_MANUAL_TERMS_MISSING")
+        self.assertEqual(payload["message"], "원문에서 찾을 수 없는 수동 용어가 있습니다.")
+        self.assertEqual(payload["missing_terms"], ["Missing Manual Term"])
         self.assertIn("Missing Manual Term", payload["detail"])
         self.assertIn("not found in the approved source", payload["detail"])
+
+        status, confirmed, _ = self._request(
+            "/api/import",
+            method="POST",
+            payload={
+                "review_sha256": payload["document"]["review_sha256"],
+                "rows": rows,
+                "allow_missing_terms": True,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(confirmed["ok"])
+        self.assertEqual(confirmed["result"]["unverified_count"], 1)
 
     def test_injects_only_a_local_return_url(self) -> None:
         return_url = "http://127.0.0.1:8765/"

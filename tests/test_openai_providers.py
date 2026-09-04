@@ -11,10 +11,16 @@ from glk.infrastructure.openai_common import (
     OpenAIEmptyResponseError,
     openai_failure_code,
 )
+from glk.infrastructure.openai_glossary_triage import (
+    OpenAIGlossaryTriageProvider,
+)
 from glk.infrastructure.openai_layout import OpenAILayoutProvider
 from glk.infrastructure.openai_ocr import OpenAIImageOcrProvider
 from glk.infrastructure.openai_pdf_icon_audit import OpenAIPdfIconAuditProvider
 from glk.infrastructure.openai_translation import OpenAITranslationProvider
+from glk.infrastructure.openai_translation_prompt import (
+    OpenAITranslationPromptDraftProvider,
+)
 
 
 class _FakeResponses:
@@ -103,6 +109,42 @@ class OpenAIProviderTests(unittest.TestCase):
             request["text"]["format"]["name"],  # type: ignore[index]
             "pdf_icon_audit",
         )
+
+    def test_glossary_triage_uses_its_structured_schema(self) -> None:
+        provider, responses = self._provider(
+            OpenAIGlossaryTriageProvider,
+            '{"suggestions":[]}',
+        )
+
+        value = provider.triage("Review candidates")
+
+        self.assertEqual(value["suggestions"], [])
+        request = responses.requests[0]
+        self.assertEqual(
+            request["text"]["format"]["name"],  # type: ignore[index]
+            "glossary_candidate_triage",
+        )
+        self.assertIn("untrusted source data", request["instructions"])
+
+    def test_translation_prompt_draft_uses_its_structured_schema(self) -> None:
+        provider, responses = self._provider(
+            OpenAITranslationPromptDraftProvider,
+            (
+                '{"draft":"첫째 줄\\n둘째 줄\\n셋째 줄",'
+                '"rationale":"문체 근거"}'
+            ),
+        )
+
+        value = provider.generate_draft("Create a style prompt")
+
+        self.assertIn("첫째 줄", value["draft"])
+        request = responses.requests[0]
+        self.assertEqual(
+            request["text"]["format"]["name"],  # type: ignore[index]
+            "translation_prompt_draft",
+        )
+        self.assertIn("신뢰할 수 없는 데이터", request["instructions"])
+        self.assertIn("합니다체", request["instructions"])
 
     def test_empty_output_is_rejected(self) -> None:
         provider, _ = self._provider(OpenAITranslationProvider, "")

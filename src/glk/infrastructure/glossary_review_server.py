@@ -7,10 +7,20 @@ from http.server import BaseHTTPRequestHandler
 from importlib import resources
 import json
 from pathlib import Path
+import secrets
+import threading
+import time
 from typing import Any
 from urllib.parse import urlsplit
 import webbrowser
 
+from glk.application.glossary_ai_service import (
+    GlossaryAiTriageError,
+    GlossaryTriageProvider,
+    estimate_project_glossary_ai_triage,
+    get_project_glossary_ai_suggestions,
+    triage_project_glossary_candidates,
+)
 from glk.application.glossary_review_service import (
     GlossaryReviewConflictError,
     GlossaryReviewError,
@@ -19,6 +29,7 @@ from glk.application.glossary_review_service import (
 )
 from glk.application.glossary_service import (
     GlossaryImportError,
+    GlossaryManualTermsMissingError,
     import_project_glossary,
 )
 from glk.error_response import (
@@ -44,7 +55,9 @@ class GlossaryReviewHttpServer(LocalHttpServer):
         *,
         project: str | Path,
         workspace_root: str | Path,
+        settings_root: str | Path | None = None,
         return_url: str | None = None,
+        glossary_ai_provider: GlossaryTriageProvider | None = None,
     ) -> None:
         self.return_url = validate_local_return_url(
             return_url,
@@ -53,10 +66,134 @@ class GlossaryReviewHttpServer(LocalHttpServer):
         super().__init__(server_address, handler_class)
         self.project = str(project)
         self.workspace_root = str(workspace_root)
+        self.settings_root = settings_root
+        self.glossary_ai_provider = glossary_ai_provider
+        self.glossary_ai_job_lock = threading.Lock()
+        self.glossary_ai_job: dict[str, Any] | None = None
 
     @property
     def review_url(self) -> str:
         return self.root_url
+
+    def glossary_ai_job_status(self) -> dict[str, Any] | None:
+        """Return a browser-safe snapshot of the current AI triage job."""
+        with self.glossary_ai_job_lock:
+            if self.glossary_ai_job is None:
+                return None
+            job = dict(self.glossary_ai_job)
+        started_at = float(job.pop("_started_at"))
+        finished_at = job.pop("_finished_at", None)
+        job["elapsed_seconds"] = max(
+            0,
+            int(
+                (float(finished_at) if finished_at else time.monotonic())
+                - started_at
+            ),
+        )
+        return job
+
+    def _update_glossary_ai_job(
+        self,
+        job_id: str,
+        **updates: Any,
+    ) -> None:
+        with self.glossary_ai_job_lock:
+            if (
+                self.glossary_ai_job is None
+                or self.glossary_ai_job["job_id"] != job_id
+            ):
+                return
+            self.glossary_ai_job.update(updates)
+
+    def _run_glossary_ai_job(
+        self,
+        job_id: str,
+        *,
+        review_sha256: str,
+        rows: list[dict[str, Any]],
+    ) -> None:
+        def progress(value: dict[str, int | str]) -> None:
+            self._update_glossary_ai_job(job_id, **value)
+
+        try:
+            with self.mutation_lock:
+                result = triage_project_glossary_candidates(
+                    project=self.project,
+                    workspace_root=self.workspace_root,
+                    settings_root=self.settings_root,
+                    expected_review_sha256=review_sha256,
+                    rows=rows,
+                    provider=self.glossary_ai_provider,
+                    progress=progress,
+                )
+        except Exception as error:
+            code = getattr(error, "code", "GLOSSARY_AI_TRIAGE_FAILED")
+            response = make_error_response(
+                code,
+                error,
+                message=localized_detail_message(error),
+            ).to_dict()
+            self._update_glossary_ai_job(
+                job_id,
+                status="failed",
+                stage="failed",
+                error=response,
+                _finished_at=time.monotonic(),
+            )
+            return
+        self._update_glossary_ai_job(
+            job_id,
+            status="completed",
+            stage="completed",
+            processed_candidates=result.target_count,
+            result={"ok": True, **result.to_dict()},
+            _finished_at=time.monotonic(),
+        )
+
+    def start_glossary_ai_job(
+        self,
+        *,
+        review_sha256: str,
+        rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Start one background triage job and return its initial state."""
+        with self.glossary_ai_job_lock:
+            if self.glossary_ai_job is not None and self.glossary_ai_job[
+                "status"
+            ] == "running":
+                raise GlossaryAiTriageError(
+                    "An AI glossary candidate triage job is already running.",
+                    code="GLOSSARY_AI_JOB_ACTIVE",
+                )
+            job_id = secrets.token_urlsafe(12)
+            self.glossary_ai_job = {
+                "job_id": job_id,
+                "status": "running",
+                "stage": "preparing",
+                "total_candidates": 0,
+                "cached_candidates": 0,
+                "processed_candidates": 0,
+                "request_total": 0,
+                "request_completed": 0,
+                "result": None,
+                "error": None,
+                "_started_at": time.monotonic(),
+                "_finished_at": None,
+            }
+        worker = threading.Thread(
+            target=self._run_glossary_ai_job,
+            kwargs={
+                "job_id": job_id,
+                "review_sha256": review_sha256,
+                "rows": rows,
+            },
+            daemon=True,
+            name=f"glk-glossary-ai-{job_id}",
+        )
+        worker.start()
+        job = self.glossary_ai_job_status()
+        assert job is not None
+        return job
 
 
 class _GlossaryReviewHandler(LocalHttpRequestHandler):
@@ -126,6 +263,55 @@ class _GlossaryReviewHandler(LocalHttpRequestHandler):
                 return
             self._send_json(HTTPStatus.OK, document)
             return
+        if path == "/api/ai-triage/job":
+            if not self._api_authorized():
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                    code="REVIEW_SESSION_INVALID",
+                )
+                return
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "job": self.server.glossary_ai_job_status(),
+                },
+            )
+            return
+        if path == "/api/ai-triage":
+            if not self._api_authorized():
+                self._send_error_json(
+                    HTTPStatus.FORBIDDEN,
+                    "Invalid review session.",
+                    code="REVIEW_SESSION_INVALID",
+                )
+                return
+            try:
+                result = get_project_glossary_ai_suggestions(
+                    project=self.server.project,
+                    workspace_root=self.server.workspace_root,
+                    settings_root=self.server.settings_root,
+                    provider=self.server.glossary_ai_provider,
+                )
+            except GlossaryReviewConflictError as error:
+                self._send_error_json(
+                    HTTPStatus.CONFLICT,
+                    error,
+                    code=error.code,
+                )
+                return
+            except (GlossaryReviewError, OSError, ValueError) as error:
+                code = getattr(error, "code", "INVALID_REQUEST")
+                self._send_error_json(
+                    HTTPStatus.BAD_REQUEST,
+                    error,
+                    code=code,
+                    message=localized_detail_message(error),
+                )
+                return
+            self._send_json(HTTPStatus.OK, {"ok": True, **result.to_dict()})
+            return
         self._send_error_json(
             HTTPStatus.NOT_FOUND,
             "Not found.",
@@ -134,7 +320,12 @@ class _GlossaryReviewHandler(LocalHttpRequestHandler):
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
-        if path not in {"/api/save", "/api/import"}:
+        if path not in {
+            "/api/save",
+            "/api/import",
+            "/api/ai-triage/estimate",
+            "/api/ai-triage",
+        }:
             self._send_error_json(
                 HTTPStatus.NOT_FOUND,
                 "Not found.",
@@ -156,50 +347,81 @@ class _GlossaryReviewHandler(LocalHttpRequestHandler):
                 raise GlossaryReviewError("review_sha256 is required.")
             if not isinstance(rows, list):
                 raise GlossaryReviewError("rows must be a list.")
-            with self.server.mutation_lock:
-                document = save_project_glossary_review(
-                    project=self.server.project,
-                    workspace_root=self.server.workspace_root,
+            response_status = HTTPStatus.OK
+            if path == "/api/ai-triage":
+                job = self.server.start_glossary_ai_job(
+                    review_sha256=review_hash,
                     rows=rows,
-                    expected_review_sha256=review_hash,
                 )
-                if path == "/api/save":
-                    response: dict[str, Any] = {
-                        "ok": True,
-                        "document": document,
-                    }
-                else:
-                    try:
-                        result = import_project_glossary(
+                response = {"ok": True, "job": job}
+                response_status = HTTPStatus.ACCEPTED
+            else:
+                with self.server.mutation_lock:
+                    if path == "/api/ai-triage/estimate":
+                        estimate = estimate_project_glossary_ai_triage(
                             project=self.server.project,
                             workspace_root=self.server.workspace_root,
-                            file="03_terminology/glossary_review.tsv",
-                            allow_missing_terms=bool(
-                                body.get("allow_missing_terms", False)
-                            ),
+                            settings_root=self.server.settings_root,
+                            expected_review_sha256=review_hash,
+                            rows=rows,
+                            provider=self.server.glossary_ai_provider,
                         )
-                    except GlossaryImportError as error:
-                        response = dict(
-                            make_error_response(
-                                "GLOSSARY_IMPORT_FAILED",
-                                error,
-                                message=localized_detail_message(error),
-                            ).to_dict()
-                        )
-                        response["document"] = document
+                        response = {"ok": True, **estimate.to_dict()}
                     else:
-                        response = {
-                            "ok": True,
-                            "result": result.to_dict(),
-                            "document": get_project_glossary_review_document(
-                                project=self.server.project,
-                                workspace_root=self.server.workspace_root,
-                            ),
-                        }
-        except (GlossaryReviewError, OSError, ValueError) as error:
+                        document = save_project_glossary_review(
+                            project=self.server.project,
+                            workspace_root=self.server.workspace_root,
+                            rows=rows,
+                            expected_review_sha256=review_hash,
+                        )
+                        if path == "/api/save":
+                            response = {
+                                "ok": True,
+                                "document": document,
+                            }
+                        else:
+                            try:
+                                import_result = import_project_glossary(
+                                    project=self.server.project,
+                                    workspace_root=self.server.workspace_root,
+                                    file="03_terminology/glossary_review.tsv",
+                                    allow_missing_terms=bool(
+                                        body.get("allow_missing_terms", False)
+                                    ),
+                                )
+                            except GlossaryManualTermsMissingError as error:
+                                response = dict(
+                                    make_error_response(
+                                        error.code,
+                                        error,
+                                        message=localized_detail_message(error),
+                                    ).to_dict()
+                                )
+                                response["missing_terms"] = list(error.source_terms)
+                                response["document"] = document
+                            except GlossaryImportError as error:
+                                response = dict(
+                                    make_error_response(
+                                        "GLOSSARY_IMPORT_FAILED",
+                                        error,
+                                        message=localized_detail_message(error),
+                                    ).to_dict()
+                                )
+                                response["document"] = document
+                            else:
+                                response = {
+                                    "ok": True,
+                                    "result": import_result.to_dict(),
+                                    "document": get_project_glossary_review_document(
+                                        project=self.server.project,
+                                        workspace_root=self.server.workspace_root,
+                                    ),
+                                }
+        except (GlossaryAiTriageError, GlossaryReviewError, OSError, ValueError) as error:
             status = (
                 HTTPStatus.CONFLICT
                 if isinstance(error, GlossaryReviewConflictError)
+                or getattr(error, "code", "") == "GLOSSARY_AI_JOB_ACTIVE"
                 else HTTPStatus.BAD_REQUEST
             )
             code = (
@@ -209,15 +431,17 @@ class _GlossaryReviewHandler(LocalHttpRequestHandler):
             )
             self._send_error_json(status, error, code=code)
             return
-        self._send_json(HTTPStatus.OK, response)
+        self._send_json(response_status, response)
 
 
 def create_glossary_review_server(
     *,
     project: str | Path,
     workspace_root: str | Path = "workspaces",
+    settings_root: str | Path | None = None,
     port: int = 0,
     return_url: str | None = None,
+    glossary_ai_provider: GlossaryTriageProvider | None = None,
 ) -> GlossaryReviewHttpServer:
     validate_local_port(port, error_type=GlossaryReviewError)
     get_project_glossary_review_document(
@@ -229,7 +453,9 @@ def create_glossary_review_server(
         _GlossaryReviewHandler,
         project=project,
         workspace_root=workspace_root,
+        settings_root=settings_root,
         return_url=return_url,
+        glossary_ai_provider=glossary_ai_provider,
     )
 
 

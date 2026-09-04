@@ -101,6 +101,16 @@ class DashboardRouteTests(unittest.TestCase):
             ("PUT", "source", "source_upload"),
             ("PATCH", "ocr-prompt", "ocr_prompt"),
             ("PATCH", "translation-prompt", "translation_prompt"),
+            (
+                "POST",
+                "translation-prompt-ai-estimate",
+                "translation_prompt_ai_estimate",
+            ),
+            (
+                "POST",
+                "translation-prompt-ai-draft",
+                "translation_prompt_ai_draft",
+            ),
         ]
 
         for method, action, expected_name in cases:

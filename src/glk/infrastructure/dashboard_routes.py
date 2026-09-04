@@ -45,6 +45,10 @@ _PROJECT_ROUTES: dict[tuple[str, str], str] = {
     ("PUT", "source"): "source_upload",
     ("PATCH", "ocr-prompt"): "ocr_prompt",
     ("PATCH", "translation-prompt"): "translation_prompt",
+    ("POST", "translation-prompt-ai-estimate"): (
+        "translation_prompt_ai_estimate"
+    ),
+    ("POST", "translation-prompt-ai-draft"): "translation_prompt_ai_draft",
 }
 
 
